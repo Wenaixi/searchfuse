@@ -5,6 +5,7 @@
 // verified without a key. Results are ranked pages with snippets and no
 // written answer, so the summary is mechanical.
 import { requestText } from '../util/timedRequest.ts';
+import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
 const DEFAULT_MAX_RESULTS = 10;
@@ -45,6 +46,7 @@ export async function executeYoucomSearch(options: EngineRequest): Promise<Engin
     AbortSignal.timeout(options.timeoutMs),
     options.timeoutMs,
     [],
+    resolveExplicitProxy(options.settings.proxy),
   );
 
   if (!response.ok) {

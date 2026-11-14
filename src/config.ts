@@ -5,6 +5,7 @@ import * as path from 'path';
 // (its config import is type-only), so this does not create an import cycle.
 import { findEngine, listEngines } from './providers/index.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
+import { resolveExplicitProxy } from './util/explicitProxy.ts';
 import { maskUrlCredentials, redactSecrets } from './util/redact.ts';
 
 // Layered configuration: CLI flags > environment variables > ~/.modsearch/config.json > built-ins.
@@ -40,6 +41,15 @@ export interface EngineSettings {
    * point and exactly the risk: only name a host you trust with that key.
    */
   baseURL?: string;
+  /**
+   * Per-engine proxy. Unset follows the machine's http_proxy / https_proxy /
+   * no_proxy; `direct` or `none` forces a direct connection for this engine
+   * alone; a full http(s) URL sends only this engine through it. Engines share
+   * one process, so this is the only way to route one of them differently —
+   * a keyless engine through a local relay, a regional API through a regional
+   * egress, or an engine bypassing a proxy the rest of the machine needs.
+   */
+  proxy?: string;
 }
 
 export interface ModsearchConfig {
@@ -89,6 +99,7 @@ const SETTABLE_ENGINE_FIELDS: Array<keyof EngineSettings> = [
   'enabled',
   'baseURL',
   'keylessFetch',
+  'proxy',
 ];
 
 /** Engines that used to be pinned globally, mapped to the role they serve. */
@@ -453,6 +464,23 @@ export function setConfigValue(
       }
       value = trimmed;
     }
+    if (field === 'proxy') {
+      const trimmed = value.trim();
+      // Empty unsets the override, back to following the environment. The
+      // stored value is a keyword or a URL, never a half-written one: the
+      // router resolves it on every run, so a value saved here that it cannot
+      // act on would fail far from this command.
+      if (trimmed === '') {
+        delete config.engines?.[engineName]?.proxy;
+        writeConfigFile(config, configPath);
+        return;
+      }
+      const resolved = resolveExplicitProxy(trimmed);
+      if (resolved === undefined) {
+        throw new Error(`Invalid proxy: "${value}". Use direct, none, or a full http(s) URL.`);
+      }
+      value = trimmed;
+    }
     config.engines ??= {};
     config.engines[engineName] ??= {};
     config.engines[engineName][field as StringEngineSetting] = value;
@@ -639,7 +667,9 @@ export function renderEffectiveConfig(
       return maskKeys(String(value));
     }
     let text = String(value);
-    if (field === 'baseURL') {
+    if (field === 'baseURL' || field === 'proxy') {
+      // Both can carry credentials in their userinfo (`http://user:pass@host`),
+      // and this output is meant to be safe to paste into an issue.
       text = maskUrlCredentials(text);
     }
     // Same-row wash: the row's own key must not survive in its other fields.

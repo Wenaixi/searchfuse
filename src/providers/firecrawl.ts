@@ -12,6 +12,7 @@
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
+import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import {
   type CloudDisclosureInspection,
   inspectCloudDisclosureTarget,
@@ -76,6 +77,7 @@ async function firecrawlPost<T>(
   body: unknown,
   signal: AbortSignal,
   timeoutMs: number,
+  proxyOverride: string | null | undefined,
 ): Promise<T> {
   // No key means keyless mode: the endpoint accepts requests with no
   // Authorization header under Firecrawl's free keyless allowance (1,000
@@ -91,6 +93,7 @@ async function firecrawlPost<T>(
     signal,
     timeoutMs,
     apiKeySecrets,
+    proxyOverride,
   );
   ensureOk(response, text, apiKey, apiKeySecrets);
   return JSON.parse(text) as T;
@@ -167,6 +170,7 @@ async function firecrawlSearch(options: EngineRequest): Promise<EngineOutput> {
     },
     AbortSignal.timeout(options.timeoutMs),
     options.timeoutMs,
+    resolveExplicitProxy(options.settings.proxy),
   );
 
   const items = (data.data?.web ?? []).map((r) => ({
@@ -257,6 +261,7 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
     },
     deadline,
     options.timeoutMs,
+    resolveExplicitProxy(options.settings.proxy),
   );
 
   const metadata = data.data?.metadata ?? {};

@@ -8,6 +8,7 @@
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
+import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { resolveEndpoint } from './endpoint.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
@@ -66,6 +67,7 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
     AbortSignal.timeout(options.timeoutMs),
     options.timeoutMs,
     [...apiKeySecrets, options.settings.baseURL],
+    resolveExplicitProxy(options.settings.proxy),
   );
 
   if (!response.ok) {

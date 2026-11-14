@@ -6,6 +6,7 @@
 // items directly.
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
+import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import type { EngineRequest, EngineOutput, SearchEngine } from './index.ts';
 import { resolveEndpoint } from './endpoint.ts';
@@ -67,6 +68,7 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
     AbortSignal.timeout(options.timeoutMs),
     options.timeoutMs,
     [...apiKeySecrets, options.settings.baseURL],
+    resolveExplicitProxy(options.settings.proxy),
   );
 
   if (!response.ok) {

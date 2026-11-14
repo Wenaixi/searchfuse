@@ -74,6 +74,19 @@ function call(url: string) {
   return requestText('engine', url, { method: 'GET' }, AbortSignal.timeout(5_000), 5_000, []);
 }
 
+/** The same call, with a per-engine proxy override. */
+function callWithProxy(url: string, explicitProxy: string | null | undefined) {
+  return requestText(
+    'engine',
+    url,
+    { method: 'GET' },
+    AbortSignal.timeout(5_000),
+    5_000,
+    [],
+    explicitProxy,
+  );
+}
+
 describe('requestText and the system HTTP proxy', () => {
   let origin: Server;
   let proxy: Server & { seen: string[] };
@@ -113,5 +126,66 @@ describe('requestText and the system HTTP proxy', () => {
     await expect(call(`http://127.0.0.1:${port}/search`)).rejects.toThrow(
       /^engine request failed: fetch failed; cause: .*ECONNREFUSED/,
     );
+  });
+});
+
+/**
+ * The `proxy` field exists so one engine can be routed differently from the
+ * rest of the machine. These three cases are the whole contract: the setting
+ * wins over the environment in both directions, and its absence changes
+ * nothing.
+ */
+describe('requestText and a per-engine proxy override', () => {
+  let origin: Server;
+  let proxy: Server & { seen: string[] };
+
+  beforeEach(async () => {
+    for (const key of PROXY_ENV_KEYS) {
+      vi.stubEnv(key, '');
+    }
+    origin = await startOrigin();
+    proxy = await startProxy(origin.port);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await proxy.close();
+    await origin.close();
+  });
+
+  it('uses the explicit proxy even when no proxy variable is set', async () => {
+    const { text } = await callWithProxy(
+      'http://engine-api.invalid/search',
+      `http://127.0.0.1:${proxy.port}`,
+    );
+    expect(text).toBe('{"from":"origin"}');
+    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+  });
+
+  it('bypasses http_proxy when the engine asks for a direct connection', async () => {
+    vi.stubEnv('http_proxy', `http://127.0.0.1:${proxy.port}`);
+    const { text } = await callWithProxy(`http://127.0.0.1:${origin.port}/search`, null);
+    expect(text).toBe('{"from":"origin"}');
+    // The environment would have used the proxy; the setting overrides it.
+    expect(proxy.seen).toEqual([]);
+  });
+
+  it('overrides a different proxy the environment would have used', async () => {
+    // The environment names a port with nothing behind it: if the explicit
+    // proxy lost, this request would fail rather than reach the origin.
+    vi.stubEnv('http_proxy', `http://127.0.0.1:${await closedPort()}`);
+    const { text } = await callWithProxy(
+      'http://engine-api.invalid/search',
+      `http://127.0.0.1:${proxy.port}`,
+    );
+    expect(text).toBe('{"from":"origin"}');
+    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+  });
+
+  it('keeps following the environment when the setting is absent', async () => {
+    vi.stubEnv('http_proxy', `http://127.0.0.1:${proxy.port}`);
+    const { text } = await callWithProxy('http://engine-api.invalid/search', undefined);
+    expect(text).toBe('{"from":"origin"}');
+    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
   });
 });

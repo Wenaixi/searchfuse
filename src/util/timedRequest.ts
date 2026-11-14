@@ -27,6 +27,12 @@ export async function requestText(
   signal: AbortSignal,
   timeoutMs: number,
   secrets: ReadonlyArray<string | undefined | null>,
+  /**
+   * Per-engine proxy override, resolved by `resolveExplicitProxy`: `undefined`
+   * follows the machine's proxy variables, `null` forces a direct connection,
+   * a string is the proxy to use. Absent keeps the pre-existing behavior.
+   */
+  explicitProxy?: string | null,
 ): Promise<{ response: Response; text: string }> {
   const fail = (error: unknown): Error =>
     signal.aborted
@@ -38,7 +44,11 @@ export async function requestText(
           )}`,
         );
 
-  const proxyUrl = resolveProxyForUrl(new URL(url), process.env);
+  // An explicit setting decides alone, in both directions: `null` means direct
+  // and must not consult http_proxy, so this is a strict three-way branch
+  // rather than a truthiness check.
+  const proxyUrl =
+    explicitProxy === undefined ? resolveProxyForUrl(new URL(url), process.env) : explicitProxy;
   // NO_PROXY was already applied above, so the agent gets an empty one and
   // always takes the proxy it is handed.
   const dispatcher = proxyUrl
