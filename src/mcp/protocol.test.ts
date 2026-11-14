@@ -292,7 +292,7 @@ describe('McpConnection', () => {
   });
 
   it('terminates the session with DELETE on close, treating 405 as success', async () => {
-    let deleteSeen = false;
+    const deleteSeen = false;
     const server = await mcpServer((message, round) => {
       if (message.method === 'initialize') {
         return {

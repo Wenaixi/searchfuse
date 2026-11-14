@@ -8,7 +8,7 @@ import {
 } from './config.ts';
 import { coolingEntry, type CooldownController } from './cooldown.ts';
 import { fanout, type FanoutTarget } from './aggregate/fanout.ts';
-import { rrfFuse, type Fused } from './aggregate/rrf.ts';
+import { rrfFuse } from './aggregate/rrf.ts';
 import {
   allEngines,
   enginesForRole,

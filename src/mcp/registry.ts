@@ -13,7 +13,7 @@
 //    to the calling fiber. Nothing here needs to hold its own disposer list:
 //    unloading the plugin removes the tools, and unloading a server mid-run
 //    removes only that server's tools.
-import type { McpConnection, McpServerConfig, McpToolSpec } from './protocol.ts';
+import type { McpServerConfig, McpToolSpec } from './protocol.ts';
 import { McpConnection as Connection, isServerNameValid, publicToolName } from './protocol.ts';
 
 /**

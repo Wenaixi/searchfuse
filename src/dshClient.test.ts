@@ -1210,23 +1210,44 @@ describe('the exposure matrix', () => {
     expect(card.options.filter((o) => o.group === 'preference').length).toBeGreaterThan(0);
   });
 
-  it('reads an engine that only joins the fusion', () => {
-    const card = render({
-      ...SUMMARY,
-      engines: { ...SUMMARY.engines, tavily: { ...SUMMARY.engines.tavily, enabled: true, expose: {} } },
-    });
-    expect((card.nextDraft as unknown as { exposeState?: string }) ?? true).toBeTruthy();
+  // Each form is verified through savePayload, which is what the card
+  // actually sends: a helper asserted directly would prove nothing about
+  // what reaches the file.
+  const forms = [
+    ['both', { enabled: true, expose: { aggregate: true, tool: true } }],
+    ['aggregate', { enabled: true, expose: { aggregate: true, tool: false } }],
+    ['tool', { enabled: true, expose: { aggregate: false, tool: true } }],
+    ['off', { enabled: false, expose: { aggregate: false, tool: false } }],
+  ];
+
+  it('seeds the draft from the file rather than guessing a form', () => {
+    const draft = evaluate({}).factory(() => ({})).__card.nextDraft(
+      {
+        ...SUMMARY,
+        engines: { ...SUMMARY.engines, tavily: { ...SUMMARY.engines.tavily, enabled: true, expose: { aggregate: false, tool: true } } },
+      },
+      'tavily',
+    );
+    expect(draft.exposeState).toBe('tool');
   });
 
-  it('translates each form into the flags it stands for', () => {
-    const mapping = (evaluate({}).factory(() => ({})).__card as unknown as {
-      stateToSetting?: (s: string) => unknown;
-    }).stateToSetting;
-    if (mapping === undefined) return; // helper is module-private in this build
-    expect(mapping('both')).toEqual({ enabled: true, expose: { aggregate: true, tool: true } });
-    expect(mapping('aggregate')).toEqual({ enabled: true, expose: { aggregate: true, tool: false } });
-    expect(mapping('tool')).toEqual({ enabled: true, expose: { aggregate: false, tool: true } });
-    expect(mapping('off')).toEqual({ enabled: false, expose: { aggregate: false, tool: false } });
+  it.each(forms.filter(([state]) => state !== 'aggregate'))(
+    'sends the flags %s stands for',
+    (state, expected) => {
+      const card = evaluate({}).factory(() => ({})).__card;
+      const draft = card.nextDraft(SUMMARY, 'tavily');
+      draft.exposeState = state;
+      expect(card.savePayload(SUMMARY, draft).expose).toEqual(expected);
+    },
+  );
+
+  it('sends nothing when the form is switched back to the default', () => {
+    // aggregate is what an engine already does, so choosing it is not a change
+    // and must not rewrite the file the same way it already is.
+    const card = evaluate({}).factory(() => ({})).__card;
+    const draft = card.nextDraft(SUMMARY, 'tavily');
+    draft.exposeState = 'aggregate';
+    expect(card.savePayload(SUMMARY, draft).expose).toBeUndefined();
   });
 });
 
