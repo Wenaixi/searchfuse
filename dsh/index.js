@@ -482,7 +482,15 @@ function engineToolNames() {
     const config = readModsearchConfig();
     const engines = isPlainObject(config.engines) ? config.engines : {};
     return Object.entries(engines)
-      .filter(([, settings]) => isPlainObject(settings) && isPlainObject(settings.expose) && settings.expose.tool === true)
+      .filter(
+        ([, settings]) =>
+          isPlainObject(settings) &&
+          isPlainObject(settings.expose) &&
+          settings.expose.tool === true &&
+          // Same rule registerEngineTools applies: a switched-off engine is
+          // not a tool, so its name is free for another one to claim.
+          coerceBoolean(settings.enabled) !== false,
+      )
       .map(([rawName, settings]) =>
         typeof settings.toolName === 'string' && settings.toolName.trim() !== ''
           ? settings.toolName.trim()
@@ -1151,6 +1159,12 @@ function registerEngineTools(ctx) {
     }
     const expose = isPlainObject(rawSettings.expose) ? rawSettings.expose : {};
     if (expose.tool !== true) {
+      continue;
+    }
+    // `enabled: false` is a total off switch, not just "stay out of the
+    // fusion". An engine the user switched off must not reappear as a tool:
+    // that would make the switch mean something other than what it says.
+    if (coerceBoolean(rawSettings.enabled) === false) {
       continue;
     }
     const engine = canonicalEngine(rawName);
