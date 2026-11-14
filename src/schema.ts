@@ -16,6 +16,10 @@ export const SEARCH_RESULT_SCHEMA = {
           snippet: { type: 'string' },
           source: { type: 'string' },
           published_at: { type: 'string' },
+          // Present only on a fused result: which engines returned this page.
+          // A chain run answers from one engine, so the field is absent there
+          // rather than a one-element list.
+          foundIn: { type: 'array', items: { type: 'string' } },
         },
         required: ['title', 'url', 'snippet'],
       },

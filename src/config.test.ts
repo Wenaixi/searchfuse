@@ -212,6 +212,22 @@ describe('config file', () => {
     expect(loadConfigFile(p).engines?.tavily?.apiKey).toBe('second-key-123456');
   });
 
+  it('carries the aggregate section through migration', () => {
+    // migrateLegacyConfig rebuilds the config from a list of known keys. A new
+    // top-level section that is not carried across disappears silently — the
+    // read path then reports the default, so `mode: chain` never takes effect
+    // and nothing says why.
+    const migrated = migrateLegacyConfig({
+      aggregate: { mode: 'chain', deadlineMs: 3_000 },
+    });
+    expect(migrated.aggregate).toEqual({ mode: 'chain', deadlineMs: 3_000 });
+  });
+
+  it('omits the aggregate section when the file never had one', () => {
+    const migrated = migrateLegacyConfig({});
+    expect(migrated.aggregate).toBeUndefined();
+  });
+
   it('keeps a hand-written __proto__ entry as data, never as the prototype', () => {
     // On a normal object literal, engines["__proto__"] = {...} sets the
     // prototype: the entry hides from Object.entries and JSON.stringify while

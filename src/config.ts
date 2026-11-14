@@ -22,6 +22,19 @@ export const ROLES: Role[] = ['search', 'fetch', 'social'];
 /** The role whose preferred engine is stored at the top level. */
 export const CONFIGURED_ROLE: Role = 'search';
 
+export type AggregateMode = 'rrf' | 'chain';
+
+export interface AggregateConfig {
+  /** 'rrf' fuses concurrently, 'chain' tries one engine at a time. */
+  mode?: AggregateMode;
+  /**
+   * Wall-clock budget for a fused run, shared across every source. Past it,
+   * stragglers are recorded as failures and the run proceeds with what
+   * arrived. Ignored in chain mode, which has its own per-engine budget.
+   */
+  deadlineMs?: number;
+}
+
 export interface EngineSettings {
   apiKey?: string;
   model?: string;
@@ -50,12 +63,41 @@ export interface EngineSettings {
    * egress, or an engine bypassing a proxy the rest of the machine needs.
    */
   proxy?: string;
+  /**
+   * How this engine takes part in a fused search. Both keys default to
+   * `aggregate: true, tool: false`, which is the behavior a config written
+   * before these existed gets.
+   *
+   * - `aggregate` — its result joins the `web_search` fusion.
+   * - `tool` — it also becomes a tool of its own, callable by name.
+   *
+   * Both at once is allowed: the engine contributes to the fused answer and
+   * can be addressed directly when the model wants that one source alone.
+   */
+  expose?: {
+    aggregate?: boolean;
+    tool?: boolean;
+  };
+  /**
+   * Name for the standalone tool when `expose.tool` is on. Defaults to
+   * `<engine>_search`. Two engines may not claim the same name, and the
+   * reserved names of the built-in tools are refused.
+   */
+  toolName?: string;
 }
 
 export interface ModsearchConfig {
   /** Engine for searching. Empty means: use the best one available here. */
   engine?: string;
   engines?: Record<string, EngineSettings>;
+  /**
+   * How several sources combine. `rrf` (the default) runs the eligible engines
+   * concurrently and fuses their lists by reciprocal rank, so agreement
+   * between independent engines outranks one engine's own favourite. `chain`
+   * keeps the original behavior: try one engine at a time and stop at the
+   * first that answers.
+   */
+  aggregate?: AggregateConfig;
   /**
    * Quota cooldown switch: 'on' (default) or 'off'. On, a quota-spent engine is
    * remembered and moved to the back of the fallback chain until it recovers.
@@ -276,6 +318,12 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   if (allowPrivateNetwork !== undefined) {
     config.allowPrivateNetwork = allowPrivateNetwork;
   }
+  // This function rebuilds the config from a list of known keys, so a new
+  // top-level section is dropped unless it is carried across here. Omitting
+  // one would not fail loudly: the read path would just report the default.
+  if (raw.aggregate !== undefined) {
+    config.aggregate = raw.aggregate;
+  }
   if (seenApiKeys.size > 0) {
     SEEN_API_KEYS.set(config, [...seenApiKeys]);
   }
@@ -324,6 +372,32 @@ export function cooldownEnabled(config: ModsearchConfig): boolean {
 /** Whether reserved and private address ranges are allowed. Off by default. */
 export function allowsPrivateNetwork(config: ModsearchConfig): boolean {
   return config.allowPrivateNetwork === true;
+}
+
+/** Fused by default; `chain` restores the one-engine-at-a-time behavior. */
+export function aggregateMode(config: ModsearchConfig): AggregateMode {
+  return config.aggregate?.mode === 'chain' ? 'chain' : 'rrf';
+}
+
+/** Total wall-clock budget for a fused run, in milliseconds. */
+export function aggregateDeadlineMs(config: ModsearchConfig): number {
+  const configured = config.aggregate?.deadlineMs;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return 8_000;
+}
+
+/**
+ * How one engine exposes itself. Missing keys take the defaults a config
+ * written before these settings existed should get.
+ */
+export function exposeOf(settings: EngineSettings): { aggregate: boolean; tool: boolean } {
+  const expose = isPlainObject(settings.expose) ? settings.expose : {};
+  return {
+    aggregate: expose.aggregate !== false,
+    tool: expose.tool === true,
+  };
 }
 
 /** Settings for one engine, with env vars overriding the file. */

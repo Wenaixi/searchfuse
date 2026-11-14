@@ -1,6 +1,16 @@
-import { engineSettings, loadConfigFile, type ModsearchConfig } from './config.ts';
-import { coolingEntry, type CooldownController } from './cooldown.ts';
 import {
+  aggregateDeadlineMs,
+  aggregateMode,
+  engineSettings,
+  exposeOf,
+  loadConfigFile,
+  type ModsearchConfig,
+} from './config.ts';
+import { coolingEntry, type CooldownController } from './cooldown.ts';
+import { fanout, type FanoutTarget } from './aggregate/fanout.ts';
+import { rrfFuse, type Fused } from './aggregate/rrf.ts';
+import {
+  allEngines,
   enginesForRole,
   type EngineOutput,
   type EngineRequest,
@@ -218,6 +228,28 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
         };
   const context = { mode, query, url, timeoutMs, deadline, config, env, options };
 
+  // Fused mode runs the eligible engines concurrently and fuses their lists.
+  // Chain mode is the original behavior and stays byte-for-byte unchanged
+  // below. Fetch never fuses: it returns one page, and merging two engines'
+  // renderings of it would be a different product.
+  if (mode === 'search' && aggregateMode(config) === 'rrf') {
+    const fused = await runFused(config, env, query, timeoutMs, options);
+    if (fused !== undefined) {
+      return {
+        mode,
+        query: query ?? null,
+        url: null,
+        results: [fused],
+        meta: {
+          generatedAt: new Date().toISOString(),
+          durationSeconds: (Date.now() - startedAt) / 1000,
+        },
+      };
+    }
+    // Nothing qualified to fuse (every engine opted out or is cooling), so the
+    // run falls through to the chain rather than answering empty.
+  }
+
   // Run every source's plan concurrently and reassemble in request order, so a
   // web,x run costs about the time of its slowest source, not their sum.
   // Promise.all preserves index order regardless of which settled first.
@@ -248,10 +280,125 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
   };
 }
 
+/**
+ * The fused path: run every eligible search engine at once and merge their
+ * lists by reciprocal rank.
+ *
+ * Eligibility is decided here rather than by the router, because the three
+ * exclusions mean different things and the router only knows about one of
+ * them:
+ *
+ * - `enabled: false` — the user turned this engine off.
+ * - `expose.aggregate: false` — the engine is kept as a standalone tool only.
+ * - cooling — its quota is spent, so calling it now would only fail. It is
+ *   reported as skipped rather than failed: nothing broke.
+ *
+ * An explicit `--engine` pins the run to that one engine, which cannot be a
+ * fusion by definition, so it returns undefined and the chain serves it.
+ * Returning undefined whenever nothing qualifies lets the caller fall through
+ * to the chain instead of answering with an empty result.
+ */
+async function runFused(
+  config: ModsearchConfig,
+  env: NodeJS.ProcessEnv,
+  query: string | undefined,
+  timeoutMs: number,
+  options: RunSearchOptions,
+): Promise<SourceResult | undefined> {
+  if (query === undefined || options.engine !== undefined) {
+    return undefined;
+  }
+  if (options.sources !== undefined && !parseSources(options.sources).includes('web')) {
+    return undefined;
+  }
+
+  const controller = options.cooldown;
+  const targets: FanoutTarget[] = [];
+  const skipped: string[] = [];
+
+  for (const engine of allEngines()) {
+    if (!engine.roles.includes('search') || engine.execute === undefined) {
+      continue;
+    }
+    const settings = engineSettings(engine.name, config, env);
+    if (settings.enabled === false) {
+      continue;
+    }
+    if (!exposeOf(settings).aggregate) {
+      continue;
+    }
+    if (!engine.isAvailable(settings, env, 'search')) {
+      continue;
+    }
+    const keyCount = splitApiKeys(settings.apiKey).length;
+    if (controller && coolingEntry(controller.state, engine.name, controller.now, keyCount)) {
+      skipped.push(`${engine.name}: 处于冷却期，本次未参与（配额恢复后自动回归）`);
+      continue;
+    }
+    targets.push({ engine, settings });
+  }
+
+  if (targets.length === 0) {
+    return undefined;
+  }
+
+  const startedAt = Date.now();
+  const request = {
+    mode: 'search' as const,
+    query,
+    maxResults: options.maxResults,
+    timeoutMs,
+    settings: {},
+    allowPrivateNetwork: options.allowPrivateNetwork === true || config.allowPrivateNetwork === true,
+  };
+  const budgetMs = aggregateDeadlineMs(config);
+  let fanoutResult: Awaited<ReturnType<typeof fanout>>;
+  try {
+    fanoutResult = await fanout<{
+      title: string;
+      url: string;
+      snippet: string;
+    }>(targets, request, budgetMs, AbortSignal.timeout(budgetMs), { skipped });
+  } catch {
+    // Every engine failed. Falling through to the chain rather than throwing
+    // here keeps one behavior for "nothing worked": the chain raises the
+    // error the user already knows, naming the source and each engine's
+    // attempt. A second, differently worded total-failure message from the
+    // fused path would be a worse error for the same situation.
+    return undefined;
+  }
+  const { outputs, failures } = fanoutResult;
+  const fused = rrfFuse(outputs);
+
+  const enginesUsed = outputs.map((o) => o.engine);
+  const multiSource = fused.filter((item) => item.foundIn.length > 1).length;
+  const summary =
+    fused.length > 0
+      ? `Fused ${fused.length} result(s) from ${enginesUsed.length} engine(s) (${enginesUsed.join(', ')}) for "${query}".${
+          multiSource > 0
+            ? ` ${multiSource} result(s) were returned by more than one engine.`
+            : ''
+        } Read items for the sources; each item's foundIn names the engines that returned it.`
+      : '';
+
+  return {
+    source: 'web',
+    requestedSource: 'web',
+    engine: enginesUsed.join(','),
+    status: failures.length > 0 ? 'degraded' : 'ok',
+    summary,
+    items: fused as unknown as Array<Record<string, unknown>>,
+    uncertainty: [...failures, ...skipped],
+    warnings:
+      fused.length === 0 ? ['No results were returned by any of the eligible engines.'] : [],
+    attempts: [],
+    durationSeconds: (Date.now() - startedAt) / 1000,
+  };
+}
+
 async function runOneSource(
   plan: SourcePlan,
-  context: {
-    mode: RunMode;
+  context: {    mode: RunMode;
     query?: string;
     url?: string;
     timeoutMs: number;
