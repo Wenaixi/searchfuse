@@ -363,6 +363,7 @@ describe('a save carries only what the save is about', () => {
         firecrawl: true,
         keenable: true,
         youcom: true,
+        searxng: true,
         'grok-cli': true,
         local: true,
       },
@@ -684,6 +685,7 @@ describe('the automatic engine chain lists what this machine can actually search
       'firecrawl',
       'keenable',
       'youcom',
+      'searxng',
       'grok-cli X search only',
     ]);
     expect(view.texts.some((text) => /status is unavailable/i.test(text))).toBe(true);
@@ -871,6 +873,7 @@ describe('the preference list offers only engines a preference can mean', () => 
       'firecrawl',
       'keenable',
       'youcom',
+      'searxng',
       'grok-cli',
     ]);
   });

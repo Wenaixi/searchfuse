@@ -462,11 +462,19 @@ const CARD_ENGINES = [
   'firecrawl',
   'keenable',
   'youcom',
+  'searxng',
   'grok-cli',
   'local',
 ];
-/** The HTTP engines: the only ones with a key and an endpoint to configure. */
+/** Engines that take an API key. */
 const KEYED_ENGINES = ['tavily', 'exa', 'firecrawl', 'keenable'];
+/**
+ * Engines that take a `baseURL`. SearXNG belongs here without being keyed:
+ * it needs a host to talk to but no credential, and the two capabilities are
+ * validated separately so a card save cannot put an API key on an engine that
+ * has nothing to do with one.
+ */
+const ENDPOINT_ENGINES = [...KEYED_ENGINES, 'searxng'];
 /**
  * Engines whose `model` setting a run actually reads. The others are shown
  * without the field rather than with one nothing is behind: the HTTP engines
@@ -685,11 +693,11 @@ function applyCardSettings(patch) {
     if (!CARD_ENGINES.includes(engine)) {
       throw new Error(`unknown engine: ${patch.target}`);
     }
-    if (
-      !KEYED_ENGINES.includes(engine) &&
-      (patch.apiKey !== undefined || patch.baseURL !== undefined)
-    ) {
-      throw new Error(`${engine} takes no API key or base URL`);
+    if (!KEYED_ENGINES.includes(engine) && patch.apiKey !== undefined) {
+      throw new Error(`${engine} takes no API key`);
+    }
+    if (!ENDPOINT_ENGINES.includes(engine) && patch.baseURL !== undefined) {
+      throw new Error(`${engine} takes no base URL`);
     }
     if (!MODEL_ENGINES.includes(engine) && patch.model !== undefined) {
       throw new Error(`${engine} takes no model setting`);

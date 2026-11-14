@@ -28,12 +28,13 @@ window.__ModuleLoader__.load({
       'firecrawl',
       'keenable',
       'youcom',
+      'searxng',
       'grok-cli',
       'local',
     ];
 
     // Engines that search with no key and no signup.
-    var KEYLESS_ENGINES = ['firecrawl', 'keenable', 'youcom'];
+    var KEYLESS_ENGINES = ['firecrawl', 'keenable', 'youcom', 'searxng'];
 
     // The chain is a row of search engines, so the page fetcher is not in it.
     // `local` reads a URL it is handed and searches for nothing, and a tickbox

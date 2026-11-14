@@ -57,7 +57,7 @@ program
   )
   .option(
     '-e, --engine <name>',
-    'Engine for this run, overriding config (antigravity-cli, tavily, exa, firecrawl, keenable, youcom, grok-cli, local)',
+    'Engine for this run, overriding config (antigravity-cli, tavily, exa, firecrawl, keenable, youcom, searxng, grok-cli, local)',
   )
   .option('-m, --model <name>', 'Engine model, where the engine has one')
   .option('--prompt <text>', 'Extra constraints for this run')

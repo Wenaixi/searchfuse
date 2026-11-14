@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FETCH_RESULT_SCHEMA, SEARCH_RESULT_SCHEMA } from './schema.ts';
+import { listEngines } from './providers/index.ts';
 
 const SEARCH_SCHEMA_PATH = new URL('../dsh/search-schema.json', import.meta.url);
 const FETCH_SCHEMA_PATH = new URL('../dsh/fetch-schema.json', import.meta.url);
@@ -21,6 +22,35 @@ describe('dsh plugin bundle', () => {
 
     const fetch = JSON.parse(fs.readFileSync(FETCH_SCHEMA_PATH, 'utf-8'));
     expect(fetch).toEqual(FETCH_RESULT_SCHEMA);
+  });
+
+  it('keeps the card engine list in lockstep across the host and browser halves', () => {
+    // dsh/index.js and dsh/client.js each carry their own copy of the engine
+    // list: the browser half is a hand-written bundle that cannot import the
+    // TypeScript source, so the duplication is structural rather than an
+    // oversight. Nothing else guards it, and a new engine added to one half
+    // only would show up in the card as an engine the host then refuses, or
+    // as an engine the host accepts that the card never offers.
+    const host = fs.readFileSync(new URL('../dsh/index.js', import.meta.url), 'utf-8');
+    const client = fs.readFileSync(new URL('../dsh/client.js', import.meta.url), 'utf-8');
+    const listFrom = (source: string, constant: string): string[] => {
+      // The host half is a module using `const`; the browser half is a
+      // hand-written bundle using `var`, so the pattern accepts both.
+      const match = source.match(new RegExp(`(?:const|var) ${constant} = \\[([^\\]]+)\\]`));
+      if (!match?.[1]) throw new Error(`${constant} not found`);
+      return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1] as string);
+    };
+    expect(listFrom(client, 'ENGINES')).toEqual(listFrom(host, 'CARD_ENGINES'));
+  });
+
+  it('keeps the registered engines in lockstep with the card list', () => {
+    // A registered engine the card does not offer is unconfigurable from the
+    // web UI; a card entry with no registration is a row that cannot work.
+    const host = fs.readFileSync(new URL('../dsh/index.js', import.meta.url), 'utf-8');
+    const card = host.match(/const CARD_ENGINES = \[([^\]]+)\]/)?.[1] ?? '';
+    const offered = [...card.matchAll(/'([^']+)'/g)].map((m) => m[1] as string);
+    const registered = listEngines();
+    expect(registered.filter((name) => !offered.includes(name))).toEqual([]);
   });
 
   it('wires the bundle manifest to the patch and the patch to the plugin', () => {
