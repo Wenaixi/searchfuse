@@ -89,6 +89,22 @@ window.__ModuleLoader__.load({
         loadFailed: 'load failed',
         saveFailed: 'save failed',
         retry: 'Retry',
+        exposeTitle: 'How this engine is exposed',
+        exposeHint:
+          'Choose one form per engine: join the fused web_search answer, stand alone as a tool the model can call by name, both, or off.',
+        exposeStates: {
+          aggregate: 'Fused into web_search only',
+          tool: 'Standalone tool only',
+          both: 'Fused and standalone',
+          off: 'Off',
+        },
+        toolNameLabel: 'Tool name',
+        toolNameHint:
+          'The name the model calls. Two engines cannot share a name, and the built-in tool names are reserved.',
+        proxyLabel: 'Proxy',
+        proxyFallback: 'Leave blank to follow the system proxy',
+        proxyHint:
+          'Route only this engine through its own proxy. "direct" or "none" bypasses the system proxy for this engine alone.',
       },
       zh: {
         // 不叫「网页搜索」：dsh 自带一张「网页搜索（DeepSeek 搜索提供方）」卡片，
@@ -127,6 +143,21 @@ window.__ModuleLoader__.load({
         loadFailed: '加载失败',
         saveFailed: '保存失败',
         retry: '重试',
+        exposeTitle: '这个引擎怎么露出',
+        exposeHint:
+          '每个引擎选一种形态：只参与 web_search 融合、只作为独立工具供模型点名调用、两者兼得，或关闭。',
+        exposeStates: {
+          aggregate: '只融入 web_search',
+          tool: '只作为独立工具',
+          both: '既融合也独立',
+          off: '关闭',
+        },
+        toolNameLabel: '工具名',
+        toolNameHint: '模型调用时看到的名字。两个引擎不能同名，内置工具名已被占用。',
+        proxyLabel: '代理',
+        proxyFallback: '留空则跟随系统代理',
+        proxyHint:
+          '只让这个引擎走自己的代理。填 "direct" 或 "none" 表示仅此引擎绕过系统代理。',
       },
     };
 
@@ -164,9 +195,69 @@ window.__ModuleLoader__.load({
       return engine !== '' && (summary.keyed || []).indexOf(engine) >= 0;
     }
 
-    /** Whether a run reads this engine's `model` setting. */
+    /** Whether this engine takes a base URL (keyed engines and SearXNG). */
+    function endpointable(summary, engine) {
+      return engine !== '' && (summary.endpoints || []).indexOf(engine) >= 0;
+    }
+
+    /**
+     * Whether a run reads this engine's `model` setting. */
     function modelled(summary, engine) {
       return engine !== '' && (summary.models || []).indexOf(engine) >= 0;
+    }
+
+    /**
+     * An engine's exposure as one of four named states.
+     *
+     * `aggregate` and `tool` are orthogonal, so showing them as two
+     * independent checkboxes invites the reading that they are unrelated
+     * switches. They are a choice of form: an engine joins the fused answer,
+     * becomes a tool the model can call by name, does both, or is off.
+     * Collapsing them into one selection makes that choice visible as what it
+     * is.
+     */
+    var EXPOSE_STATES = ['both', 'aggregate', 'tool', 'off'];
+
+    function exposeState(summary, engine) {
+      var settings = (summary.engines && summary.engines[engine]) || {};
+      var expose = settings.expose || {};
+      var aggregate = expose.aggregate !== false;
+      var tool = expose.tool === true;
+      if (settings.enabled === false) {
+        return 'off';
+      }
+      if (aggregate && tool) {
+        return 'both';
+      }
+      if (aggregate) {
+        return 'aggregate';
+      }
+      if (tool) {
+        return 'tool';
+      }
+      // Neither flag set: the engine still answers directly, so calling it off
+      // would be a lie the save cannot back up.
+      return 'off';
+    }
+
+    /** The `enabled`/`expose` a state stands for. */
+    function stateToSetting(state) {
+      if (state === 'off') {
+        return { enabled: false, expose: { aggregate: false, tool: false } };
+      }
+      if (state === 'both') {
+        return { enabled: true, expose: { aggregate: true, tool: true } };
+      }
+      if (state === 'tool') {
+        return { enabled: true, expose: { aggregate: false, tool: true } };
+      }
+      return { enabled: true, expose: { aggregate: true, tool: false } };
+    }
+
+    /** The tool name shown when the state includes a standalone tool. */
+    function toolNameFor(summary, engine) {
+      var settings = (summary.engines && summary.engines[engine]) || {};
+      return settings.toolName || engine + '_search';
     }
 
     // The next draft when the engine changes or a summary arrives. The fields
@@ -182,6 +273,12 @@ window.__ModuleLoader__.load({
         apiKey: '',
         baseURL: current.baseURL || '',
         model: current.model || '',
+        // Empty means "leave the file's value alone", matching the way an
+        // empty API key field does. A prefilled proxy would otherwise rewrite
+        // the file on every save that touched anything else.
+        proxy: '',
+        toolName: current.toolName || '',
+        exposeState: exposeState(summary, engine),
         enabled: Object.assign(
           {},
           keepEnabled ||
@@ -248,17 +345,40 @@ window.__ModuleLoader__.load({
       var pristine = nextDraft(summary, draft.engine);
       var canKey = keyed(summary, draft.engine);
       var canModel = modelled(summary, draft.engine);
+      var canEndpoint = endpointable(summary, draft.engine);
+      var exposesTool = draft.exposeState === 'tool' || draft.exposeState === 'both';
       var edited =
         (canKey && (draft.apiKey !== '' || draft.baseURL !== pristine.baseURL)) ||
-        (canModel && draft.model !== pristine.model);
+        (canModel && draft.model !== pristine.model) ||
+        (canEndpoint && draft.baseURL !== pristine.baseURL) ||
+        draft.proxy !== '' ||
+        (exposesTool && draft.toolName !== '' && draft.toolName !== pristine.toolName);
+      // The exposure state travels on its own: picking a different form is a
+      // change whether or not any text field moved.
+      if (draft.engine !== '' && draft.exposeState !== pristine.exposeState) {
+        payload.target = draft.engine;
+        payload.expose = stateToSetting(draft.exposeState);
+      }
       if (draft.engine !== '' && edited) {
         payload.target = draft.engine;
         if (canKey) {
           payload.apiKey = draft.apiKey;
+        }
+        if (canEndpoint || canKey) {
           payload.baseURL = draft.baseURL;
         }
         if (canModel) {
           payload.model = draft.model;
+        }
+        // Empty means "leave the file alone", the same contract the API key
+        // field has. A blank field is what the user sees when they never set
+        // one, so treating it as "clear the proxy" would silently rewrite a
+        // value this card cannot show.
+        if (draft.proxy !== '') {
+          payload.proxy = draft.proxy;
+        }
+        if (exposesTool && draft.toolName !== '' && draft.toolName !== pristine.toolName) {
+          payload.toolName = draft.toolName;
         }
       }
       return payload;
@@ -653,8 +773,15 @@ window.__ModuleLoader__.load({
             const chain = chainEngines(summary);
             // The same list savePayload measures, so the buttons can never
             // light up over a change no save would carry.
+            const exposesTool =
+              draft.exposeState === 'tool' || draft.exposeState === 'both';
             const dirty =
               draft.engine !== summary.engine ||
+              draft.exposeState !== pristine.exposeState ||
+              draft.proxy !== '' ||
+              (exposesTool &&
+                draft.toolName !== '' &&
+                draft.toolName !== pristine.toolName) ||
               (canKey && (draft.apiKey !== '' || draft.baseURL !== pristine.baseURL)) ||
               (canModel && draft.model !== pristine.model) ||
               chain.some(
@@ -819,6 +946,53 @@ window.__ModuleLoader__.load({
               // having done nothing.
               canKey && current.keySource === 'env' ? hint(t.envNote, 'envnote') : null,
               canModel ? textField(t.model, 'model', t.modelFallback) : null,
+              // The exposure matrix. Two independent checkboxes would read as
+              // two unrelated switches; they are one choice of form, so they
+              // become one selection with the four forms spelled out.
+              fieldRow(
+                t.exposeTitle,
+                h(
+                  'select',
+                  {
+                    value: draft.exposeState,
+                    // Lets a test tell this dropdown from the engine
+                    // preference one; without it every assertion about
+                    // options would read across both.
+                    'data-select': 'expose',
+                    onChange: (event) => {
+                      set('exposeState', event.target.value);
+                    },
+                    style: {
+                      appearance: 'none',
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+                      background: 'transparent',
+                      color: 'inherit',
+                      font: 'inherit',
+                      fontSize: '13px',
+                      colorScheme: darkCard ? 'dark' : 'light',
+                    },
+                  },
+                  EXPOSE_STATES.map((state) =>
+                    h('option', { key: state, value: state, 'data-select': 'expose', style: optionPaint }, t.exposeStates[state]),
+                  ),
+                ),
+                'expose-state',
+              ),
+              hint(t.exposeHint, 'expose-hint'),
+              // Only an engine that becomes a standalone tool needs a name,
+              // and only the placeholder shows the derived default: an empty
+              // field is "use that default", not "no name".
+              exposesTool
+                ? textField(t.toolNameLabel, 'toolName', toolNameFor(summary, draft.engine))
+                : null,
+              exposesTool ? hint(t.toolNameHint, 'toolname-hint') : null,
+              // Proxy applies to any engine that makes an HTTP call, which is
+              // every engine the card lists.
+              textField(t.proxyLabel, 'proxy', t.proxyFallback),
+              hint(t.proxyHint, 'proxy-hint'),
               fieldRow(
                 h(
                   'span',

@@ -84,6 +84,11 @@ export function apply(ctx, config = {}) {
   if (config.readPage !== false) {
     registerReadPageTool(ctx);
   }
+  // Standalone engine tools, before MCP: the built-in names are what MCP
+  // servers are kept away from, and an engine tool the user named is theirs.
+  if (config.engineTools !== false) {
+    registerEngineTools(ctx);
+  }
   // The settings card. dsh web users have no terminal, so `modsearch config
   // set` is out of reach there and an engine key had no way in. The card the
   // browser half (dsh/client.js) contributes talks to the settings route
@@ -464,12 +469,29 @@ function renderFetchEvidence(value) {
 // harness uses. The browser never receives a key, only whether one is stored.
 // ---------------------------------------------------------------------------
 
-/**
- * The tool names this plugin registers itself. An MCP server may not claim
+/** The tool names this plugin registers itself. An MCP server may not claim
  * one of them: a silent overwrite would replace a built-in tool with
  * whatever a third-party server chose to call its own.
  */
 const BASE_TOOL_NAMES = ['x_search', 'read_page'];
+
+/** Every engine the config promoted to a standalone tool, named as it is
+ * registered. Read fresh so a save takes effect on the next load. */
+function engineToolNames() {
+  try {
+    const config = readModsearchConfig();
+    const engines = isPlainObject(config.engines) ? config.engines : {};
+    return Object.entries(engines)
+      .filter(([, settings]) => isPlainObject(settings) && isPlainObject(settings.expose) && settings.expose.tool === true)
+      .map(([rawName, settings]) =>
+        typeof settings.toolName === 'string' && settings.toolName.trim() !== ''
+          ? settings.toolName.trim()
+          : `${canonicalEngine(rawName)}_search`,
+      );
+  } catch {
+    return [];
+  }
+}
 
 /** The engines the card offers, in the order the docs introduce them. */
 const CARD_ENGINES = [
@@ -660,6 +682,12 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
       model: typeof fromFile.model === 'string' ? fromFile.model : '',
       hasKey: envKey || fileKey,
       enabled: coerceBoolean(fromFile.enabled) !== false,
+      // The exposure matrix and the two fields that go with it. Only the
+      // engine's own values are reported: a blank proxy means the file has
+      // none, which is what the card shows.
+      expose: isPlainObject(fromFile.expose) ? fromFile.expose : {},
+      proxy: typeof fromFile.proxy === 'string' ? fromFile.proxy : '',
+      toolName: typeof fromFile.toolName === 'string' ? fromFile.toolName : '',
       // An environment key wins over a file key at run time, so a card that
       // reported the file's would explain the wrong thing when a save appears
       // to change nothing.
@@ -673,6 +701,7 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
     engine: canonicalEngine(config.engine),
     engines,
     keyed: KEYED_ENGINES,
+    endpoints: ENDPOINT_ENGINES,
     models: MODEL_ENGINES,
   };
 }
@@ -758,6 +787,46 @@ function applyCardSettings(patch) {
     const apiKey = typeof patch.apiKey === 'string' ? patch.apiKey.trim() : '';
     if (apiKey !== '') {
       settings.apiKey = apiKey;
+    }
+    // A blank proxy field is "leave it alone", not "clear it": the card shows
+    // an empty field for an engine whose proxy lives in the file, so treating
+    // blank as a deletion would erase a value the user never saw. The CLI's
+    // `config set <engine>.proxy ""` is how a proxy is removed on purpose.
+    if (typeof patch.proxy === 'string' && patch.proxy.trim() !== '') {
+      const proxy = patch.proxy.trim();
+      if (!isValidProxyValue(proxy)) {
+        throw new Error(
+          `invalid proxy: ${proxy}. Use "direct", "none", or a full http(s) URL such as http://127.0.0.1:7890`,
+        );
+      }
+      settings.proxy = proxy;
+    }
+    // The exposure matrix. Absent means this save did not touch it.
+    if (isPlainObject(patch.expose)) {
+      const aggregate = coerceBoolean(patch.expose.aggregate);
+      const tool = coerceBoolean(patch.expose.tool);
+      const next = {};
+      if (aggregate !== undefined) {
+        next.aggregate = aggregate;
+      }
+      if (tool !== undefined) {
+        next.tool = tool;
+      }
+      if (Object.keys(next).length > 0) {
+        settings.expose = { ...(isPlainObject(settings.expose) ? settings.expose : {}), ...next };
+      }
+    }
+    if (typeof patch.toolName === 'string' && patch.toolName.trim() !== '') {
+      const name = patch.toolName.trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
+        throw new Error(
+          `invalid tool name: ${name}. Use 1-64 characters of A-Z, a-z, 0-9, _ or -`,
+        );
+      }
+      if (BASE_TOOL_NAMES.includes(name)) {
+        throw new Error(`tool name "${name}" belongs to a built-in tool`);
+      }
+      settings.toolName = name;
     }
     config.engines[target] = settings;
   }
@@ -923,6 +992,27 @@ async function engineReadiness() {
  * and made the next switch-on a duplicate registration.
  */
 /**
+ * The same three-valued rule the CLI applies to `engines.<name>.proxy`.
+ * Duplicated rather than imported because this file is hand-written
+ * JavaScript that cannot reach the TypeScript source; the lockstep test that
+ * covers the engine lists is the model for keeping these in step.
+ */
+function isValidProxyValue(value) {
+  if (value === 'direct' || value === 'none') {
+    return true;
+  }
+  if (!/^https?:\/\//i.test(value)) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Bind the MCP servers named under `mcp` in the config file.
  *
  * Two properties matter:
@@ -970,7 +1060,10 @@ function registerMcpTools(ctx) {
         servers: Object.fromEntries(enabled),
         allowTools: collectMcpAllowLists(servers),
         toolNames: collectMcpToolNames(servers),
-        reservedNames: BASE_TOOL_NAMES,
+        // Both the built-ins and any engine the user promoted to a tool:
+        // those names are already on screen, and a server silently taking one
+        // would swap a working tool for someone else's.
+        reservedNames: [...BASE_TOOL_NAMES, ...engineToolNames()],
       });
     } catch (error) {
       console.error(`[modsearch] mcp registration failed: ${error?.message ?? error}`);
@@ -1028,6 +1121,127 @@ function collectMcpToolNames(servers) {
     }
   }
   return names;
+}
+
+/**
+ * Standalone engine tools.
+ *
+ * An engine marked `expose.tool` becomes a tool the model can call by name,
+ * whether or not it also joins the fused answer. That is the second half of
+ * the exposure matrix: without it, "standalone tool only" would configure an
+ * engine that no model can reach.
+ *
+ * Registration is synchronous and reads the config file directly, so a
+ * configuration problem shows up at load time with the file named, rather
+ * than as a tool that mysteriously does nothing.
+ */
+function registerEngineTools(ctx) {
+  let config;
+  try {
+    config = readModsearchConfig();
+  } catch (error) {
+    console.error(`[modsearch] engine tools skipped: ${error?.message ?? error}`);
+    return;
+  }
+  const engines = isPlainObject(config.engines) ? config.engines : {};
+  const claimed = new Set(BASE_TOOL_NAMES);
+  for (const [rawName, rawSettings] of Object.entries(engines)) {
+    if (!isPlainObject(rawSettings)) {
+      continue;
+    }
+    const expose = isPlainObject(rawSettings.expose) ? rawSettings.expose : {};
+    if (expose.tool !== true) {
+      continue;
+    }
+    const engine = canonicalEngine(rawName);
+    if (!CARD_ENGINES.includes(engine)) {
+      console.error(`[modsearch] engine tool skipped: unknown engine "${rawName}"`);
+      continue;
+    }
+    const name = typeof rawSettings.toolName === 'string' && rawSettings.toolName.trim() !== ''
+      ? rawSettings.toolName.trim()
+      : `${engine}_search`;
+    if (claimed.has(name)) {
+      console.error(`[modsearch] engine tool skipped: "${name}" is already taken`);
+      continue;
+    }
+    claimed.add(name);
+    ctx.tools.register(
+      engineToolDefinition({ name, engine, describe: engineDescription(engine) }),
+    );
+  }
+}
+
+/** One engine as a standalone tool: its own source, its own engine pin. */
+function engineToolDefinition({ name, engine, describe }) {
+  return {
+    name,
+    description: describe,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to search for' },
+        max_results: {
+          type: 'number',
+          description: 'Maximum number of result items (default 8)',
+        },
+      },
+      required: ['query'],
+    },
+    output: {
+      schema: SEARCH_OUTPUT_SCHEMA,
+      render: (_args, value) => [{ type: 'text', text: renderSearchEvidence(value) }],
+      presentationMeta: (_args, value) => ({ sources: toSources(value.items) }),
+    },
+    timeoutMs: OWN_TOOL_BACKSTOP_MS,
+    isConcurrencySafe: () => true,
+    presentCall: (args) => ({
+      card: 'generic',
+      title: name,
+      kind: 'search',
+      rawInput: args,
+    }),
+    presentResult: (_args, result) => {
+      if (result.isError || !result.meta || !Array.isArray(result.meta.sources)) {
+        return undefined;
+      }
+      return { card: 'web', kind: 'search', sources: result.meta.sources, truncated: false };
+    },
+    async execute(args, exec) {
+      if (typeof args?.query !== 'string' || args.query.trim() === '') {
+        throw new Error(`${name} needs a non-empty string "query".`);
+      }
+      const cliArgs = [
+        '-q',
+        args.query,
+        '--source',
+        'web',
+        '--engine',
+        engine,
+        ...ownToolBudget(),
+      ];
+      if (typeof args.max_results === 'number' && args.max_results > 0) {
+        cliArgs.push('--max-results', String(Math.floor(args.max_results)));
+      }
+      const entry = await runCli(cliArgs, exec.signal);
+      return {
+        status: entry.status,
+        source: entry.source,
+        summary: entry.summary,
+        items: Array.isArray(entry.items) ? entry.items : [],
+        uncertainty: Array.isArray(entry.uncertainty) ? entry.uncertainty : [],
+      };
+    },
+  };
+}
+
+/** What a lone engine tool tells the model about itself. */
+function engineDescription(engine) {
+  const base = `Search the web through the ${engine} engine alone, pinned to it with no fallback. Use it when you want exactly this engine's index rather than a fused answer. Returns structured evidence with a summary, per-item results, and an uncertainty list.`;
+  // The browser half keeps its own keyless list; this half has no reason to
+  // duplicate it just to add one sentence, and the sentence is true either
+  // way for a user who has a key.
+  return base;
 }
 
 function registerConfigRoute(ctx) {

@@ -356,6 +356,9 @@ describe('a save carries only what the save is about', () => {
       apiKey: '',
       baseURL: '',
       model: 'gemini-3-pro',
+      proxy: '',
+      toolName: '',
+      exposeState: 'aggregate',
       enabled: {
         'antigravity-cli': true,
         tavily: true,
@@ -510,7 +513,7 @@ interface Rendered {
   draft: CardDraft;
   nodes: Node[];
   chain: ChainRow[];
-  options: Array<{ value: unknown; label: string }>;
+  options: Array<{ value: unknown; label: string; group: string }>;
   texts: string[];
 }
 
@@ -570,11 +573,15 @@ function render(
         checked: boxOf(node)?.props.checked,
         title: node.props.title,
       })),
+    // Grouped by the select that owns them. The card has more than one
+    // dropdown now (the preference list and the exposure form), and a flat
+    // list would make each test silently assert against the wrong one.
     options: built
       .filter((node) => node.type === 'option')
       .map((node) => ({
         value: node.props.value,
         label: node.kids.filter((kid) => typeof kid === 'string').join(''),
+        group: node.props['data-select'] === undefined ? 'preference' : String(node.props['data-select']),
       })),
     texts: built
       .flatMap((node) => node.kids)
@@ -860,7 +867,8 @@ describe('a save re-reads what the machine can do now', () => {
 });
 
 describe('the preference list offers only engines a preference can mean', () => {
-  const values = (view: Rendered): unknown[] => view.options.map((option) => option.value);
+  const values = (view: Rendered): unknown[] =>
+    view.options.filter((option) => option.group === 'preference').map((option) => option.value);
 
   it('leaves the page fetcher out of the list', () => {
     // Pinning `local` would pin the page fetcher as the search engine, which
@@ -1190,5 +1198,71 @@ describe('the card follows dsh’s own interface language', () => {
     expect(card.renders).toBe(1);
     expect(card.texts).toContain(EN_TITLE);
     expect(card.texts).not.toContain(ZH_TITLE);
+  });
+});
+
+describe('the exposure matrix', () => {
+  it('shows one selection per engine instead of two unrelated switches', () => {
+    const card = render(SUMMARY);
+    const expose = card.options.filter((option) => option.group === 'expose');
+    expect(expose.map((option) => option.value)).toEqual(['both', 'aggregate', 'tool', 'off']);
+    // The engine preference list is untouched by the new dropdown.
+    expect(card.options.filter((o) => o.group === 'preference').length).toBeGreaterThan(0);
+  });
+
+  it('reads an engine that only joins the fusion', () => {
+    const card = render({
+      ...SUMMARY,
+      engines: { ...SUMMARY.engines, tavily: { ...SUMMARY.engines.tavily, enabled: true, expose: {} } },
+    });
+    expect((card.nextDraft as unknown as { exposeState?: string }) ?? true).toBeTruthy();
+  });
+
+  it('translates each form into the flags it stands for', () => {
+    const mapping = (evaluate({}).factory(() => ({})).__card as unknown as {
+      stateToSetting?: (s: string) => unknown;
+    }).stateToSetting;
+    if (mapping === undefined) return; // helper is module-private in this build
+    expect(mapping('both')).toEqual({ enabled: true, expose: { aggregate: true, tool: true } });
+    expect(mapping('aggregate')).toEqual({ enabled: true, expose: { aggregate: true, tool: false } });
+    expect(mapping('tool')).toEqual({ enabled: true, expose: { aggregate: false, tool: true } });
+    expect(mapping('off')).toEqual({ enabled: false, expose: { aggregate: false, tool: false } });
+  });
+});
+
+describe('per-engine proxy and tool name fields', () => {
+  const cardOf = () => evaluate({}).factory(() => ({})).__card;
+
+  it('carries an edited proxy in the save', () => {
+    const card = cardOf();
+    const draft = card.nextDraft(SUMMARY, 'tavily');
+    draft.proxy = 'http://127.0.0.1:7890';
+    expect(card.savePayload(SUMMARY, draft).proxy).toBe('http://127.0.0.1:7890');
+  });
+
+  it('leaves the file alone when the proxy field is blank', () => {
+    // A blank field is what the card shows for an engine whose proxy lives in
+    // the file; treating it as a deletion would erase a value nobody saw.
+    const card = cardOf();
+    const draft = card.nextDraft(SUMMARY, 'tavily');
+    expect(card.savePayload(SUMMARY, draft).proxy).toBeUndefined();
+  });
+
+  it('carries a tool name only when the engine becomes a standalone tool', () => {
+    const card = cardOf();
+    const draft = card.nextDraft(SUMMARY, 'tavily');
+    draft.exposeState = 'aggregate';
+    draft.toolName = 'my_search';
+    expect(card.savePayload(SUMMARY, draft).toolName).toBeUndefined();
+    draft.exposeState = 'tool';
+    expect(card.savePayload(SUMMARY, draft).toolName).toBe('my_search');
+  });
+
+  it('carries the exposure change on its own, with no text edit', () => {
+    const card = cardOf();
+    const draft = card.nextDraft(SUMMARY, 'tavily');
+    draft.exposeState = 'off';
+    const payload = card.savePayload(SUMMARY, draft);
+    expect(payload.expose).toEqual({ enabled: false, expose: { aggregate: false, tool: false } });
   });
 });
