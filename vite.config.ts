@@ -18,9 +18,16 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/main.ts'),
+      // Two entries: the CLI, and the MCP client the dsh plugin loads at run
+      // time. The plugin half is hand-written JavaScript that cannot import
+      // TypeScript, so the protocol implementation ships as its own built
+      // module rather than being duplicated by hand.
+      entry: {
+        main: resolve(__dirname, 'src/main.ts'),
+        'mcp-protocol': resolve(__dirname, 'src/mcp/protocol.ts'),
+        'mcp-registry': resolve(__dirname, 'src/mcp/registry.ts'),
+      },
       formats: ['es'],
-      fileName: 'main',
     },
     rollupOptions: {
       // Externalize deps and every Node built-in (bare and node:-prefixed),

@@ -63,6 +63,17 @@ export function apply(ctx, config = {}) {
   if (config.searchProvider !== false) {
     registerSearchProvider(ctx, config);
   }
+  // MCP servers, configured under `mcp` in ~/.modsearch/config.json. The
+  // protocol implementation ships as its own built module because this file
+  // is hand-written JavaScript that cannot import the TypeScript source.
+  //
+  // Everything stateful lives in this closure, never at module scope: the
+  // host reloads a plugin in place without re-evaluating the module when no
+  // file changed, so a module-level session would outlive its own fiber and
+  // be shared with the next generation.
+  if (config.mcp !== false) {
+    registerMcpTools(ctx);
+  }
   // Registered as raw JSON-Schema tool definitions (no dsh package imports:
   // the developer-preview registry accepts these and out-of-tree resolution
   // of @deepseek-ai/dsh-tools is not yet reliable), so this plugin owns its
@@ -90,8 +101,7 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         console.error(`[modsearch] settings card route skipped: ${error}`);
       }
-    });
-    // From rc.7 to 0.1.6-alpha.1 the settings page dispatched plugin cards
+    });    // From rc.7 to 0.1.6-alpha.1 the settings page dispatched plugin cards
     // by served settings namespace: a card rendered only when its slot key
     // matched a namespace the host answered for. The namespace registered
     // here is an empty pass-through, because its whole job is to make the
@@ -453,6 +463,13 @@ function renderFetchEvidence(value) {
 // same file the CLI edits, so a key set in the browser is the key every other
 // harness uses. The browser never receives a key, only whether one is stored.
 // ---------------------------------------------------------------------------
+
+/**
+ * The tool names this plugin registers itself. An MCP server may not claim
+ * one of them: a silent overwrite would replace a built-in tool with
+ * whatever a third-party server chose to call its own.
+ */
+const BASE_TOOL_NAMES = ['x_search', 'read_page'];
 
 /** The engines the card offers, in the order the docs introduce them. */
 const CARD_ENGINES = [
@@ -905,6 +922,114 @@ async function engineReadiness() {
  * does. Left loose, it kept serving the config file for a plugin that was off
  * and made the next switch-on a duplicate registration.
  */
+/**
+ * Bind the MCP servers named under `mcp` in the config file.
+ *
+ * Two properties matter:
+ *
+ * - A server that fails to connect must not stop the plugin. Search is the
+ *   product; MCP is an addition. Each failure becomes a line in the log and
+ *   the remaining servers still register.
+ * - The sessions outlive this call (the registered tools use them), so their
+ *   teardown is registered on the fiber. Unloading the plugin closes them.
+ *
+ * Registration is async, and `apply` is synchronous. The work is started and
+ * the tools appear when it settles; on a machine where a server is slow or
+ * unreachable, search is usable immediately rather than after a round trip.
+ */
+function registerMcpTools(ctx) {
+  let result;
+  let disposed = false;
+  const settle = async () => {
+    let config;
+    try {
+      config = readModsearchConfig();
+    } catch (error) {
+      console.error(`[modsearch] mcp skipped: ${error?.message ?? error}`);
+      return;
+    }
+    const servers = isPlainObject(config.mcp) ? config.mcp : {};
+    const enabled = Object.entries(servers).filter(([, server]) => isPlainObject(server));
+    if (enabled.length === 0) {
+      return;
+    }
+    // The registry names its own output; the host accepts raw JSON-Schema
+    // definitions, so this plugin still imports no @deepseek-ai package.
+    let mod;
+    try {
+      mod = await import('../dist/mcp-registry.js');
+    } catch (error) {
+      console.error(`[modsearch] mcp client unavailable: ${error?.message ?? error}`);
+      return;
+    }
+    if (disposed) {
+      return;
+    }
+    try {
+      result = await mod.registerMcpServers(ctx, {
+        servers: Object.fromEntries(enabled),
+        allowTools: collectMcpAllowLists(servers),
+        toolNames: collectMcpToolNames(servers),
+        reservedNames: BASE_TOOL_NAMES,
+      });
+    } catch (error) {
+      console.error(`[modsearch] mcp registration failed: ${error?.message ?? error}`);
+      return;
+    }
+    if (disposed) {
+      // The plugin went away while this was in flight: the tools it just
+      // registered are already disposed with the fiber, but the sessions are
+      // this call's own responsibility.
+      await result.closeAll().catch(() => undefined);
+      return;
+    }
+    for (const report of result.reports) {
+      if (report.error) {
+        console.error(`[modsearch] mcp ${report.serverKey}: ${report.error}`);
+      }
+    }
+  };
+  try {
+    ctx.effect(() => () => {
+      disposed = true;
+      result?.closeAll().catch(() => undefined);
+    }, 'modsearch: mcp sessions');
+  } catch {
+    // A dead ctx has no fiber to hang the teardown on; the sessions then live
+    // as long as the process, which is what the host does for a plugin that
+    // never unloads.
+  }
+  settle().catch((error) => {
+    console.error(`[modsearch] mcp setup failed: ${error?.message ?? error}`);
+  });
+}
+
+/** `<serverKey>/<toolName>` entries a server asked to hide. */
+function collectMcpAllowLists(servers) {
+  const allow = {};
+  for (const [key, server] of Object.entries(servers)) {
+    if (Array.isArray(server?.allowTools)) {
+      allow[key] = server.allowTools.filter((name) => typeof name === 'string');
+    }
+  }
+  return allow;
+}
+
+/** `<serverKey>/<rawName>` to a caller-chosen tool name. */
+function collectMcpToolNames(servers) {
+  const names = {};
+  for (const [key, server] of Object.entries(servers)) {
+    if (isPlainObject(server?.toolNames)) {
+      for (const [raw, chosen] of Object.entries(server.toolNames)) {
+        if (typeof chosen === 'string' && chosen !== '') {
+          names[`${key}/${raw}`] = chosen;
+        }
+      }
+    }
+  }
+  return names;
+}
+
 function registerConfigRoute(ctx) {
   const route = {
     name: 'modsearch-config',
