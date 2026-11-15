@@ -114,20 +114,30 @@ export const ROLE_PREFERENCE: Record<Role, string[]> = {
   // (100 a day per IP), there for when both run dry on a busy IP. SearXNG
   // follows them because it needs a configured instance but no key: it is
   // ready sooner than the keyed engines without being available on a fresh
-  // machine. Tavily and Exa are keyed backups.
+  // machine. agy synthesizes and cites but its weekly quota is small, so it
+  // backs the keyless engines up rather than fronting the chain. Tavily and
+  // Exa are keyed backups.
   //
-  // antigravity-cli is deliberately absent. It synthesizes with a model and
-  // takes 60s or more, which is longer than any useful aggregated budget, so
-  // in this chain it could only ever be skipped. It stays registered and
-  // resolvable (doctor still reports it, `--engine antigravity-cli` still
-  // runs it) and comes back here once the user opts in with
-  // `engines.antigravity-cli.enabled: true`.
-  search: ['firecrawl', 'keenable', 'youcom', 'searxng', 'arxiv', 'tavily', 'exa'],
+  // antigravity-cli is listed here even though it stays out of automatic
+  // routing by default. AGENTS.md promises that every engine participates
+  // unless `enabled: false` says otherwise, so the exclusion belongs in the
+  // config default (OFF_UNLESS_ENABLED in config.ts), not in this list.
+  // Keeping it here is what lets "enabled: true" put it back.
+  search: [
+    'firecrawl',
+    'keenable',
+    'youcom',
+    'searxng',
+    'arxiv',
+    'antigravity-cli',
+    'tavily',
+    'exa',
+  ],
   // Firecrawl runs a cloud browser for JS-heavy pages, keyless by default
-  // (opt out with firecrawl.keylessFetch false). The local needs no setup and
-  // returns the page as served, so it stays the default floor unless the user
-  // disables it. antigravity-cli is left out for the same reason as above.
-  fetch: ['firecrawl', 'local'],
+  // (opt out with firecrawl.keylessFetch false). agy extracts to a focus. The
+  // local needs no setup and returns the page as served, so it stays the
+  // default floor unless the user disables it.
+  fetch: ['firecrawl', 'antigravity-cli', 'local'],
   // Only xAI can see inside X. Left in place: this chain has exactly one
   // member, and x_search registers only when the user asks for it.
   social: ['grok-cli'],

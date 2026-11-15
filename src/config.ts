@@ -42,6 +42,26 @@ export interface AggregateConfig {
   cacheTtlMs?: number;
 }
 
+/**
+ * Engines that are registered, resolvable and diagnosable, but stay out of
+ * automatic routing until the user asks for them.
+ *
+ * This is not the same thing as deleting the engine from the role preference:
+ * AGENTS.md promises that every engine participates by default and that
+ * `enabled: false` is what excludes one, so the exclusion has to be an
+ * ordinary setting a user can flip rather than a special case in the router.
+ * The value here is the default the engine gets when the config file says
+ * nothing about it.
+ *
+ * antigravity-cli is here because it synthesizes with a model and takes a
+ * minute or more, which outlasts any useful fused budget; left in the chain it
+ * could only ever be skipped. A user who wants it writes
+ * `engines.antigravity-cli.enabled: true` and gets it back.
+ */
+const OFF_UNLESS_ENABLED: Record<string, true> = {
+  'antigravity-cli': true,
+};
+
 export interface EngineSettings {
   apiKey?: string;
   model?: string;
@@ -430,6 +450,17 @@ export function engineSettings(
   const bindings = Object.hasOwn(ENV_BINDINGS, engineName) ? ENV_BINDINGS[engineName] : {};
 
   const settings: EngineSettings = { ...fromFile };
+  // An engine that is off unless asked takes the default only when the file
+  // has no opinion. Two things count as an opinion: an explicit enabled
+  // value here, and being the engine the file pins as its preference — pinning
+  // an engine and then refusing to run it is the config arguing with itself.
+  if (
+    Object.hasOwn(OFF_UNLESS_ENABLED, engineName) &&
+    settings.enabled === undefined &&
+    chosenEngine(config) !== engineName
+  ) {
+    settings.enabled = false;
+  }
   for (const [field, envName] of Object.entries(bindings) as Array<[StringEngineSetting, string]>) {
     const value = env[envName]?.trim();
     const present = field === 'apiKey' ? splitApiKeys(value).length > 0 : Boolean(value);
