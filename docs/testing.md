@@ -36,3 +36,20 @@ pnpm typecheck                              # tsc --noEmit, run before tests
 - **Hidden child consoles** (`src/spawnContract.test.ts`). The core and separately shipped dsh plugin each start children through one wrapper that writes `windowsHide: true` after caller options. The contract test also scans shipped source and fails if any other file reaches `child_process`, so a future provider cannot quietly bring the black console flash back to GUI hosts.
 
 - Real `agy` / `grok` calls are end-to-end verification, not unit tests. They consume real quota, so keep them out of `pnpm test`.
+
+## Proving a test can fail
+
+A green test proves nothing until you have seen it red. Two cheap habits catch the common cases:
+
+- **Mutate the implementation, not the test.** Break the exact line the test is meant to cover, run it, and confirm it fails. A test that stays green under the mutation is decorative. Revert the mutation afterwards and re-run to confirm green.
+- **Assert on a quantity the wrong implementation cannot accidentally produce.** For cancellation, asserting "throws" is weak: a timeout throws too. Assert the elapsed time instead — with a 5 s timeout and a 50 ms abort, finishing under 2 s can only come from the abort. For cache and reload logic, assert the call count, not the return value.
+
+A test double that is less capable than the real system silently skips whole paths. The `house()` stage in `src/dshPlugin.test.ts` returns a disposer from `tools.register` for exactly this reason: without it, the "dispose the old generation, then register the new one" path never runs, and hot-reload tests would pass against an implementation that never disposes anything. When a double cannot model a behaviour the production code depends on, extend the double rather than weakening the assertion.
+
+## Hot reload
+
+The plugin owns `~/.modsearch/config.json`, outside the host's profile, so the host's reload signal never fires for it. `watchModsearchConfigFile` polls its mtime every few seconds and both MCP tools and engine tools hang off that single watcher — one timer, because two watchers on one file let the two halves disagree briefly after a save.
+
+Each reloader keeps its own signature and skips work when it is unchanged. The engine-tool signature covers only what decides *whether a tool exists*: raw name, engine, enabled, and custom tool name. API keys, proxies and base URLs are deliberately outside it, so rotating a key does not make tools flicker out of the list the user is looking at.
+
+Tests drive this with `vi.useFakeTimers()` and `advanceTimersByTimeAsync`, which requires that the poll interval stay a plain `setInterval` rather than an `await new Promise(setTimeout)`.
