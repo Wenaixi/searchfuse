@@ -4,6 +4,7 @@
 // 接入：没有密钥就无法验证它的请求形状。结果是带摘要的排序页面，没有
 // 成文答案，所以 summary 是机械拼出来的。
 import { requestText } from '../util/timedRequest.ts';
+import { safeHostname } from '../util/host.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
@@ -104,14 +105,6 @@ export async function executeYoucomSearch(options: EngineRequest): Promise<Engin
       usage: { resultCount: items.length },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const youcomProvider: SearchEngine = {

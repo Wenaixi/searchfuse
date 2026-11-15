@@ -8,6 +8,7 @@
 // 规整，只需要四个字段，为它引入一个解析器依赖不划算。这种做法失败的表现
 // 是字段缺失，而不是字段读错，且下面每个字段都做了校验。
 import { redactSecrets } from '../util/redact.ts';
+import { safeHostname } from '../util/host.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
@@ -150,14 +151,6 @@ export async function executeArxivSearch(options: EngineRequest): Promise<Engine
       usage: { resultCount: items.length },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const arxivProvider: SearchEngine = {

@@ -9,6 +9,7 @@
 // 只贡献一份排序列表。不因此调高权重：RRF 融合衡量的是独立来源之间的共识，
 // 抬高单一来源的票数只会扭曲它。
 import { redactSecrets } from '../util/redact.ts';
+import { safeHostname } from '../util/host.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { resolveEndpoint } from './endpoint.ts';
@@ -119,14 +120,6 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
       usage: { resultCount: items.length },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const searxngProvider: SearchEngine = {

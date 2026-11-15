@@ -3,6 +3,7 @@
 // 不编造相关度评分。Exa 返回带高亮摘要的排序链接，但不写成文答案，
 // 所以这里的摘要只是机械拼接，并附一条警告，提示读者直接从 items 取证据。
 import { redactSecrets } from '../util/redact.ts';
+import { safeHostname } from '../util/host.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
@@ -142,14 +143,6 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
       usage: { resultCount: items.length, costDollars: data.costDollars?.total ?? null },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const exaProvider: SearchEngine = {

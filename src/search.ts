@@ -28,13 +28,13 @@ import { redactSecrets } from './util/redact.ts';
 export interface RunSearchOptions {
   query?: string;
   url?: string;
-  /** Engine override for this run, e.g. `tavily`. */
+  /** 本次运行指定使用的引擎，例如 `tavily`。 */
   engine?: string;
-  /** Source list, e.g. `web,x`. Undefined decides from the query. */
+  /** 来源列表，例如 `web,x`。不传时由查询内容决定。 */
   sources?: string;
   model?: string;
   prompt?: string;
-  /** Per-engine budget: each attempt gets this long. */
+  /** 单个引擎的预算：每次尝试最多可以跑这么久。 */
   timeoutMs?: number;
   /**
    * 整次运行的墙钟预算，从运行开始算起。每次尝试拿到的是 `timeoutMs`
@@ -63,27 +63,27 @@ export interface RunSearchOptions {
   cooldown?: CooldownController;
 }
 
-/** How well this entry served the source that was requested. */
+/** 这一条目对请求的来源服务得如何。 */
 export type SourceStatus = 'ok' | 'degraded' | 'unavailable';
 
-/** One try at one engine, in the order they were attempted. */
+/** 对某个引擎的一次尝试，按实际尝试的先后顺序排列。 */
 export interface EngineAttempt {
   engine: string;
-  /** Zero-based configured key index. Present only when an engine has multiple keys. */
+  /** 配置里的密钥下标，从 0 开始。只有引擎配了多个密钥时才会出现。 */
   keyIndex?: number;
-  /** True when the engine returned a result, false when it failed or was skipped. */
+  /** 引擎返回了结果时为 true，失败或被跳过时为 false。 */
   ok: boolean;
-  /** Present only when `ok` is false: the failure message. */
+  /** 只有 `ok` 为 false 时才出现：失败消息。 */
   error?: string;
-  /** How long this attempt took, or null when nothing ran. */
+  /** 这次尝试花了多久；什么都没跑时是 null。 */
   durationSeconds: number | null;
-  /** US-dollar cost this attempt reported, where the engine tracks one (exa). Absent otherwise. */
+  /** 这次尝试报告的美元花费，只有引擎跟踪花费时才有（exa）。其余情况不出现。 */
   cost?: number;
-  /** Credits this attempt spent, where the engine tracks them (firecrawl). Absent otherwise. */
+  /** 这次尝试消耗的额度，只有引擎跟踪额度时才有（firecrawl）。其余情况不出现。 */
   credits?: number;
 }
 
-/** The spend an engine reported on its usage: exa dollars, firecrawl credits. */
+/** 引擎在 usage 里报告的花费：exa 的美元，firecrawl 的额度。 */
 function engineSpend(usage: unknown): { cost?: number; credits?: number } {
   if (!usage || typeof usage !== 'object') {
     return {};

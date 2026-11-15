@@ -4,6 +4,7 @@
 // 没有小时上限，每个组织每月 100,000 次免费请求。
 // 返回结果是带摘要的排序页面，不含成文答案，所以摘要只是机械拼接。
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
+import { safeHostname } from '../util/host.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -141,14 +142,6 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
       usage: { resultCount: items.length, mode: data.mode ?? null },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const keenableProvider: SearchEngine = {

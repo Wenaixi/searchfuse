@@ -8,6 +8,7 @@
 // 主机名，一律拒绝。自动链路随后可以改试本地引擎；强制运行时直接返回错误。
 // --allow-private-network 只授权本地访问，永不授权云披露。
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
+import { safeHostname } from '../util/host.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -363,14 +364,6 @@ function normalizeLinks(raw: unknown): Array<{ text: string; url: string }> {
     }
   }
   return out;
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const firecrawlProvider: SearchEngine = {

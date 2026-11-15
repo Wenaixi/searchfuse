@@ -6,6 +6,7 @@
 // （一条带已知安全公告的 axios 依赖链），所以已弃用。参考
 // https://docs.tavily.com/documentation/api-reference/endpoint/search
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
+import { safeHostname } from '../util/host.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -126,14 +127,6 @@ export async function executeTavilySearch(options: EngineRequest): Promise<Engin
       usage: { resultCount: items.length },
     },
   };
-}
-
-function safeHostname(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 export const tavilyProvider: SearchEngine = {
