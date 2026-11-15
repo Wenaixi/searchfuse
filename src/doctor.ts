@@ -22,7 +22,7 @@ import {
   parseCooldownStateKey,
 } from './cooldown.ts';
 import { grokAuthFile } from './providers/grok.ts';
-import { findEngine, ROLE_PREFERENCE, type SearchEngine } from './providers/index.ts';
+import { enginesForRole, findEngine, ROLE_PREFERENCE, type SearchEngine } from './providers/index.ts';
 import { commandOnPath } from './system.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
 
@@ -319,6 +319,17 @@ function candidatesForRole(role: Role, config: ModsearchConfig): SearchEngine[] 
   }
   for (const name of ROLE_PREFERENCE[role]) {
     names.push(name);
+  }
+  // Engines that can serve this role but are not in the default chain still
+  // get diagnosed. antigravity-cli is one: it synthesizes and takes a minute
+  // or more, so it is left out of automatic routing, but "is the agy binary
+  // installed and signed in" is exactly the kind of question doctor exists to
+  // answer. Without this line an engine the user can still force with
+  // --engine would silently vanish from the report.
+  for (const engine of enginesForRole(role)) {
+    if (!names.includes(engine.name)) {
+      names.push(engine.name);
+    }
   }
 
   const seen = new Set<string>();

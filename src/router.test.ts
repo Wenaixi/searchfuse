@@ -69,10 +69,7 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
     ]);
   });
@@ -83,10 +80,7 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
       'exa',
     ]);
@@ -100,10 +94,7 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
       'exa',
     ]);
@@ -113,7 +104,6 @@ describe('engine chains per role', () => {
     const keyed = config({ engines: { firecrawl: { apiKey: 'k' } } });
     expect(names(planRole('fetch', keyed, undefined, WITH_AGY).chain)).toEqual([
       'firecrawl',
-      'antigravity-cli',
       'local',
     ]);
     // On a bare machine, firecrawl leads and local still floors.
@@ -129,8 +119,6 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
     ]);
   });
@@ -140,10 +128,7 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', disabled, undefined, WITH_AGY).chain)).toEqual([
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
     ]);
   });
 
@@ -155,8 +140,6 @@ describe('engine chains per role', () => {
         firecrawl: { enabled: false },
         keenable: { enabled: false },
         youcom: { enabled: false },
-        hackernews: { enabled: false },
-        stackexchange: { enabled: false },
         arxiv: { enabled: false },
         tavily: { apiKey: ', ,' },
         exa: { apiKey: ',,' },
@@ -203,7 +186,6 @@ describe('engine chains per role', () => {
     ).toEqual(['firecrawl', 'local']);
     expect(names(planRole('fetch', config(), undefined, WITH_AGY).chain)).toEqual([
       'firecrawl',
-      'antigravity-cli',
       'local',
     ]);
   });
@@ -337,7 +319,7 @@ describe('fetch follows the chosen engine without being configured', () => {
   it('falls through the default fetch chain when the search engine cannot fetch', () => {
     // Choosing Tavily is a normal setup, not a mistake, so it earns no warning.
     const chain = planRole('fetch', config({ engine: 'tavily' }), undefined, WITH_AGY);
-    expect(names(chain.chain)).toEqual(['firecrawl', 'antigravity-cli', 'local']);
+    expect(names(chain.chain)).toEqual(['firecrawl', 'local']);
     expect(chain.notes).toEqual([]);
   });
 
@@ -387,10 +369,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'exa',
       'tavily',
     ]);
@@ -410,10 +389,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
       'exa',
     ]);
@@ -424,10 +400,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'exa',
       'tavily',
     ]);
@@ -436,14 +409,11 @@ describe('cooldown reorders the chain without changing the base order', () => {
 
   it('keeps every cooling engine in the chain and preserves the base order', () => {
     const cd = cooling({
-      'antigravity-cli': FUTURE,
       tavily: FUTURE,
       exa: FUTURE,
       firecrawl: FUTURE,
       keenable: FUTURE,
       youcom: FUTURE,
-      hackernews: FUTURE,
-      stackexchange: FUTURE,
       arxiv: FUTURE,
     });
     const { chain } = planRole('search', keyed, undefined, WITH_AGY, cd);
@@ -452,10 +422,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
       'exa',
     ]);
@@ -470,7 +437,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       WITH_AGY,
       cooling({ firecrawl: FUTURE }),
     );
-    expect(names(chain)).toEqual(['antigravity-cli', 'local', 'firecrawl']);
+    expect(names(chain)).toEqual(['local', 'firecrawl']);
   });
 
   it('ignores cooldown entirely under a forced --engine', () => {
@@ -497,10 +464,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'hackernews',
-      'stackexchange',
       'arxiv',
-      'antigravity-cli',
       'tavily',
       'exa',
     ]);

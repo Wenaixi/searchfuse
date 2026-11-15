@@ -78,7 +78,13 @@ export function apply(ctx, config = {}) {
   // the developer-preview registry accepts these and out-of-tree resolution
   // of @deepseek-ai/dsh-tools is not yet reliable), so this plugin owns its
   // own argument validation inside execute.
-  if (config.xSearch !== false) {
+  // Off by default: X search needs a signed-in Grok, and on a machine without
+  // one it can only answer degraded. Registering a tool that cannot do its
+  // job costs the model a schema on every request and a failed call the first
+  // time it is tried. The engine itself stays registered, so `doctor` still
+  // reports whether Grok is signed in and a user can switch this on the
+  // moment it is.
+  if (config.xSearch === true) {
     registerXSearchTool(ctx);
   }
   if (config.readPage !== false) {
@@ -510,8 +516,6 @@ const CARD_ENGINES = [
   'keenable',
   'youcom',
   'searxng',
-  'hackernews',
-  'stackexchange',
   'arxiv',
   'grok-cli',
   'local',

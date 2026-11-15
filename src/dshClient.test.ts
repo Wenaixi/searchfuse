@@ -367,8 +367,6 @@ describe('a save carries only what the save is about', () => {
         keenable: true,
         youcom: true,
         searxng: true,
-        hackernews: true,
-        stackexchange: true,
         arxiv: true,
         'grok-cli': true,
         local: true,
@@ -696,8 +694,6 @@ describe('the automatic engine chain lists what this machine can actually search
       'keenable',
       'youcom',
       'searxng',
-      'hackernews',
-      'stackexchange',
       'arxiv',
       'grok-cli X search only',
     ]);
@@ -888,8 +884,6 @@ describe('the preference list offers only engines a preference can mean', () => 
       'keenable',
       'youcom',
       'searxng',
-      'hackernews',
-      'stackexchange',
       'arxiv',
       'grok-cli',
     ]);

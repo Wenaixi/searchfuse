@@ -116,8 +116,6 @@ describe('doctor: search engines', () => {
           firecrawl: { enabled: false },
           keenable: { enabled: false },
           youcom: { enabled: false },
-          hackernews: { enabled: false },
-          stackexchange: { enabled: false },
           arxiv: { enabled: false },
         },
       },

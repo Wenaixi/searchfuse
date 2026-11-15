@@ -308,7 +308,7 @@ describe('dsh CLI budgets', () => {
 
   it('bounds x_search and read_page by a run deadline inside their own backstop', async () => {
     argvEchoCli();
-    const { tools } = await load();
+    const { tools } = await load({ xSearch: true });
     for (const [name, args] of [
       ['x_search', { query: 'anything' }],
       ['read_page', { url: 'https://a.example' }],
@@ -328,7 +328,7 @@ describe('dsh CLI budgets', () => {
 
 describe('dsh x_search tool', () => {
   it('returns evidence plus provenance as the canonical value', async () => {
-    const { tools } = await load();
+    const { tools } = await load({ xSearch: true });
     const tool = toolNamed(tools, 'x_search');
     envelopeCli({ ...okSearchEntry, source: 'x', requestedSource: 'x', engine: 'grok-cli' });
     const value = await tool.execute({ query: 'what is @dev saying' }, {});
@@ -342,7 +342,7 @@ describe('dsh x_search tool', () => {
   });
 
   it('marks a web stand-in answer as degraded in value and render', async () => {
-    const { tools } = await load();
+    const { tools } = await load({ xSearch: true });
     const tool = toolNamed(tools, 'x_search');
     envelopeCli({ ...okSearchEntry, requestedSource: 'x', status: 'degraded' });
     const value = await tool.execute({ query: 'reactions to the launch' }, {});
@@ -354,7 +354,7 @@ describe('dsh x_search tool', () => {
   });
 
   it('projects citation sources for the native web card', async () => {
-    const { tools } = await load();
+    const { tools } = await load({ xSearch: true });
     const tool = toolNamed(tools, 'x_search');
     const value = {
       status: 'ok',
@@ -376,7 +376,7 @@ describe('dsh x_search tool', () => {
   });
 
   it('rejects an empty query before spawning anything', async () => {
-    const { tools } = await load();
+    const { tools } = await load({ xSearch: true });
     await expect(toolNamed(tools, 'x_search').execute({ query: '  ' }, {})).rejects.toThrow(
       /non-empty string "query"/,
     );
@@ -1059,7 +1059,7 @@ describe('dsh settings card route', () => {
       plugin.apply(stage.ctx as never, {});
       expect(stage.injected).toContainEqual(['settings']);
       expect(stage.routes['modsearch-config']).toBeDefined();
-      expect([...stage.tools.keys()].sort()).toEqual(['read_page', 'x_search']);
+      expect([...stage.tools.keys()].sort()).toEqual(['read_page']);
       expect(stage.providers).toHaveLength(1);
       expect(errors).not.toHaveBeenCalled();
     } finally {
@@ -1079,7 +1079,7 @@ describe('dsh settings card route', () => {
     expect(stage.injected).toContainEqual(['settings']);
     expect(stage.namespaces).toEqual([]);
     expect(stage.routes['modsearch-config']).toBeDefined();
-    expect([...stage.tools.keys()].sort()).toEqual(['read_page', 'x_search']);
+    expect([...stage.tools.keys()].sort()).toEqual(['read_page']);
     expect(stage.providers).toHaveLength(1);
   });
 
@@ -1148,7 +1148,7 @@ describe('dsh plugin config switches', () => {
       } as never,
       {},
     );
-    expect([...tools.keys()].sort()).toEqual(['read_page', 'x_search']);
+    expect([...tools.keys()].sort()).toEqual(['read_page']);
   });
 
   it('keeps search, x_search and read_page on a host with no scoped injects at all', async () => {
@@ -1156,7 +1156,7 @@ describe('dsh plugin config switches', () => {
     // have no ctx.inject to hang them on. The settings card is the only thing
     // that may go missing there.
     const { tools, providers } = await load();
-    expect([...tools.keys()].sort()).toEqual(['read_page', 'x_search']);
+    expect([...tools.keys()].sort()).toEqual(['read_page']);
     expect(providers).toHaveLength(1);
   });
 });
