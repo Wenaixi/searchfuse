@@ -10,9 +10,11 @@
 //    Search keeps working with no MCP at all, so a dead server is a missing
 //    convenience, not a failed boot.
 // 2. Every registration goes through ctx.tools.register, which is already tied
-//    to the calling fiber. Nothing here needs to hold its own disposer list:
-//    unloading the plugin removes the tools, and unloading a server mid-run
-//    removes only that server's tools.
+//    to the calling fiber, so unloading the plugin removes the tools without
+//    this module holding a list of its own. The disposers ARE collected and
+//    returned anyway, because the plugin watches the config file and has to
+//    replace a server's tools when its settings change mid-run: a fiber-wide
+//    teardown is too coarse for that.
 import type { McpServerConfig, McpToolSpec } from './protocol.ts';
 import { McpConnection as Connection, isServerNameValid, publicToolName } from './protocol.ts';
 
@@ -83,11 +85,17 @@ export interface RegisterMcpOptions {
   logger?: (message: string) => void;
 }
 
-/** The reports, plus the one operation the caller must wire up. */
+/** The reports, plus the two operations the caller must wire up. */
 export interface McpRegistrationResult {
   reports: McpServerReport[];
   /** Close every session this registration opened. Idempotent. */
   closeAll: () => Promise<void>;
+  /**
+   * Remove every tool this registration added. Separate from `closeAll` so
+   * a config change can drop the tools, then register again, without the
+   * caller reaching into host internals.
+   */
+  disposeTools: () => void;
 }
 
 /**
@@ -106,6 +114,8 @@ export async function registerMcpServers(
   const reports: McpServerReport[] = [];
   /** Connections kept open for the registered tools, closed by the caller. */
   const keepAlive: Connection[] = [];
+  /** Undo functions for the tools registered this pass. */
+  const disposeTools_ = [] as Array<() => void>;
   let closed = false;
   const closeAll = async (): Promise<void> => {
     if (closed) {
@@ -152,7 +162,7 @@ export async function registerMcpServers(
         }
         claimed.add(name);
         const toolConnection = connection;
-        ctx.tools.register({
+        const registered = ctx.tools.register({
           name,
           description:
             tool.description ?? `Tool ${tool.name} provided by the MCP server "${serverKey}".`,
@@ -184,6 +194,9 @@ export async function registerMcpServers(
             );
           },
         });
+        if (typeof registered === 'function') {
+          disposeTools_.push(registered as () => void);
+        }
         report.tools.push(name);
       }
       report.connected = true;
@@ -205,5 +218,15 @@ export async function registerMcpServers(
     reports.push(report);
   }
 
-  return { reports, closeAll };
+  const disposeTools = (): void => {
+    for (const undo of disposeTools_) {
+      try {
+        undo();
+      } catch {
+        // A tool already gone is not an error worth reporting.
+      }
+    }
+    disposeTools_.length = 0;
+  };
+  return { reports, closeAll, disposeTools };
 }

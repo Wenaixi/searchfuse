@@ -17,6 +17,7 @@
 import {
   chmodSync,
   existsSync,
+  statSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -53,6 +54,13 @@ const OWN_TOOL_DEADLINE_MS = 180_000;
 const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
 // The provider path runs under tool-web's budget (60s for the shipped search
 // route): 40s for one engine leaves a fast fallback room inside a 55s run.
+/**
+ * How often the plugin re-checks the config file's mtime. The file is small
+ * and a stat is cheap; a few seconds is short enough that a user who just
+ * saved a server expects its tools on the next turn.
+ */
+const MCP_CONFIG_POLL_MS = 5_000;
+
 const PROVIDER_TIMEOUT_MS = 40_000;
 const PROVIDER_DEADLINE_MS = 55_000;
 
@@ -1085,17 +1093,63 @@ function isValidProxyValue(value) {
 function registerMcpTools(ctx) {
   let result;
   let disposed = false;
+  let lastSignature = '';
+  let inFlight = false;
+  let pollTimer = null;
+
+  /** The part of the config that decides which tools exist. */
+  const signatureOf = (servers) => {
+    const shape = Object.entries(servers)
+      .filter(([, server]) => isPlainObject(server))
+      .map(([key, server]) => [
+        key,
+        server.enabled !== false,
+        Array.isArray(server.allowTools) ? [...server.allowTools].sort() : null,
+        isPlainObject(server.toolNames) ? Object.entries(server.toolNames).sort() : null,
+        typeof server.url === 'string' ? server.url : null,
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    return JSON.stringify(shape);
+  };
+
   const settle = async () => {
+    if (inFlight) {
+      return;
+    }
+    inFlight = true;
     let config;
     try {
       config = readModsearchConfig();
     } catch (error) {
       console.error(`[modsearch] mcp skipped: ${error?.message ?? error}`);
+      inFlight = false;
       return;
     }
     const servers = isPlainObject(config.mcp) ? config.mcp : {};
-    const enabled = Object.entries(servers).filter(([, server]) => isPlainObject(server));
+    const enabled = Object.entries(servers).filter(
+      ([, server]) => isPlainObject(server) && server.enabled !== false,
+    );
+    const signature = signatureOf(servers);
+    // Nothing changed since the last pass: the tools already registered
+    // answer exactly this configuration, so replacing them would drop and
+    // rebuild live tool definitions for no reason.
+    if (signature === lastSignature && result !== undefined) {
+      inFlight = false;
+      return;
+    }
+
+    // The old generation goes first. Registering the new tools while the old
+    // ones are still claimed would collide on the same names and fail the
+    // whole pass.
+    if (result !== undefined) {
+      result.disposeTools();
+      await result.closeAll().catch(() => undefined);
+      result = undefined;
+    }
+    lastSignature = signature;
+
     if (enabled.length === 0) {
+      inFlight = false;
       return;
     }
     // The registry names its own output; the host accepts raw JSON-Schema
@@ -1105,9 +1159,11 @@ function registerMcpTools(ctx) {
       mod = await import('../dist/mcp-registry.js');
     } catch (error) {
       console.error(`[modsearch] mcp client unavailable: ${error?.message ?? error}`);
+      inFlight = false;
       return;
     }
     if (disposed) {
+      inFlight = false;
       return;
     }
     try {
@@ -1122,8 +1178,10 @@ function registerMcpTools(ctx) {
       });
     } catch (error) {
       console.error(`[modsearch] mcp registration failed: ${error?.message ?? error}`);
+      inFlight = false;
       return;
     }
+    inFlight = false;
     if (disposed) {
       // The plugin went away while this was in flight: the tools it just
       // registered are already disposed with the fiber, but the sessions are
@@ -1137,9 +1195,13 @@ function registerMcpTools(ctx) {
       }
     }
   };
+
   try {
     ctx.effect(() => () => {
       disposed = true;
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+      }
       result?.closeAll().catch(() => undefined);
     }, 'modsearch: mcp sessions');
   } catch {
@@ -1147,9 +1209,59 @@ function registerMcpTools(ctx) {
     // as long as the process, which is what the host does for a plugin that
     // never unloads.
   }
+
+  // The config file is the plugin's own, so the host's profile reload signal
+  // never fires for it. A stat every few seconds is the cheapest way to notice
+  // an edit: a changed mtime re-runs the registration, which replaces the
+  // server's tools without a plugin reload. Unref'd so it never holds the
+  // process open on its own.
+  const watchConfig = () => {
+    const file = modsearchConfigPath();
+    let lastMtime;
+    try {
+      lastMtime = statSync(file).mtimeMs;
+    } catch {
+      lastMtime = undefined;
+    }
+    pollTimer = setInterval(() => {
+      if (disposed) {
+        return;
+      }
+      let mtime;
+      try {
+        mtime = statSync(file).mtimeMs;
+      } catch {
+        // A deleted config means no MCP servers; settle() handles it.
+        mtime = undefined;
+      }
+      if (mtime === lastMtime) {
+        return;
+      }
+      lastMtime = mtime;
+      settle().catch((error) => {
+        console.error(`[modsearch] mcp reload failed: ${error?.message ?? error}`);
+      });
+    }, MCP_CONFIG_POLL_MS);
+    if (typeof pollTimer?.unref === 'function') {
+      pollTimer.unref();
+    }
+    try {
+      // Registered separately so the interval is cleared even on the path
+      // where the effect above never ran.
+      ctx.effect(() => () => {
+        if (pollTimer !== null) {
+          clearInterval(pollTimer);
+        }
+      }, 'modsearch: mcp config watch');
+    } catch {
+      // see above
+    }
+  };
+
   settle().catch((error) => {
     console.error(`[modsearch] mcp setup failed: ${error?.message ?? error}`);
   });
+  watchConfig();
 }
 
 /** `<serverKey>/<toolName>` entries a server asked to hide. */
