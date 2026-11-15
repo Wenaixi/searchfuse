@@ -33,6 +33,13 @@ export interface AggregateConfig {
    * arrived. Ignored in chain mode, which has its own per-engine budget.
    */
   deadlineMs?: number;
+  /**
+   * How long a fused result is served from cache, in milliseconds. 0 switches
+   * caching off. Default 5 minutes: long enough that an agent narrowing a
+   * problem reuses its own answer, short enough that a search about today's
+   * news is not stale by the time it is read.
+   */
+  cacheTtlMs?: number;
 }
 
 export interface EngineSettings {
@@ -386,6 +393,15 @@ export function aggregateDeadlineMs(config: ModsearchConfig): number {
     return configured;
   }
   return 8_000;
+}
+
+/** How long a fused result stays cacheable. 0 disables caching. */
+export function aggregateCacheTtlMs(config: ModsearchConfig): number {
+  const configured = config.aggregate?.cacheTtlMs;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0) {
+    return configured;
+  }
+  return 5 * 60 * 1000;
 }
 
 /**

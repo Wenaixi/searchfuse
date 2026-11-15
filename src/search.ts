@@ -1,4 +1,5 @@
 import {
+  aggregateCacheTtlMs,
   aggregateDeadlineMs,
   aggregateMode,
   engineSettings,
@@ -9,6 +10,7 @@ import {
 import { coolingEntry, type CooldownController } from './cooldown.ts';
 import { fanout, type FanoutTarget } from './aggregate/fanout.ts';
 import { rrfFuse } from './aggregate/rrf.ts';
+import { cacheKey, currentCachePath, pruneCache, readCache, writeCache } from './aggregate/cache.ts';
 import {
   allEngines,
   enginesForRole,
@@ -138,6 +140,9 @@ export interface RunSearchResult {
     durationSeconds: number;
   };
 }
+
+/** Ceiling on cached fusions, so the file stays bounded without a background job. */
+const CACHE_ENTRY_CAP = 100;
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 // Give the engine's own timeout a chance to fire first; SIGTERM is the backstop.
@@ -352,6 +357,32 @@ async function runFused(
     allowPrivateNetwork: options.allowPrivateNetwork === true || config.allowPrivateNetwork === true,
   };
   const budgetMs = aggregateDeadlineMs(config);
+  // A repeated query costs real quota on the keyless engines (Firecrawl's
+  // monthly credits, You.com's daily per-IP allowance), and an agent often
+  // asks the same thing twice while narrowing a problem. A short disk cache
+  // turns that second ask into a disk read.
+  //
+  // The key includes the engine set because a different set is a different
+  // answer; it excludes engine order because that is routing, not the
+  // question.
+  const cachePath = currentCachePath();
+  const cacheTtl = aggregateCacheTtlMs(config);
+  const key = cacheKey({
+    query: query ?? '',
+    maxResults: request.maxResults ?? 10,
+    engines: targets.map((t) => t.engine.name),
+  });
+  const cached = readCache(cachePath, key, new Date(), cacheTtl);
+  if (cached !== undefined && Array.isArray(cached.items)) {
+    return buildFusedResult({
+      items: cached.items as Array<Record<string, unknown>>,
+      engines: cached.engines ?? targets.map((t) => t.engine.name),
+      failures: cached.failures ?? [],
+      skipped,
+      durationSeconds: 0,
+      fromCache: true,
+    });
+  }
   let fanoutResult: Awaited<ReturnType<typeof fanout>>;
   try {
     fanoutResult = await fanout<{
@@ -369,30 +400,83 @@ async function runFused(
   }
   const { outputs, failures } = fanoutResult;
   const fused = rrfFuse(outputs);
-
   const enginesUsed = outputs.map((o) => o.engine);
-  const multiSource = fused.filter((item) => item.foundIn.length > 1).length;
+
+  // Cache the fused result before answering. A failed write would mean a
+  // second query costs quota again, not that the answer is wrong, so the
+  // error is swallowed rather than surfaced.
+  try {
+    writeCache(
+      cachePath,
+      key,
+      {
+        summary:
+          fused.length > 0
+            ? `Fused ${fused.length} result(s) from ${enginesUsed.length} engine(s).`
+            : '',
+        items: fused as unknown as Array<Record<string, unknown>>,
+        storedAt: new Date().toISOString(),
+        engines: enginesUsed,
+        failures,
+      },
+      new Date(),
+      CACHE_ENTRY_CAP,
+    );
+    pruneCache(cachePath, new Date(), cacheTtl, CACHE_ENTRY_CAP);
+  } catch {
+    // The answer stands regardless; see above.
+  }
+
+  return buildFusedResult({
+    items: fused as unknown as Array<Record<string, unknown>>,
+    engines: enginesUsed,
+    failures,
+    skipped,
+    durationSeconds: (Date.now() - startedAt) / 1000,
+    fromCache: false,
+    query,
+  });
+}
+
+/**
+ * Assemble the entry a fused run answers with.
+ *
+ * One function so a cached replay and a fresh run cannot drift apart in
+ * wording; the only difference the caller sees is that a replay took no time.
+ */
+function buildFusedResult(input: {
+  items: Array<Record<string, unknown>>;
+  engines: string[];
+  failures: string[];
+  skipped: string[];
+  durationSeconds: number;
+  fromCache: boolean;
+  query?: string;
+}): SourceResult {
+  const { items, engines, failures, skipped, durationSeconds, fromCache, query } = input;
+  const multiSource = items.filter((item) => {
+    const found = item.foundIn;
+    return Array.isArray(found) && found.length > 1;
+  }).length;
+  const cacheNote = fromCache ? ' (served from a cached fusion)' : '';
   const summary =
-    fused.length > 0
-      ? `Fused ${fused.length} result(s) from ${enginesUsed.length} engine(s) (${enginesUsed.join(', ')}) for "${query}".${
-          multiSource > 0
-            ? ` ${multiSource} result(s) were returned by more than one engine.`
-            : ''
-        } Read items for the sources; each item's foundIn names the engines that returned it.`
+    items.length > 0
+      ? `Fused ${items.length} result(s) from ${engines.length} engine(s) (${engines.join(', ')})${query === undefined ? '' : ` for "${query}"`}.${
+          multiSource > 0 ? ` ${multiSource} result(s) were returned by more than one engine.` : ''
+        }${cacheNote} Read items for the sources; each item's foundIn names the engines that returned it.`
       : '';
 
   return {
     source: 'web',
     requestedSource: 'web',
-    engine: enginesUsed.join(','),
+    engine: engines.join(','),
     status: failures.length > 0 ? 'degraded' : 'ok',
     summary,
-    items: fused as unknown as Array<Record<string, unknown>>,
+    items,
     uncertainty: [...failures, ...skipped],
-    warnings:
-      fused.length === 0 ? ['No results were returned by any of the eligible engines.'] : [],
+    warnings: items.length === 0 ? ['No results were returned by any of the eligible engines.'] : [],
     attempts: [],
-    durationSeconds: (Date.now() - startedAt) / 1000,
+    durationSeconds,
   };
 }
 
