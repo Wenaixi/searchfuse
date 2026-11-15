@@ -15,31 +15,30 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-/** One cached fusion: what the caller would have received. */
+/** 一份缓存下来的融合结果：即调用方本会收到的东西。 */
 export interface CacheRecord {
   summary: string;
   items: unknown[];
   storedAt: string;
-  /** Engine names that contributed, for the diagnostics line. */
+  /** 参与贡献的引擎名，供诊断行使用。 */
   engines?: string[];
-  /** Failure lines the run carried, preserved so a replay says the same thing. */
+  /** 本次运行携带的失败信息，保留下来以便重放时说同样的话。 */
   failures?: string[];
 }
 
 export type CacheFile = Record<string, CacheRecord>;
 
-/** Default location, beside the config the rest of the tool reads. */
+/** 默认位置，放在工具其余部分所读配置的旁边。 */
 export function currentCachePath(): string {
   return path.join(os.homedir(), '.modsearch', 'cache.json');
 }
 
 /**
- * The key a result is filed under.
+ * 结果归入此处的键。
  *
- * The engine set is part of the key because the same query answered by a
- * different set of engines is a different answer — but its ORDER is not, since
- * that is routing rather than part of the question. Whitespace in the query is
- * normalized for the same reason.
+ * 引擎集合是键的一部分，因为同一个查询由不同引擎集合作答就是不同答案；
+ * 但引擎集合的顺序不是，因为那属于路由而非问题本身。查询里的空白字符
+ * 出于同样的理由被归一化。
  */
 export function cacheKey(input: {
   query: string;
@@ -89,10 +88,10 @@ function saveCacheFile(file: string, data: CacheFile): void {
 }
 
 /**
- * The fresh record for this key, or undefined.
+ * 该键对应的新鲜记录；没有则返回 undefined。
  *
- * `ttlMs` of 0 is the documented way to switch the cache off: it expires
- * everything immediately, so callers need no separate flag.
+ * `ttlMs` 传 0 是文档约定的关闭缓存方式：它会让所有条目立即过期，
+ * 调用方就不需要额外的开关标志。
  */
 export function readCache(
   file: string,
@@ -131,7 +130,7 @@ export function writeCache(
   saveCacheFile(file, data);
 }
 
-/** Drop expired entries, then keep only the newest `cap`. */
+/** 先丢弃过期条目，然后只保留最新的 `cap` 条。 */
 export function pruneCache(file: string, now: Date, ttlMs: number, cap?: number): void {
   const data = loadCacheFile(file);
   pruneInto(data, now, ttlMs, cap);

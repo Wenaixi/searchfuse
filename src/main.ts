@@ -26,10 +26,10 @@ if (process.env.MODSEARCH_NESTED) {
   process.exit(1);
 }
 
-/** How long a finished run may wait for abandoned work before it is ended. */
+/** 一次已结束的运行，在真正收尾前最多等多久让被遗弃的工作收场。 */
 const EXIT_BACKSTOP_MS = 2_000;
 
-/** Write and wait until the stream has taken it, so exiting cannot cut it short. */
+/** 写入并等到流确实收下，这样退出时不会把它截断。 */
 function writeFully(stream: NodeJS.WriteStream, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     stream.write(text, (error) => (error ? reject(error) : resolve()));
@@ -93,8 +93,8 @@ program
         throw new Error('Invalid --max-results. Use a positive integer.');
       }
 
-      // Load the config once so the cooldown controller reads the same switch
-      // the run does. Off returns no controller, and the run touches no state.
+      // 只加载一次配置，好让冷却控制器读到与本次运行同一个开关。
+      // 关掉时返回 no controller，运行也不碰任何状态。
       const config = loadConfigFile();
       const result = await runSearch({
         query: options.query,
@@ -105,8 +105,8 @@ program
         prompt: options.prompt,
         timeoutMs,
         deadlineMs,
-        // Count the deadline from process start, so Node startup and config
-        // loading come out of the budget the caller is holding.
+        // 从进程启动开始计算截止时间，这样 Node 启动与配置加载
+        // 都从调用方手里的那份预算里扣。
         deadlineStartedAt: performance.timeOrigin,
         maxResults,
         workdir: options.workdir,
@@ -134,12 +134,11 @@ program
       );
       exitCode = 1;
     }
-    // Wait for any pending SIGKILL so an engine that ignored SIGTERM is not
-    // orphaned, then let the event loop end the process. Exiting on the spot
-    // tore down fetch sockets mid-close, which aborts Node on Windows with a
-    // libuv assertion after the result was already written (#38). Work the
-    // run abandoned at its deadline (a DNS lookup the resolver has not
-    // answered) can still hold the loop, so an unref'd backstop ends it.
+    // 先等所有待决的 SIGKILL 落地，避免忽略 SIGTERM 的引擎变成孤儿进程，
+    // 然后让事件循环自己结束进程。当场直接 exit 会在 fetch socket
+    // 关闭途中拆掉它，Windows 上触发 libuv 断言崩溃——而那时结果已经写完了（#38）。
+    // 运行在截止时间处遗弃的工作（解析器还没应答的 DNS 查询）仍可能吊住事件循环，
+    // 所以用一个 unref 的兜底定时器把它结束掉。
     await waitForPendingKills();
     process.exitCode = exitCode;
     setTimeout(() => process.exit(exitCode), EXIT_BACKSTOP_MS).unref();
@@ -200,14 +199,14 @@ config
   .action(async (key: string, value: string | undefined) => {
     try {
       if (value === undefined) {
-        // Only keys may be prompted for: every other field is ordinary
-        // configuration, and omitting its value is a mistake worth naming.
+        // 只有密钥可以交互式询问：其余字段都是普通配置，
+        // 省略它的值属于值得点名的错误。
         if (!key.endsWith('.apiKey')) {
           throw new Error(`${key} needs a value: modsearch config set ${key} <value>`);
         }
-        // Validate the engine name BEFORE prompting: a typo must fail here,
-        // not after the user has typed their key in (or, on a pipe, after a
-        // line of someone's stdin has been consumed).
+        // 在提示之前先校验引擎名：拼写错误必须在这里就失败，
+        // 而不是等用户把密钥敲完以后（或者在管道上，等某人的标准输入
+        // 已经被吃掉一行之后）才发现。
         const parts = key.split('.').filter(Boolean);
         const engineName = parts[0] === 'engines' ? parts[1] : parts[0];
         if (!engineName || !findEngine(engineName)) {
@@ -255,5 +254,5 @@ state
     }
   });
 
-// parseAsync: the hidden-prompt path in `config set` awaits user input.
+// parseAsync：`config set` 里的隐藏提示路径需要等待用户输入。
 await program.parseAsync(process.argv, { from: 'node' });

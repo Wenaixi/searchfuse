@@ -70,8 +70,8 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
   try {
     data = JSON.parse(text) as SearxngResponse;
   } catch {
-    // An HTML page here means the instance ignored format=json and served the
-    // web UI, which is the same misconfiguration 403 reports outright.
+    // 这里出现 HTML 页面，说明实例忽略了 format=json、返回了网页界面，
+    // 这与直接报 403 的那种配置错误是同一回事。
     throw new Error(
       'searxng answered with something that is not JSON. The instance is probably serving HTML because format=json is not enabled in its settings.yml.',
     );
@@ -134,9 +134,9 @@ export const searxngProvider: SearchEngine = {
   roles: ['search'],
   requirement:
     'a SearXNG baseURL whose settings.yml enables format: json (public instances usually leave it off and answer 403)',
-  // No sensible default host exists, so an unconfigured entry must not claim
-  // availability: a chain runner would otherwise be parked and fail at call
-  // time with a configuration problem dressed up as a run-time one.
+  // 不存在一个靠谱的默认主机，所以未配置的条目绝不能声称自己可用：
+  // 否则链式调度器会被它占住，直到调用时才失败，把配置问题伪装成
+  // 运行期问题。
   isAvailable: (settings) => typeof settings.baseURL === 'string' && settings.baseURL.trim() !== '',
   execute: executeSearxngSearch,
 };

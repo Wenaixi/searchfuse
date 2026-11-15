@@ -30,7 +30,7 @@ export const MCP_OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** Flatten the text blocks of an MCP result into the text a model reads. */
+/** 把 MCP 结果的文本块摊平成模型读到的那段文本。 */
 export function extractText(content: unknown): string {
   if (!Array.isArray(content)) {
     return typeof content === 'string' ? content : '';
@@ -51,54 +51,53 @@ export function extractText(content: unknown): string {
 }
 
 export interface McpRegistration {
-  /** The tool name the model sees. */
+  /** 模型看到的工具名。 */
   name: string;
-  /** The server's own spelling, used for the actual call. */
+  /** 服务端自己的写法，实际调用时用它。 */
   rawName: string;
   serverKey: string;
 }
 
-/** What one server contributed, for the diagnostics surface. */
+/** 某个服务端贡献了什么，供诊断界面使用。 */
 export interface McpServerReport {
   serverKey: string;
   url: string;
   connected: boolean;
   tools: string[];
-  /** Why the server contributed nothing, when it did not. */
+  /** 该服务端为何什么都没贡献（当它确实没贡献时）。 */
   error?: string;
 }
 
 export interface RegisterMcpOptions {
-  /** Server key to config. Keys must already be known-good. */
+  /** 服务端键到配置的映射。键必须已是已知合法的。 */
   servers: Record<string, McpServerConfig>;
-  /** Per-server tool allow-list. Absent means every advertised tool. */
+  /** 每个服务端的工具白名单。缺省表示服务端公布的全部工具。 */
   allowTools?: Record<string, string[]>;
-  /** Override the derived tool name, keyed by `<serverKey>/<rawName>`. */
+  /** 覆盖推导出的工具名，键为 `<serverKey>/<rawName>`。 */
   toolNames?: Record<string, string>;
-  /** Names already taken by built-in tools; a collision is refused. */
+  /** 已被内置工具占用的名字；冲突会被拒绝。 */
   reservedNames?: readonly string[];
   logger?: (message: string) => void;
 }
 
-/** The reports, plus the two operations the caller must wire up. */
+/** 各服务端的报告，外加调用方必须接线的那两个操作。 */
 export interface McpRegistrationResult {
   reports: McpServerReport[];
-  /** Close every session this registration opened. Idempotent. */
+  /** 关闭本次注册打开的所有会话。幂等。 */
   closeAll: () => Promise<void>;
   /**
-   * Remove every tool this registration added. Separate from `closeAll` so
-   * a config change can drop the tools, then register again, without the
-   * caller reaching into host internals.
+   * 移除本次注册添加的所有工具。它与 `closeAll` 分开，是为了让配置变更
+   * 能先摘掉工具、再重新注册，而调用方无需伸手进宿主内部结构。
    */
   disposeTools: () => void;
 }
 
 /**
- * Register every enabled server's tools on the context.
+ * 把每个已启用服务端的工具注册到 context 上。
  *
- * Returns one report per server so the plugin can tell the user what happened
- * without a failed start. Numbers and wording are deliberately per-server:
- * "context7 needs a key" and "grep is not reachable" are different repairs.
+ * 每个服务端返回一份报告，这样插件能告诉用户发生了什么，而不必以启动失败
+ * 收场。数字与措辞刻意按服务端分开：「context7 需要密钥」和「grep 连不上」
+ * 是两种不同的修法。
  */
 export async function registerMcpServers(
   ctx: { tools: { register: (definition: unknown) => unknown } },
@@ -107,9 +106,9 @@ export async function registerMcpServers(
   const reserved = new Set(options.reservedNames ?? []);
   const claimed = new Set<string>(reserved);
   const reports: McpServerReport[] = [];
-  /** Connections kept open for the registered tools, closed by the caller. */
+  /** 为已注册的工具保持打开的连接，由调用方关闭。 */
   const keepAlive: Connection[] = [];
-  /** Undo functions for the tools registered this pass. */
+  /** 本轮注册的工具对应的撤销函数。 */
   const disposeTools_ = [] as Array<() => void>;
   let closed = false;
   const closeAll = async (): Promise<void> => {

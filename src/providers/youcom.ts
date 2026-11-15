@@ -1,15 +1,14 @@
-// You.com (https://you.com/docs). In-process fetch engine, search only, in the
-// same shape as keenable.ts. It calls the keyless agents endpoint, which You.com
-// caps at 100 searches a day per IP and which takes no key and no signup. The
-// keyed index endpoint is not wired in yet: its request shape could not be
-// verified without a key. Results are ranked pages with snippets and no
-// written answer, so the summary is mechanical.
+// You.com（https://you.com/docs）。进程内抓取引擎，只做搜索，形态与
+// keenable.ts 相同。它调用免密钥的 agents 端点，You.com 对此的限制是每个
+// IP 每天 100 次搜索，且不需要密钥、不需要注册。带密钥的 index 端点尚未
+// 接入：没有密钥就无法验证它的请求形状。结果是带摘要的排序页面，没有
+// 成文答案，所以 summary 是机械拼出来的。
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
 const DEFAULT_MAX_RESULTS = 10;
-/** The keyless endpoint answers a count above 50 with 402 Payment Required. */
+/** 免密钥端点对超过 50 的 count 回 402 Payment Required。 */
 const MAX_RESULTS_CEILING = 50;
 const YOUCOM_KEYLESS_ENDPOINT = 'https://api.you.com/v1/agents/search';
 
@@ -51,9 +50,8 @@ export async function executeYoucomSearch(options: EngineRequest): Promise<Engin
 
   if (!response.ok) {
     const detail = text.trim();
-    // The keyless pool is shared by everyone on this IP, so a 429 here is not
-    // about anything the user configured. It resets daily, and the next run
-    // simply fails over again, so it stays out of the quota cooldown.
+    // 免密钥池由这个 IP 上的所有人共用，所以这里的 429 跟用户配置了什么无关。
+    // 它每天重置，下一次运行换个引擎就是了，因此不计入配额冷却。
     if (response.status === 429) {
       throw new Error(
         "youcom's keyless allowance for this IP is used up for the day (100 searches). Search continues with the next engine.",
@@ -76,8 +74,7 @@ export async function executeYoucomSearch(options: EngineRequest): Promise<Engin
     } = {
       title: r.title ?? '',
       url: r.url ?? '',
-      // The first snippet is the excerpt matched to the query; the
-      // description is the page's own blurb.
+      // 第一条 snippet 是与查询匹配的摘录；description 则是页面自己的简介。
       snippet: r.snippets?.[0] || r.description || '',
       source: r.url ? safeHostname(r.url) : undefined,
     };

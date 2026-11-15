@@ -160,6 +160,7 @@ const SETTABLE_ENGINE_FIELDS: Array<keyof EngineSettings> = [
   'baseURL',
   'keylessFetch',
   'proxy',
+  'toolName',
 ];
 
 /** 过去被全局固定的引擎，映射到它们承担的角色。 */
@@ -505,6 +506,10 @@ export function setConfigValue(
   } else {
     const [rawEngineName, field] =
       parts[0] === 'engines' ? [parts[1], parts[2]] : [parts[0], parts[1]];
+    // `expose` 是唯一一个嵌套的引擎设置，所以它的键多一段：
+    // engines.<engine>.expose.aggregate / .tool。其余字段仍然只到第二段。
+    const nestedField =
+      field === 'expose' && parts[0] === 'engines' ? parts[3] : undefined;
     if (!rawEngineName || !field) {
       throw new Error(
         `Invalid config key: ${dottedKey}. Use "engine" or "engines.<engine>.<${SETTABLE_ENGINE_FIELDS.join('|')}>".`,
@@ -519,9 +524,12 @@ export function setConfigValue(
         `Unknown engine: ${rawEngineName}. Known engines: ${listEngines().join(', ')}.`,
       );
     }
-    if (!SETTABLE_ENGINE_FIELDS.includes(field as keyof EngineSettings)) {
+    // `expose` 刻意不在 SETTABLE_ENGINE_FIELDS 里：它是唯一一个嵌套设置，
+    // 需要一个额外的键段（.aggregate / .tool），白名单那条字符串直写路径
+    // 处理不了它。它由下面的专门分支接手。
+    if (field !== 'expose' && !SETTABLE_ENGINE_FIELDS.includes(field as keyof EngineSettings)) {
       throw new Error(
-        `Unknown engine setting: ${field}. Use ${SETTABLE_ENGINE_FIELDS.join(', ')}.`,
+        `Unknown engine setting: ${field}. Use ${SETTABLE_ENGINE_FIELDS.join(', ')}, or expose.aggregate / expose.tool.`,
       );
     }
     // 手工编辑的文件在这些位置可能放任何东西。拒绝展开一个非对象，
@@ -573,6 +581,29 @@ export function setConfigValue(
         );
       }
       value = trimmed;
+    }
+    if (field === 'expose') {
+      // 漏掉第三段就说明键写错了：`engines.x.expose` 本身没有值可设，
+      // 它是个容器。在这个层级上默默接受只会写进一个没人读的东西。
+      if (nestedField !== 'aggregate' && nestedField !== 'tool') {
+        throw new Error(
+          `Invalid config key: ${dottedKey}. Use "engines.<engine>.expose.aggregate" or "engines.<engine>.expose.tool".`,
+        );
+      }
+      const parsed = coerceBoolean(value);
+      if (parsed === undefined) {
+        throw new Error(`Invalid expose.${nestedField} value: ${value}. Use true or false.`);
+      }
+      config.engines ??= {};
+      config.engines[engineName] ??= {};
+      const existing = config.engines[engineName].expose;
+      const exposeBlock: { aggregate?: boolean; tool?: boolean } = isPlainObject(existing)
+        ? { ...existing }
+        : {};
+      exposeBlock[nestedField] = parsed;
+      config.engines[engineName].expose = exposeBlock;
+      writeConfigFile(config, configPath);
+      return;
     }
     if (field === 'proxy') {
       const trimmed = value.trim();
@@ -800,6 +831,21 @@ export function renderEffectiveConfig(
         continue;
       }
       target[field] = tag(shown(field, value, entryKeys), 'file');
+    }
+    // `expose` 是嵌套设置，白名单那个循环看不到它。一个引擎设了露出形态却
+    // 在 `config show` 里什么都不显示，等于让人无法确认自己刚写的配置。
+    if (isPlainObject(settings.expose)) {
+      const expose = settings.expose as { aggregate?: unknown; tool?: unknown };
+      const parts: string[] = [];
+      if (typeof expose.aggregate === 'boolean') {
+        parts.push(`aggregate=${expose.aggregate}`);
+      }
+      if (typeof expose.tool === 'boolean') {
+        parts.push(`tool=${expose.tool}`);
+      }
+      if (parts.length > 0) {
+        target.expose = tag(parts.join(', '), 'file');
+      }
     }
   }
 

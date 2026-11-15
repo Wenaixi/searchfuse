@@ -12,7 +12,7 @@ import { arxivProvider } from './arxiv.ts';
 
 export type RunMode = 'search' | 'fetch';
 
-/** Where evidence comes from. `web` is the public index, `x` is X/Twitter. */
+/** 证据来自哪里。`web` 是公开索引，`x` 是 X/Twitter。 */
 export type Source = 'web' | 'x';
 
 export interface ProviderInvocation {
@@ -22,10 +22,9 @@ export interface ProviderInvocation {
 }
 
 /**
- * One unit of work handed to an engine. Engine-specific knobs (binary paths,
- * API keys, network policy) are not fields here: each engine reads what it
- * needs from `settings`, which the config layer resolved from flags,
- * environment, and file.
+ * 交给引擎的一个工作单元。引擎专属的开关（二进制路径、API 密钥、
+ * 网络策略）不在这里：各引擎从 `settings` 里读自己需要的东西，
+ * 那是由配置层从命令行参数、环境变量和配置文件解析出来的。
  */
 export interface EngineRequest {
   mode: RunMode;
@@ -37,12 +36,12 @@ export interface EngineRequest {
   workdir?: string;
   timeoutMs: number;
   settings: EngineSettings;
-  /** All configured API keys, retained only so provider errors can redact every sibling key. */
+  /** 所有已配置的 API 密钥，保留它们只是为了让提供方错误能脱敏掉每一个同级密钥。 */
   apiKeySecrets?: readonly string[];
   /**
-   * Global network policy for this run: allow the local fetcher to reach
-   * reserved and private ranges. Firecrawl never receives those targets.
-   * Resolved from config and --allow-private-network. Off when absent.
+   * 本次运行的全局网络策略：允许本地抓取器访问保留网段和私有网段。
+   * Firecrawl 永远不会收到这类目标。由配置和 --allow-private-network 解析得出，
+   * 缺省即为关闭。
    */
   allowPrivateNetwork?: boolean;
 }
@@ -56,7 +55,7 @@ export interface EngineOutput {
   };
 }
 
-/** Everything an engine needs to explain a non-zero exit. */
+/** 引擎解释非零退出码所需的全部信息。 */
 export interface EngineFailureContext {
   stdout: string;
   stderr: string;
@@ -65,20 +64,20 @@ export interface EngineFailureContext {
 
 export interface SearchEngine {
   name: string;
-  /** Jobs this engine can do. */
+  /** 这个引擎能做的活儿。 */
   roles: Role[];
-  /** Model used when nothing else specifies one. Absent when it has no model. */
+  /** 其他地方都没指定时使用的模型。没有模型时缺省。 */
   defaultModel?: string;
-  /** Is this engine usable right now (installed, signed in, keyed)? */
+  /** 这个引擎现在可用吗（已安装、已登录、已配好密钥）？ */
   isAvailable: (settings: EngineSettings, env: NodeJS.ProcessEnv, role: Role) => boolean;
-  /** One line for humans: what this engine needs to become available. */
+  /** 给人类看的一行：这个引擎要变得可用还缺什么。 */
   requirement: string;
-  // Subprocess engines implement buildInvocation + parseOutput.
-  // In-process engines (tavily, http) implement execute instead.
+  // 子进程引擎实现 buildInvocation + parseOutput。
+  // 进程内引擎（tavily、http）改为实现 execute。
   buildInvocation?: (request: EngineRequest) => ProviderInvocation;
   parseOutput?: (stdout: string) => EngineOutput;
   execute?: (request: EngineRequest) => Promise<EngineOutput>;
-  /** Turn a non-zero exit into an actionable message, or null for the default. */
+  /** 把非零退出码转成可行动的消息；返回 null 表示用默认处理。 */
   describeFailure?: (context: EngineFailureContext) => string | null;
 }
 
@@ -95,8 +94,8 @@ const ENGINES: Record<string, SearchEngine> = {
   arxiv: arxivProvider,
   'grok-cli': grokCliProvider,
   grok: grokCliProvider,
-  // The built-in direct fetcher, canonically `local`. `http` and `direct` stay
-  // as aliases so old flags and configs keep resolving to it.
+  // 内置直连抓取器，规范名是 `local`。`http` 和 `direct` 保留为别名，
+  // 让旧的命令行参数与配置仍能解析到它。
   local: httpFetchProvider,
   http: httpFetchProvider,
   direct: httpFetchProvider,
@@ -153,14 +152,13 @@ export function resolveEngine(engineName: string): SearchEngine {
 }
 
 export function findEngine(engineName: string): SearchEngine | undefined {
-  // Own properties only: the registry is a plain object, and a bare index
-  // walks the prototype chain, so a name like "constructor" would come back
-  // as Object's constructor function and read as a truthy "engine".
+  // 只用自有属性：注册表是个普通对象，而裸下标会走原型链，于是像
+  // "constructor" 这样的名字会取到 Object 的构造函数，被当成真值的“引擎”。
   const key = engineName.trim().toLowerCase();
   return Object.hasOwn(ENGINES, key) ? ENGINES[key] : undefined;
 }
 
-/** Every registered engine, once each, in registration order. */
+/** 每个已注册的引擎，各出现一次，按注册顺序。 */
 export function allEngines(): SearchEngine[] {
   return [...new Set(Object.values(ENGINES))];
 }

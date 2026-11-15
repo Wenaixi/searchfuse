@@ -1,14 +1,12 @@
-// Firecrawl (https://docs.firecrawl.dev). One file, two roles: search and fetch.
-// Both talk to the Firecrawl v2 REST API directly with the built-in fetch and an
-// AbortController that cancels on timeout. Search maps ranked results in the
-// same shape as the other HTTP engines. Fetch is the point of this engine: it
-// runs a real browser in the cloud, so JavaScript-rendered pages come back with
-// content the local engine cannot see.
+// Firecrawl（https://docs.firecrawl.dev）。单个文件承担两个角色：搜索与抓取。
+// 两者都用内置的 fetch 和超时即取消的 AbortController，直接与 Firecrawl v2
+// REST API 通信。搜索把排名结果映射成与其他 HTTP 引擎相同的形状。抓取才是
+// 这个引擎存在的意义：它在云端运行真实浏览器，所以 JavaScript 渲染的页面
+// 能带回本地引擎看不到的内容。
 //
-// The fetch path validates the target with the network module first. Literal
-// private targets and hostnames proven private by the cloud-disclosure policy
-// are declined. An automatic chain can then try local. A forced run returns an
-// error. --allow-private-network authorizes local access, never cloud disclosure.
+// 抓取路径先用网络模块校验目标。字面量私网目标、被云披露策略判定为私网的
+// 主机名，一律拒绝。自动链路随后可以改试本地引擎；强制运行时直接返回错误。
+// --allow-private-network 只授权本地访问，永不授权云披露。
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
@@ -26,8 +24,8 @@ import { MAX_CONTENT_CHARS } from './limits.ts';
 const DEFAULT_LIMIT = 10;
 const FIRECRAWL_DEFAULT_BASE = 'https://api.firecrawl.dev';
 const MAX_LINKS = 20;
-// Firecrawl's documented timeout contract is 1000-300000 ms; clamp both ends
-// so a caller's tighter --timeout cannot produce a request Firecrawl rejects.
+// Firecrawl 文档规定的超时契约是 1000-300000 ms；两端都要夹取，
+// 免得调用方更紧的 --timeout 生成一个会被 Firecrawl 拒绝的请求。
 const TIMEOUT_CEILING_MS = 300_000;
 const TIMEOUT_FLOOR_MS = 1_000;
 
@@ -66,9 +64,9 @@ export async function executeFirecrawl(options: EngineRequest): Promise<EngineOu
 }
 
 /**
- * POST to the Firecrawl API and read the whole body under `signal`, so the
- * timeout covers the body as well as the headers. Non-2xx responses become
- * actionable errors here. Returns the parsed JSON of a 2xx response.
+ * 向 Firecrawl API 发 POST，并在 `signal` 下读完整个响应体，让超时同时覆盖
+ * 响应头和响应体。非 2xx 响应在这里转成可操作的错误。2xx 响应返回解析后的
+ * JSON。
  */
 async function firecrawlPost<T>(
   url: string,
@@ -79,9 +77,9 @@ async function firecrawlPost<T>(
   timeoutMs: number,
   proxyOverride: string | null | undefined,
 ): Promise<T> {
-  // No key means keyless mode: the endpoint accepts requests with no
-  // Authorization header under Firecrawl's free keyless allowance (1,000
-  // credits/month per their announcement, metered as per-IP daily caps).
+  // 无密钥即免密钥模式：按 Firecrawl 的免费免密钥额度（官方公告为每月
+  // 1,000 credits，按 IP 折算为每日上限），端点接受不带 Authorization 头的
+  // 请求。
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (apiKey) {
     headers.authorization = `Bearer ${apiKey}`;
@@ -99,7 +97,7 @@ async function firecrawlPost<T>(
   return JSON.parse(text) as T;
 }
 
-/** Turn a non-2xx API response into an actionable error, quota class included. */
+/** 把非 2xx 的 API 响应转成可操作的错误，包含配额类别。 */
 function ensureOk(
   response: Response,
   text: string,
@@ -109,14 +107,14 @@ function ensureOk(
   if (response.ok) {
     return;
   }
-  // The API's error body is foreign text that loves to echo the Authorization
-  // header; scrub it before it travels into messages.
+  // API 的错误响应体是外部文本，特别喜欢回显 Authorization 头；
+  // 在它进入消息之前先做脱敏。
   const detail = redactSecrets(text.trim(), apiKeySecrets);
   const message = `firecrawl returned ${response.status} ${response.statusText}.${detail ? ` ${detail}` : ''}`;
   if (response.status >= 500) {
     throw new Error(message);
   }
-  // A 402 or a credit/quota message is the quota class the cooldown layer reads.
+  // 402 或含 credit/quota 的消息，就是冷却层读取的配额类别。
   if (response.status === 402 || isQuotaFailureMessage(detail)) {
     throw new ApiKeyFailureError(
       `firecrawl is out of credits: ${detail || `HTTP ${response.status}`}. Add credit or set your own key at https://firecrawl.dev, or use another engine.`,
@@ -124,9 +122,9 @@ function ensureOk(
   }
   if (response.status === 401 || response.status === 403) {
     if (!apiKey) {
-      // Firecrawl turns anonymous calls away from IPs it reads as a VPN or a
-      // proxy, which a machine behind a corporate or Clash-style proxy always
-      // is. Waiting does not help there, so say what does.
+      // Firecrawl 会拒绝来自被它判定为 VPN 或代理的 IP 的匿名调用，而处在
+      // 企业代理或 Clash 类代理之后的机器永远落在这个判定里。等待在那里
+      // 没用，所以告诉用户什么有用。
       if (/VPN or proxy/i.test(detail)) {
         throw new Error(
           `firecrawl does not allow keyless use from a proxy or VPN exit IP. Set a free key: modsearch config set firecrawl.apiKey <key>, or use keenable or youcom. (${detail})`,
@@ -150,8 +148,8 @@ async function firecrawlSearch(options: EngineRequest): Promise<EngineOutput> {
   if (!options.query) {
     throw new Error('Search mode requires a query.');
   }
-  // Search runs keyless when no key is configured: Firecrawl's REST API
-  // accepts unauthenticated calls against the free keyless allowance.
+  // 未配置密钥时搜索走免密钥：Firecrawl 的 REST API 接受未认证调用，
+  // 消耗的是免费免密钥额度。
   const apiKeys = splitApiKeys(options.settings.apiKey);
   const apiKey = apiKeys[0] ?? null;
   const apiKeySecrets = [...new Set([...apiKeys, ...(options.apiKeySecrets ?? [])])];
@@ -210,13 +208,12 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
   const apiKey = apiKeys[0] ?? null;
   const apiKeySecrets = [...new Set([...apiKeys, ...(options.apiKeySecrets ?? [])])];
   const target = normalizeFetchUrl(options.url);
-  // One deadline for the DNS check, the request, and the body.
+  // DNS 校验、请求和响应体共用同一个截止时间。
   const deadline = AbortSignal.timeout(options.timeoutMs);
 
-  // A literal private target never leaves the machine. DNS-only classification
-  // is advisory for cloud disclosure: standard 198.18/15 proxy fake IPs count
-  // as public placeholders, and one real public answer makes the hostname
-  // public. --allow-private-network remains local-only and never bypasses this.
+  // 字面量私网目标绝不离开本机。仅基于 DNS 的分类对云披露只作参考：
+  // 标准 198.18/15 段的代理伪 IP 视为公网占位符，只要有一个真实公网答案，
+  // 该主机名即算公网。--allow-private-network 仅限本地，永不绕过这里。
   if (isLiteralReservedTarget(target)) {
     throw new Error(
       `firecrawl does not fetch the private or reserved target ${target.hostname}. Use the local engine instead.`,
@@ -248,12 +245,11 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
       url: target.toString(),
       formats: ['markdown', 'links'],
       onlyMainContent: true,
-      // Always scrape fresh, and leave nothing behind. maxAge: 0 only refuses
-      // to READ Firecrawl's multi-day cache (stale content is fatal for a tool
-      // whose whole point is current information); storeInCache: false keeps
-      // the scraped page from being WRITTEN into Firecrawl's cache and index,
-      // which its API defaults to doing. And skipTlsVerification defaults to
-      // true upstream, so certificate checks are explicitly switched back on.
+      // 始终现抓，不留痕迹。maxAge: 0 只是拒绝「读取」Firecrawl 的多天缓存
+      //（对一个全部意义在于取得即时信息的工具来说，过期内容是致命的）；
+      // storeInCache: false 阻止被抓的页面「写入」Firecrawl 的缓存和索引，
+      // 而上游 API 默认就会写。另外 skipTlsVerification 上游默认为 true，
+      // 这里显式把证书校验重新打开。
       maxAge: 0,
       storeInCache: false,
       skipTlsVerification: false,
@@ -270,8 +266,8 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
     throw new Error(`firecrawl fetched ${target.toString()} but the page returned ${statusCode}.`);
   }
 
-  // Cap the markdown at the same ceiling the local engine uses, so a huge page
-  // cannot flood a model's context no matter which fetch engine served it.
+  // 用与本地引擎相同的上限截断 markdown，这样无论哪个抓取引擎服务，
+  // 超大页面都无法把模型的上下文冲爆。
   const rawContent = data.data?.markdown ?? '';
   const truncated = rawContent.length > MAX_CONTENT_CHARS;
   const content = truncated ? rawContent.slice(0, MAX_CONTENT_CHARS) : rawContent;
@@ -281,8 +277,8 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
     metadata.description ||
     `${target.toString()} (Firecrawl scrape${typeof statusCode === 'number' ? `, ${statusCode}` : ''})`;
 
-  // A page that came back nearly empty from a real browser is genuine doubt
-  // about the evidence, so it stays in uncertainty.
+  // 真实浏览器抓回来的页面近乎空白，属于对证据的实实在在的疑问，
+  // 所以放进 uncertainty。
   const uncertainty: string[] = [];
   if (content.length < 200) {
     uncertainty.push(
@@ -316,11 +312,10 @@ async function firecrawlFetch(options: EngineRequest): Promise<EngineOutput> {
 }
 
 /**
- * The requested formats provide markdown, not HTML or hydration data. After
- * excluding headings, links with zero body text suggest a page skeleton whose
- * content did not render, regardless of language or site. One link is enough
- * because zero body text is already a strong condition. Genuinely sparse pages
- * usually have some body text without links, not links without body text.
+ * 请求的格式提供的是 markdown，而非 HTML 或水合数据。排除标题行之后，
+ * 正文为零的链接暗示页面只剩骨架、内容没有渲染出来，与语言和站点无关。
+ * 一个链接就足够，因为正文为零本身已是强条件。真正稀疏的页面通常有
+ * 一些不带链接的正文，而不是有链接却没有正文。
  */
 export function looksLikeClientRenderedShell(markdown: string): boolean {
   let linkCount = 0;
@@ -342,7 +337,7 @@ export function looksLikeClientRenderedShell(markdown: string): boolean {
   return linkCount >= 1;
 }
 
-/** Firecrawl returns links as bare URL strings; map them to the {text, url} shape. */
+/** Firecrawl 返回的链接是裸 URL 字符串；把它们映射成 {text, url} 形状。 */
 function normalizeLinks(raw: unknown): Array<{ text: string; url: string }> {
   if (!Array.isArray(raw)) {
     return [];
@@ -383,11 +378,10 @@ export const firecrawlProvider: SearchEngine = {
   roles: ['search', 'fetch'],
   requirement:
     'nothing: search and public-page fetch work keyless (free, no signup). Opt out of cloud fetch with firecrawl.keylessFetch false',
-  // Keyless fetch is on by default and switched off with an explicit
-  // `keylessFetch: false`. The check is strict on purpose: any malformed value
-  // (a hand-written string that config coercion did not normalize) counts as
-  // off, so a broken config fails closed to the local engine rather than
-  // sending URLs to the cloud on a guess. A configured key always enables it.
+  // 免密钥抓取默认开启，用显式 `keylessFetch: false` 关闭。这项检查刻意
+  // 严格：任何格式错误的值（配置归一化没能处理的手写字符串）都算作关闭，
+  // 这样损坏的配置会安全地回退到本地引擎，而不是凭猜测把 URL 发往云端。
+  // 已配置的密钥永远可以开启它。
   isAvailable: (settings, env, role) =>
     role === 'search' ||
     splitApiKeys(settings.apiKey).length > 0 ||

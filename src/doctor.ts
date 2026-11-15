@@ -1,8 +1,7 @@
-// `modsearch doctor`: diagnose configuration and routing on this machine
-// without spending quota or making a network request. It only looks at the
-// Node version, the config file, environment variables, whether engine
-// binaries are on PATH, and whether the Grok login file exists. Everything it
-// reports is a local fact, so it is safe to run anywhere, any number of times.
+// `modsearch doctor`：在本机诊断配置与路由，不消耗配额、不发起网络请求。
+// 它只看 Node 版本、配置文件、环境变量、引擎二进制是否在 PATH 上、以及
+// Grok 登录文件是否存在。它报告的一切都是本地事实，所以在任何机器上、
+// 运行任意多次都是安全的。
 import * as fs from 'fs';
 import {
   allowsPrivateNetwork,
@@ -26,40 +25,40 @@ import { enginesForRole, findEngine, ROLE_PREFERENCE, type SearchEngine } from '
 import { commandOnPath } from './system.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
 
-/** The Node floor this build promises. Kept in step with package.json engines. */
+/** 这个构建承诺的 Node 版本下限。与 package.json 的 engines 字段保持一致。 */
 export const MIN_NODE = '22.13.0';
 
 export interface EngineDiagnosis {
   engine: string;
-  /** Whether automatic routing is allowed to use this engine. */
+  /** 自动路由是否允许使用这个引擎。 */
   enabled: boolean;
   ready: boolean;
-  /** One line explaining the readiness verdict. */
+  /** 用一行解释就绪判定结果。 */
   reason: string;
-  /** A copyable command that would make it ready, when it is not. */
+  /** 尚未就绪时，一条可复制、能让它就绪的命令。 */
   fix?: string;
-  /** For keyed engines: where the key came from, or null when absent. */
+  /** 对于需要密钥的引擎：密钥来自何处，不存在时为 null。 */
   keySource?: 'env' | 'file' | null;
 }
 
 export interface RoleDiagnosis {
   role: Role;
-  /** Plain-language job name. */
+  /** 平实的职责名称。 */
   job: string;
-  /** The candidate engines for this role, in resolution order. */
+  /** 该角色的候选引擎，按解析顺序排列。 */
   candidates: EngineDiagnosis[];
-  /** The first enabled and ready candidate, or null when none qualifies. */
+  /** 第一个已启用且就绪的候选引擎，没有任何合格者时为 null。 */
   resolved: string | null;
 }
 
-/** One engine that is currently cooling, with how long is left. */
+/** 一个当前正在冷却的引擎，以及还剩多久。 */
 export interface CooldownDiagnosis {
   engine: string;
-  /** Zero-based API key index for per-key cooldowns. Absent on legacy engine cooldowns. */
+  /** 按密钥冷却时使用的从零开始的 API 密钥索引。旧式引擎级冷却没有这个字段。 */
   keyIndex?: number;
-  /** ISO time it may recover. */
+  /** 可能恢复的 ISO 时间。 */
   until: string;
-  /** Human remaining time, e.g. "1h 30m" or "45m". */
+  /** 人类可读的剩余时间，例如 "1h 30m" 或 "45m"。 */
   remaining: string;
   reason: string;
 }
@@ -67,32 +66,31 @@ export interface CooldownDiagnosis {
 export interface DoctorReport {
   node: { version: string; minimum: string; ok: boolean; fix?: string };
   engineChoice: {
-    /** The configured search engine, or null when automatic. */
+    /** 配置的搜索引擎，自动选择时为 null。 */
     value: string | null;
     source: 'file' | 'default';
-    /** Set when the configured name is not a known engine. */
+    /** 配置的名称不是已知引擎时设置。 */
     problem?: string;
   };
   configFile: {
     path: string;
     exists: boolean;
-    /** Octal permission string (e.g. "600") when the file exists. */
+    /** 文件存在时的八进制权限字符串（例如 "600"）。 */
     mode?: string;
     /**
-     * False when the file is group- or world-readable on a platform that
-     * enforces POSIX permissions. A missing file is fine (true): defaults
-     * leak nothing. Windows reports 666/777 for every file, so the judgment
-     * is skipped there rather than crying wolf.
+     * 在强制 POSIX 权限的平台上，文件可被同组或其他用户读取时为 false。
+     * 文件不存在也算正常（true）：默认值不泄露任何东西。Windows 对每个文件
+     * 都报 666/777，所以在那里跳过这项判定，而不是虚报狼来了。
      */
     permissionsOk: boolean;
-    /** The fix, when permissions are too open. */
+    /** 权限过于开放时的修复建议。 */
     note?: string;
     readable: boolean;
-    /** Set when the file exists but could not be read or parsed. */
+    /** 文件存在但无法读取或解析时设置。 */
     problem?: string;
   };
   allowPrivateNetwork: { enabled: boolean; source: 'file' | 'default' };
-  /** Quota cooldown: the switch state and every engine cooling right now. */
+  /** 配额冷却：开关状态，以及此刻正在冷却的每个引擎。 */
   cooldown: { enabled: boolean; statePath: string; engines: CooldownDiagnosis[] };
   roles: RoleDiagnosis[];
 }
@@ -100,12 +98,12 @@ export interface DoctorReport {
 export interface DoctorOptions {
   config?: ModsearchConfig;
   env?: NodeJS.ProcessEnv;
-  /** Defaults to the running Node version. Injectable for tests. */
+  /** 默认取运行中的 Node 版本。可注入以便测试。 */
   nodeVersion?: string;
   configPath?: string;
-  /** Cooldown state file. Injectable for tests. */
+  /** 冷却状态文件。可注入以便测试。 */
   statePath?: string;
-  /** Clock for remaining-time math. Injectable for tests. */
+  /** 用于计算剩余时间的时钟。可注入以便测试。 */
   now?: Date;
 }
 
@@ -134,7 +132,7 @@ function apiKeyPresentReason(count: number, source: 'env' | 'file'): string {
   return `API key present (${count} ${count === 1 ? 'key' : 'keys'}, from ${source})`;
 }
 
-/** Compare two dotted numeric versions. Returns negative, zero, or positive. */
+/** 比较两个点分数字版本号。返回负数、零或正数。 */
 function compareVersions(a: string, b: string): number {
   const pa = a
     .replace(/^v/, '')
@@ -153,7 +151,7 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Diagnose one engine: is it usable here, and if not, what fixes it. */
+/** 诊断单个引擎：它在本机能否使用，不能的话怎么修。 */
 function diagnoseEngine(
   engine: SearchEngine,
   config: ModsearchConfig,
@@ -245,10 +243,9 @@ function diagnoseEngine(
       config.engines?.firecrawl?.apiKey,
     );
     const configuredEngine = chosenEngine(config);
-    // Keyless fetch is on by default; only an explicit `keylessFetch: false`
-    // turns it off, and an explicit Firecrawl engine choice overrides even
-    // that (choosing the engine is consent). Mirrors firecrawlProvider and
-    // the router's unconditional add of the configured engine.
+    // 免密钥抓取默认开启；只有显式 `keylessFetch: false` 才会关闭，而显式
+    // 选择 Firecrawl 作为引擎可以覆盖它（选择引擎本身就是同意）。这里与
+    // firecrawlProvider 以及路由器无条件加入已配置引擎的行为保持一致。
     const keylessFetch =
       settings.keylessFetch === undefined ||
       settings.keylessFetch === true ||
@@ -297,7 +294,7 @@ function diagnoseEngine(
     };
   }
 
-  // the local engine and anything else that needs no setup.
+  // 本地引擎以及其他一切无需配置的东西。
   const ready = engine.isAvailable(settings, env, role);
   return {
     engine: engine.name,
@@ -307,7 +304,7 @@ function diagnoseEngine(
   };
 }
 
-/** The candidate engines for a role, in resolution order, deduplicated. */
+/** 某角色的候选引擎，按解析顺序排列，并已去重。 */
 function candidatesForRole(role: Role, config: ModsearchConfig): SearchEngine[] {
   const names: string[] = [];
   const configured = chosenEngine(config);
@@ -320,12 +317,10 @@ function candidatesForRole(role: Role, config: ModsearchConfig): SearchEngine[] 
   for (const name of ROLE_PREFERENCE[role]) {
     names.push(name);
   }
-  // Engines that can serve this role but are not in the default chain still
-  // get diagnosed. antigravity-cli is one: it synthesizes and takes a minute
-  // or more, so it is left out of automatic routing, but "is the agy binary
-  // installed and signed in" is exactly the kind of question doctor exists to
-  // answer. Without this line an engine the user can still force with
-  // --engine would silently vanish from the report.
+  // 能服务这个角色但不在默认链路里的引擎同样会得到诊断。antigravity-cli 就是
+  // 其中之一：它靠合成生成、要花上一分钟以上，所以被排除在自动路由之外，但
+  //「agy 二进制装没装、登没登录」恰恰是 doctor 存在的意义要回答的问题。没有
+  // 这段，用户仍可用 --engine 强制的引擎会从报告里悄悄消失。
   for (const engine of enginesForRole(role)) {
     if (!names.includes(engine.name)) {
       names.push(engine.name);
@@ -344,7 +339,7 @@ function candidatesForRole(role: Role, config: ModsearchConfig): SearchEngine[] 
   return engines;
 }
 
-/** The engines cooling right now, plus whether the switch is even on. */
+/** 此刻正在冷却的引擎，以及开关本身是否打开。 */
 function diagnoseCooldown(
   config: ModsearchConfig,
   statePath: string,
@@ -391,8 +386,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   const statePath = options.statePath ?? currentStatePath();
   const now = options.now ?? new Date();
 
-  // Read the config, but never let a broken file abort the diagnosis: a broken
-  // file is one of the things doctor exists to point at.
+  // 读取配置，但绝不让损坏的文件中断诊断：损坏的文件本身就是 doctor
+  // 存在要指出来的东西之一。
   let config: ModsearchConfig = options.config ?? {};
   let configProblem: string | undefined;
   const exists = fs.existsSync(configPath);
@@ -400,19 +395,19 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   let mode: string | undefined;
   let permissionsOk = true;
   if (options.config === undefined && exists) {
-    // Permissions first, parsing second: a broken file still holds its keys,
-    // so an unparseable 0644 config must still earn the chmod verdict.
+    // 先查权限，再解析：损坏的文件里照样有密钥，所以一份无法解析的 0644
+    // 配置仍必须拿到 chmod 的判定结论。
     try {
       const stat = fs.statSync(configPath);
       const bits = stat.mode & 0o777;
       mode = bits.toString(8).padStart(3, '0');
-      // Judge, don't just report: the file holds API keys. Windows reads back
-      // 666/777 for every file, so only platforms with real POSIX permissions
-      // (process.getuid exists) get the verdict.
+      // 要判定，而不只是报告：文件里存着 API 密钥。Windows 对每个文件都
+      // 回读 666/777，所以只有具备真实 POSIX 权限的平台（存在
+      // process.getuid）才给出判定。
       const enforcesPosixPerms = typeof process.getuid === 'function';
       permissionsOk = !enforcesPosixPerms || (bits & 0o077) === 0;
     } catch {
-      // stat failing is reported through the read path below
+      // stat 失败会通过下面的读取路径报告
     }
     try {
       config = loadConfigFile(configPath);
@@ -421,7 +416,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
       configProblem = error instanceof Error ? error.message : String(error);
     }
   } else if (options.config === undefined) {
-    readable = false; // no file is not "readable", it just means defaults
+    readable = false; // 没有文件不算「可读」，只意味着用默认值
   }
 
   const ok = compareVersions(nodeVersion, MIN_NODE) >= 0;
@@ -474,7 +469,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   };
 }
 
-/** Human-readable report. `--json` prints the object instead. */
+/** 人类可读的报告。`--json` 则直接打印对象。 */
 export function formatDoctorReport(report: DoctorReport): string {
   const lines: string[] = ['modsearch doctor', ''];
 

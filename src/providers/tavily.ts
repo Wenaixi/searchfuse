@@ -1,10 +1,9 @@
-// Community-contributed engine (thanks @mani2001, PR #1), ported to the
-// engine contract: schema-shaped result, no fabricated relevance score,
-// uncertainty as an array. Search mode only.
+// 社区贡献的引擎（感谢 @mani2001，PR #1），已按引擎契约改造：
+// 结果符合 schema 形状、不编造相关度评分、uncertainty 用数组表达。只支持搜索模式。
 //
 // 这里用内置 fetch 直接与 Tavily REST API 通信。
-// official @tavily/core SDK dragged in ~30 production dependencies (an axios
-// chain with known advisories) to wrap a single POST, so it is gone. See
+// 官方 @tavily/core SDK 为了包住一个 POST 请求，拖进了约 30 个生产依赖
+// （一条带已知安全公告的 axios 依赖链），所以已弃用。参考
 // https://docs.tavily.com/documentation/api-reference/endpoint/search
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import { redactSecrets } from '../util/redact.ts';
@@ -47,9 +46,8 @@ export async function executeTavilySearch(options: EngineRequest): Promise<Engin
   const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
   const startedAt = Date.now();
 
-  // Own the abort signal so a --timeout shorter than any server-side ceiling is
-  // enforced here, body included, and cancelling truly tears down the
-  // underlying request instead of leaving it running while we walk away.
+  // 自己持有 abort 信号，这样比任何服务端上限更短的 --timeout 都能在这里生效，
+  // 响应体也一并受控，取消时真正拆掉底层请求，而不是丢下它继续在后台跑。
   const { response, text } = await requestText(
     'tavily',
     resolveEndpoint(options.settings.baseURL, TAVILY_DEFAULT_BASE, '/search'),
@@ -73,19 +71,17 @@ export async function executeTavilySearch(options: EngineRequest): Promise<Engin
   );
 
   if (!response.ok) {
-    // The gateway's error body is foreign text that loves to echo the
-    // Authorization header; scrub it before it travels into messages.
+    // 网关的错误响应体是外部文本，很容易把 Authorization 头原样回显；
+    // 在它进入错误消息之前先做脱敏。
     const detail = redactSecrets(text.trim(), [...apiKeySecrets, options.settings.baseURL]);
     const message = `tavily returned ${response.status} ${response.statusText}.${detail ? ` ${detail}` : ''}`;
-    // Server failures are not evidence that the selected key is bad, even if
-    // an upstream error page happens to mention quota.
+    // 服务端故障不能作为「所选密钥有问题」的证据，哪怕上游错误页恰好提到了配额。
     if (response.status >= 500) {
       throw new Error(message);
     }
-    // Tavily returns 432 (plan usage cap) and 433 (PAYGO cap) for a spent monthly
-    // budget. Carry the status code into the message so the cooldown layer reads
-    // it as the monthly quota class and holds the engine for a day, not the
-    // 45-minute default, instead of re-hitting the same wall every run.
+    // 月度预算耗尽时 Tavily 返回 432（订阅额度触顶）和 433（按量付费触顶）。
+    // 把状态码带进消息，冷却层才能把它读作月度配额类、把引擎挂起一整天
+    // （而不是默认的 45 分钟），避免每轮都反复撞同一堵墙。
     if (response.status === 432 || response.status === 433) {
       throw new ApiKeyFailureError(
         `tavily is out of monthly quota (HTTP ${response.status}).${detail ? ` ${detail}` : ''} Add credit at https://app.tavily.com, or search with another engine.`,

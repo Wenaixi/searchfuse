@@ -37,30 +37,28 @@ export interface RunSearchOptions {
   /** Per-engine budget: each attempt gets this long. */
   timeoutMs?: number;
   /**
-   * Wall-clock budget for the whole run, counted from its start. Each attempt
-   * gets the smaller of `timeoutMs` and what is left, and an engine whose turn
-   * comes after the budget is spent is skipped. Absent means no run-wide cap,
-   * so a chain of N engines may take up to N times `timeoutMs`.
+   * 整次运行的墙钟预算，从运行开始算起。每次尝试拿到的是 `timeoutMs`
+   * 与剩余时间中较小的那个；轮到它时预算已经用完的引擎直接跳过。
+   * 缺省表示没有全轮上限，所以 N 个引擎的链最多可能花掉 N 倍的 `timeoutMs`。
    */
   deadlineMs?: number;
   /**
-   * Epoch milliseconds the deadline counts from. Defaults to the start of this
-   * run. The CLI passes its process start, so Node startup and config loading
-   * come out of the same budget the caller is holding.
+   * 截止时间从哪个纪元毫秒开始计算。默认从本次运行的起点算。
+   * CLI 传的是进程启动时刻，这样 Node 启动与配置加载都从调用方手里
+   * 那份预算里扣。
    */
   deadlineStartedAt?: number;
   maxResults?: number;
   workdir?: string;
-  /** One-off override for the local engine's private network guard. */
+  /** 针对本次运行、一次性覆盖本地引擎私网防护的开关。 */
   allowPrivateNetwork?: boolean;
-  /** Injected config, for tests. Loaded from ~/.modsearch/config.json otherwise. */
+  /** 注入的配置，测试用。否则从 ~/.modsearch/config.json 加载。 */
   config?: ModsearchConfig;
   env?: NodeJS.ProcessEnv;
   /**
-   * Quota cooldown for this run: orders the chain away from spent engines and
-   * records or clears their state as the run plays out. Absent means the
-   * cooldown is off (the switch, or a caller that does not use it), and routing
-   * is exactly as it was before cooldowns existed.
+   * 本次运行的配额冷却：让链避开已经耗尽的引擎，并在运行推进的过程中
+   * 记录或清除它们的状态。缺省表示冷却关闭（要么开关是关的，要么调用方
+   * 根本不使用它），路由行为与冷却机制出现之前完全一致。
    */
   cooldown?: CooldownController;
 }
@@ -111,19 +109,18 @@ export interface SourceResult {
   engine: string | null;
   model?: string;
   /**
-   * `ok`: served the requested source. `degraded`: a stand-in corpus answered
-   * (e.g. the web answering an X request, so it is second-hand). `unavailable`:
-   * nothing could serve the source, and `items` is empty.
+   * `ok`：按请求的语料库作答。`degraded`：由一个替代语料库作答
+   * （例如用网页应答一个 X 请求，所以是二手证据）。`unavailable`：
+   * 没有任何东西能服务这个来源，`items` 为空。
    */
   status: SourceStatus;
   /**
-   * Routing and runtime warnings for this source: an engine that failed and was
-   * replaced, a degrade to a stand-in corpus, a config typo, the local engine's
-   * "no synthesis" and "private network allowed" notices. These are about how
-   * the answer was produced, not about the facts in it.
+   * 这个来源的路由与运行期警告：某引擎失败并被替换、降级到替代语料库、
+   * 配置里的一处笔误、本地引擎的「不做合成」与「已允许私网」通告。
+   * 这些说的是答案**怎么来的**，不是答案里的事实。
    */
   warnings: string[];
-  /** Every engine tried for this source, in order, with per-try outcome. */
+  /** 这个来源试过的每个引擎，按顺序，附带每次尝试的结果。 */
   attempts: EngineAttempt[];
   durationSeconds: number | null;
   [resultField: string]: unknown;
@@ -286,22 +283,20 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
 }
 
 /**
- * The fused path: run every eligible search engine at once and merge their
- * lists by reciprocal rank.
+ * 融合路径：把所有合格搜索引擎一次性跑完，再按倒数排名把它们的列表融合起来。
  *
- * Eligibility is decided here rather than by the router, because the three
- * exclusions mean different things and the router only knows about one of
- * them:
+ * 资格判定放在这里而不是路由层，因为三条排除规则含义各不相同，
+ * 而路由层只认得其中一条：
  *
- * - `enabled: false` — the user turned this engine off.
- * - `expose.aggregate: false` — the engine is kept as a standalone tool only.
- * - cooling — its quota is spent, so calling it now would only fail. It is
- *   reported as skipped rather than failed: nothing broke.
+ * - `enabled: false` —— 用户把这个引擎关掉了。
+ * - `expose.aggregate: false` —— 这个引擎只保留为独立工具。
+ * - 冷却中 —— 它的配额已经用尽，现在调用只会失败。这种情况上报为
+ *   「跳过」而不是「失败」：没有任何东西坏掉。
  *
- * An explicit `--engine` pins the run to that one engine, which cannot be a
- * fusion by definition, so it returns undefined and the chain serves it.
- * Returning undefined whenever nothing qualifies lets the caller fall through
- * to the chain instead of answering with an empty result.
+ * 显式 `--engine` 把这次运行钉死在那一个引擎上，而按定义它不可能是一次融合，
+ * 所以这里返回 undefined，交给链式那条路去服务它。
+ * 只要没有任何引擎合格就返回 undefined，让调用方落回链式，
+ * 而不是用一个空结果作答。
  */
 async function runFused(
   config: ModsearchConfig,

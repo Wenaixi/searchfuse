@@ -1,10 +1,8 @@
-// Keenable（https://docs.keenable.ai）。进程内抓取引擎，只做搜索，
-// in the same shape as exa.ts. With no key it calls the keyless `/public`
-// twin of the endpoint, which Keenable caps at 1,000 requests an hour per IP
-// and which needs an `X-Keenable-Title` header naming the calling app. A key
-// moves the call to the authenticated path: no hourly cap, 100,000 free
-// requests a month per organization. Results are ranked pages with snippets
-// and no written answer, so the summary is mechanical.
+// 形态与 exa.ts 相同。没有密钥时调用该端点的免密钥 `/public` 孪生接口，
+// Keenable 对它按 IP 限制每小时 1,000 次请求，并且要求带上
+// `X-Keenable-Title` 头，声明调用方应用名。有密钥则改走认证路径：
+// 没有小时上限，每个组织每月 100,000 次免费请求。
+// 返回结果是带摘要的排序页面，不含成文答案，所以摘要只是机械拼接。
 import { ApiKeyFailureError, isQuotaFailureMessage, splitApiKeys } from '../util/apiKeys.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
@@ -13,10 +11,10 @@ import { resolveEndpoint } from './endpoint.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
 const DEFAULT_MAX_RESULTS = 10;
-/** Keenable rejects max_results outside 1-50. */
+/** Keenable 只接受 1-50 范围内的 max_results。 */
 const MAX_RESULTS_CEILING = 50;
 const KEENABLE_DEFAULT_BASE = 'https://api.keenable.ai';
-/** Required on keyless calls: how Keenable attributes anonymous traffic. */
+/** 免密钥调用必填：Keenable 用它归属匿名流量。 */
 const APP_TITLE = 'modsearch';
 
 interface KeenableResult {
@@ -71,24 +69,21 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
   );
 
   if (!response.ok) {
-    // The gateway's error body is foreign text; scrub it before it travels
-    // into messages.
+    // 网关的错误响应体是外部文本；在它进入错误消息之前先做脱敏。
     const detail = redactSecrets(text.trim(), [...apiKeySecrets, options.settings.baseURL]);
     const message = `keenable returned ${response.status} ${response.statusText}.${detail ? ` ${detail}` : ''}`;
     if (response.status >= 500) {
       throw new Error(message);
     }
     if (!apiKey) {
-      // The keyless pool is shared by everyone on this IP, so a 429 here is
-      // not about anything the user configured.
+      // 免密钥池由该 IP 上的所有人共用，所以这里的 429 与用户自己的配置无关。
       throw new Error(
         response.status === 429
           ? `keenable's keyless pool for this IP is used up for the hour (1,000 requests). Set a free key for your own quota: modsearch config set keenable.apiKey <key> (100,000 requests/month, https://app.keenable.ai)`
           : message,
       );
     }
-    // 402 is the spent monthly allowance: the quota class the cooldown layer
-    // holds for a day rather than re-hitting.
+    // 402 表示月度配额度已耗尽：这属于让冷却层挂起一整天的配额类，而不是反复去撞。
     if (response.status === 402 || isQuotaFailureMessage(detail)) {
       throw new ApiKeyFailureError(
         `keenable is out of credits (HTTP ${response.status}).${detail ? ` ${detail}` : ''} Buy credits at https://app.keenable.ai/console, wait for the monthly reset, or search with another engine.`,
@@ -116,7 +111,7 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
     } = {
       title: r.title ?? '',
       url: r.url ?? '',
-      // The snippet is the page excerpt; the description is often empty.
+      // snippet 是页面摘录；description 经常为空。
       snippet: r.snippet || r.description || '',
       source: r.url ? safeHostname(r.url) : undefined,
     };
@@ -161,8 +156,8 @@ export const keenableProvider: SearchEngine = {
   roles: ['search'],
   requirement:
     'nothing: search works keyless (1,000 requests/hour per IP, no signup). A free key lifts the hourly cap (100,000 requests/month)',
-  // Keyless search needs nothing, so it is always available. A key only
-  // changes which endpoint the call goes to.
+  // 免密钥搜索什么都不需要，所以它永远可用。密钥只会改变
+  // 这次调用打到哪个端点。
   isAvailable: () => true,
   execute: executeKeenableSearch,
 };

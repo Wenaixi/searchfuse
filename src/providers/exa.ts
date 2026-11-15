@@ -1,9 +1,7 @@
 // Exa 搜索（https://docs.exa.ai）。进程内抓取引擎，只做搜索，
-// the same shape as tavily.ts: one POST with the built-in fetch, an
-// AbortController that genuinely cancels on timeout, and no fabricated relevance
-// score. Exa returns ranked links with highlight snippets but writes no answer,
-// so the summary here is mechanical and a warning tells the reader to work from
-// items directly.
+// 形态与 tavily.ts 相同：用内置 fetch 发一个 POST，AbortController 在超时时真正取消请求，
+// 不编造相关度评分。Exa 返回带高亮摘要的排序链接，但不写成文答案，
+// 所以这里的摘要只是机械拼接，并附一条警告，提示读者直接从 items 取证据。
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -24,7 +22,7 @@ interface ExaResult {
 
 interface ExaResponse {
   results?: ExaResult[];
-  /** Total dollar cost of this call, useful only as a diagnostic. */
+  /** 本次调用的美元总花费，仅用于诊断。 */
   costDollars?: { total?: number };
 }
 
@@ -48,8 +46,8 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
   const numResults = options.maxResults ?? DEFAULT_NUM_RESULTS;
   const startedAt = Date.now();
 
-  // Own the abort signal so a --timeout shorter than any server-side ceiling is
-  // enforced here, body included, and cancelling truly tears down the request.
+  // 自己持有 abort 信号，这样比任何服务端上限更短的 --timeout 都能在这里生效，
+  // 响应体也一并受控，取消时请求真正被拆掉。
   const { response, text } = await requestText(
     'exa',
     resolveEndpoint(options.settings.baseURL, EXA_DEFAULT_BASE, '/search'),
@@ -72,17 +70,17 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
   );
 
   if (!response.ok) {
-    // The gateway's error body is foreign text that loves to echo the
-    // Authorization header; scrub it before it travels into messages.
+    // 网关的错误响应体是外部文本，很容易把 Authorization 头原样回显；
+    // 在它进入错误消息之前先做脱敏。
     const detail = redactSecrets(text.trim(), [...apiKeySecrets, options.settings.baseURL]);
     if (response.status >= 500) {
       throw new Error(
         `exa returned ${response.status} ${response.statusText}.${detail ? ` ${detail}` : ''}`,
       );
     }
-    // A spent balance is a quota error, not a broken key: judge by the response
-    // text first, since Exa can return it under several status codes. The
-    // cooldown layer reads this wording to recognize the quota class.
+    // 余额耗尽属于配额错误，不是密钥损坏：先看响应文本判断，
+    // 因为 Exa 可能在多个状态码下返回同一种情况。
+    // 冷却层靠这段措辞识别配额类错误。
     if (isQuotaFailureMessage(detail)) {
       throw new ApiKeyFailureError(
         `exa is out of credits: ${detail || `HTTP ${response.status}`}. Add credit at https://exa.ai, or search with another engine.`,
@@ -113,7 +111,7 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
       snippet: r.highlights?.[0] ?? '',
       source: r.url ? safeHostname(r.url) : undefined,
     };
-    // Defensive: only carry a date when Exa actually returned one.
+    // 防御性处理：只有 Exa 真的返回了日期才带上。
     if (r.publishedDate) {
       item.published_at = r.publishedDate;
     }
@@ -129,8 +127,8 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
     summary,
     items,
     uncertainty: items.length === 0 ? ['No results found for this query.'] : [],
-    // Exa ranks and links but writes no synthesis, so the summary above is
-    // mechanical. Same shape as the local engine's "read it yourself" notice.
+    // Exa 只排序和给链接，不写综述，所以上面的 summary 是机械拼接的。
+    // 形式与本地引擎的「自己读结果」提示相同。
     warnings: [
       'Exa returns ranked results without an LLM summary, so the summary is mechanical: read items directly for the evidence.',
     ],

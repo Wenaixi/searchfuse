@@ -51,8 +51,7 @@ export function isServerNameValid(name: string): boolean {
 }
 
 /**
- * `mcp__<server>__<tool>`, folded to the character set the host accepts and
- * shortened with a stable hash when it would exceed the name budget.
+ * `mcp__<server>__<tool>`，折叠到宿主接受的字符集，超长时用稳定的哈希缩短。
  */
 export function publicToolName(serverName: string, rawName: string): string {
   const joined = `mcp__${serverName}__${rawName}`;
@@ -71,13 +70,11 @@ export function publicToolName(serverName: string, rawName: string): string {
 }
 
 /**
- * Read the JSON-RPC messages out of an SSE body.
+ * 从 SSE 响应体里读出 JSON-RPC 消息。
  *
- * Comment lines (`:`) are keep-alives, blank lines separate events, and a
- * `data:` payload may be split across several lines. Anything that does not
- * parse as JSON is skipped rather than fatal: a server is allowed to emit
- * event types this client does not model, and one stray frame must not lose
- * the real answer behind it.
+ * 注释行（`:`）是保活，空行分隔事件，而 `data:` 载荷可能拆成好几行。
+ * 解析不了 JSON 的内容直接跳过，而不是当作致命错误：服务端有权发出
+ * 本客户端不认识的事件类型，一帧跑偏不能把后面真正的答案弄丢。
  */
 export function parseSseMessages(body: string): JsonRpcMessage[] {
   const messages: JsonRpcMessage[] = [];
@@ -109,11 +106,10 @@ export class McpProtocolError extends Error {
 }
 
 /**
- * One server connection.
+ * 一条服务端连接。
  *
- * Not shared between runs: an MCP server may be stateless, and holding a
- * socket open buys nothing for a search engine that already fans out
- * concurrent requests.
+ * 不在多次运行之间共享：MCP 服务端可能是无状态的，而对一个本就并发扇出
+ * 请求的搜索引擎来说，占着一只 socket 不关也换不来任何好处。
  */
 export class McpConnection {
   private sessionId: string | undefined;
@@ -148,12 +144,11 @@ export class McpConnection {
   }
 
   /**
-   * One JSON-RPC request. Returns the matching response message.
+   * 一次 JSON-RPC 请求。返回与之匹配的响应消息。
    *
-   * A 404 is the protocol's way of saying the session is gone, so it triggers
-   * one fresh handshake and one retry. Nothing else is retried: a 401 or a
-   * malformed answer means the server rejected the call, and repeating it
-   * would just fail again.
+   * 404 是协议表达「会话已没了」的方式，所以它会触发一次重新握手加一次重试。
+   * 其他情况一律不重试：401 或格式不对的响应意味着服务端拒绝了这次调用，
+   * 重复一遍只会再失败一次。
    */
   private async request(
     body: Record<string, unknown>,
@@ -218,7 +213,7 @@ export class McpConnection {
     });
   }
 
-  /** initialize, then notifications/initialized. Idempotent within a run. */
+  /** 先 initialize，再 notifications/initialized。单次运行内幂等。 */
   async handshake(): Promise<void> {
     if (this.initialized) {
       return;
@@ -266,7 +261,7 @@ export class McpConnection {
           this.protocolVersion = version;
         }
       } catch {
-        /* the notification below is what the server actually needs */
+        /* 真正对服务端有用的是下面那条通知 */
       }
     }
 
@@ -316,7 +311,7 @@ export class McpConnection {
     return response.result;
   }
 
-  /** Explicit teardown. A 405 means the server keeps sessions to itself. */
+  /** 显式拆除。405 意味着服务端把会话留给自己管。 */
   async close(): Promise<void> {
     if (!this.sessionId) {
       return;

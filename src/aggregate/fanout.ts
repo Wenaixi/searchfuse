@@ -1,5 +1,5 @@
 import type { EngineRequest, SearchEngine } from '../providers/index.ts';
-import { rrfFuse, type RankedList } from './rrf.ts';
+import type { RankedList } from './rrf.ts';
 
 /** 一个要运行的引擎，配置与纳入规则都已经解析好。 */
 export interface FanoutTarget {
@@ -110,9 +110,3 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
   return { outputs, failures, skipped };
 }
 
-/** 把 fanout 收集到的各引擎列表融合成一个排序列表。 */
-export function fuse<T extends { url?: string; snippet?: string }>(
-  outputs: RankedList<T>[],
-): Array<T & { score: number; foundIn: string[] }> {
-  return rrfFuse(outputs);
-}

@@ -4,21 +4,18 @@ import { resolveProxyForUrl } from './proxy.ts';
 import { redactSecrets } from './redact.ts';
 
 /**
- * One HTTP request to an engine API with its whole body read under a single
- * deadline. The signal stays armed until the body is in memory: aborting only
- * up to the response headers let a server that streams the body slowly hold
- * the run past its timeout.
+ * 对引擎 API 的一次 HTTP 请求，整个响应体的读取都在同一个截止时间内完成。
+ * 信号会一直武装到响应体进入内存为止：只在等到响应头之前就中断，会让一个
+ * 慢慢吐响应体的服务端把整轮运行拖过它的超时。
  *
- * A timeout reads `<label> timed out after <ms> ms.`, which the cooldown layer
- * treats as transient. Any other transport failure reads `<label> request
- * failed: ...` with the cause attached and the secrets scrubbed. An error
- * response whose body cannot be read comes back with empty text, so the caller
- * still reports the status.
+ * 超时读作 `<label> timed out after <ms> ms.`，冷却层会把它视为瞬时故障。
+ * 其他传输失败读作 `<label> request failed: ...`，附带原因且密钥已脱敏。
+ * 错误响应如果响应体读不出来，会带着空文本返回，调用方仍能报告状态码。
  *
- * The call honors http_proxy / https_proxy / no_proxy the same way the local
- * page fetch does. Node's fetch ignores them unless NODE_USE_ENV_PROXY is set,
- * and a harness that spawns this CLI rarely sets it, so on a machine whose
- * only way out is a proxy every engine failed while page fetches worked.
+ * 这个调用对 http_proxy / https_proxy / no_proxy 的处理与本地页面抓取一致。
+ * Node 的 fetch 只有在设置了 NODE_USE_ENV_PROXY 时才会理会它们，而启动本 CLI
+ * 的宿主很少设置它，所以在一条只能走代理出网的机器上，会出现所有引擎都失败、
+ * 而页面抓取却正常的情况。
  */
 export async function requestText(
   label: string,
@@ -28,9 +25,9 @@ export async function requestText(
   timeoutMs: number,
   secrets: ReadonlyArray<string | undefined | null>,
   /**
-   * Per-engine proxy override, resolved by `resolveExplicitProxy`: `undefined`
-   * follows the machine's proxy variables, `null` forces a direct connection,
-   * a string is the proxy to use. Absent keeps the pre-existing behavior.
+   * 单引擎的代理覆盖，由 `resolveExplicitProxy` 解析：`undefined`
+   * 表示沿用本机的代理环境变量，`null` 表示强制直连，字符串则是要使用的
+   * 代理。缺省时保持原有行为。
    */
   explicitProxy?: string | null,
 ): Promise<{ response: Response; text: string }> {

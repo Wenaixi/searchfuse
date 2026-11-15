@@ -1,16 +1,12 @@
-// arXiv search through the export API
-// (http://export.arxiv.org/api/query). In-process search engine, search
-// only, in the same shape as the other API engines.
+// 通过 export API（http://export.arxiv.org/api/query）搜索 arXiv。
+// 进程内搜索引擎，只做搜索，形态与其他 API 引擎相同。
 //
-// No key. The service asks for roughly one request every three seconds and
-// says so; a search chain spends far less than that, and the request timeout
-// is what keeps a slow response from holding the run.
+// 不需要密钥。服务方自己说了大约每三秒一次请求；一条搜索链花得远少于这个
+// 频率，而请求超时才是防止慢响应拖住整轮运行的东西。
 //
-// The response is Atom XML. It is read with a narrow regular expression rather
-// than an XML parser: the document is small and regular, four fields are
-// wanted, and adding a parser dependency for that is not a trade worth making.
-// The failure mode of this approach is a missing field, not a wrong one, and
-// every field is validated below.
+// 响应是 Atom XML。这里用一条很窄的正则读取，而不是 XML 解析器：文档小且
+// 规整，只需要四个字段，为它引入一个解析器依赖不划算。这种做法失败的表现
+// 是字段缺失，而不是字段读错，且下面每个字段都做了校验。
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -27,7 +23,7 @@ interface ArxivEntry {
   published?: string;
 }
 
-/** Atom wraps its text; the API indents titles and abstracts across lines. */
+/** Atom 会折行包裹文本；API 也把标题和摘要按行缩进。 */
 function collapse(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -41,10 +37,10 @@ function decodeEntities(text: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/** Pull the four fields out of each `<entry>` block. */
+/** 从每个 `<entry>` 块里取出那四个字段。 */
 function parseEntries(body: string): ArxivEntry[] {
   const entries: ArxivEntry[] = [];
-  // Non-greedy so adjacent entries do not swallow one another.
+  // 非贪婪匹配，这样相邻条目不会吞掉彼此。
   for (const match of body.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
     const block = match[1] ?? '';
     const title = block.match(/<title>([\s\S]*?)<\/title>/)?.[1];
@@ -87,7 +83,7 @@ export async function executeArxivSearch(options: EngineRequest): Promise<Engine
   const startedAt = Date.now();
   const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
   const url = new URL(ARXIV_API);
-  // `all:` searches every field; a bare term would be read as a field name.
+  // `all:` 会搜索所有字段；裸词元会被当成字段名来解析。
   url.searchParams.set('search_query', `all:${options.query}`);
   url.searchParams.set('start', '0');
   url.searchParams.set('max_results', String(Math.min(maxResults, 50)));
@@ -121,8 +117,7 @@ export async function executeArxivSearch(options: EngineRequest): Promise<Engine
       } = {
         title: entry.title,
         url: entry.url,
-        // Authors first: on a paper the byline is what tells the model whose
-        // work it is reading.
+        // 作者放前面：对一篇论文来说，署名行才是告诉模型它在读谁的作品的东西。
         snippet:
           entry.authors.length > 0
             ? `${entry.authors.join(', ')}${entry.summary ? ` — ${entry.summary}` : ''}`
