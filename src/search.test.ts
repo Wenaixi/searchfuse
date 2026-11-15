@@ -95,7 +95,12 @@ describe('zero-config machine', () => {
     try {
       await expect(
         runSearch({ query: 'anything', config: {}, env: BARE_ENV, timeoutMs: 5_000 }),
-      ).rejects.toThrow(/Every engine for the web source failed/);
+        // The fused path reports a total failure in its own words and does
+        // not hand the run back to the chain, because the chain would query
+        // the same engines again for the same failure and spend the quota
+        // twice. Its message names each source and its reason, same as the
+        // chain's did.
+      ).rejects.toThrow(/Every engine failed or was skipped/);
     } finally {
       vi.unstubAllGlobals();
     }

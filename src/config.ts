@@ -103,15 +103,13 @@ export interface EngineSettings {
 }
 
 export interface ModsearchConfig {
-  /** Engine for searching. Empty means: use the best one available here. */
+  /** 用于搜索的引擎。空表示使用本机可用的最佳引擎。 */
   engine?: string;
   engines?: Record<string, EngineSettings>;
   /**
-   * How several sources combine. `rrf` (the default) runs the eligible engines
-   * concurrently and fuses their lists by reciprocal rank, so agreement
-   * between independent engines outranks one engine's own favourite. `chain`
-   * keeps the original behavior: try one engine at a time and stop at the
-   * first that answers.
+   * 多个来源如何组合。`rrf`（默认值）并发运行符合条件的引擎，按倒数排名融合
+   * 它们的列表，于是多个独立引擎一致认可的结果会压过单个引擎自己的偏好。
+   * `chain` 保留原有行为：一次试一个引擎，在第一个给出答案的引擎处停下。
    */
   aggregate?: AggregateConfig;
   /**
@@ -121,20 +119,18 @@ export interface ModsearchConfig {
    */
   mcp?: Record<string, Record<string, unknown>>;
   /**
-   * Quota cooldown switch: 'on' (default) or 'off'. On, a quota-spent engine is
-   * remembered and moved to the back of the fallback chain until it recovers.
-   * Off, nothing is read from or written to state.json and routing is unchanged.
+   * 配额冷却开关：'on'（默认）或 'off'。开启时，配额用尽的引擎会被记住并
+   * 移到回退链的末尾，直到它恢复。关闭时，既不读也不写 state.json，路由行为不变。
    */
   cooldown?: string;
   /**
-   * Global network policy, not an engine setting: allow reserved and private
-   * address ranges in the local fetcher. It never authorizes sending a target
-   * that is, or resolves to, a reserved address to Firecrawl. Off by default.
+   * 全局网络策略，不是引擎设置：允许本地抓取器访问保留地址与私有地址段。
+   * 它从不授权把保留地址（或解析到保留地址的目标）发给 Firecrawl。默认关闭。
    */
   allowPrivateNetwork?: boolean;
 }
 
-/** Shapes older configs used before role preferences collapsed to one field. */
+/** 角色偏好收敛成单个字段之前，旧配置使用的形状。 */
 interface LegacyRoleConfig {
   engine?: string;
 }
@@ -142,7 +138,7 @@ interface LegacyRoleConfig {
 export const CONFIG_DIR = path.join(os.homedir(), '.modsearch');
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
-/** Resolved at call time so a faked HOME (tests) redirects the config too. */
+/** 在调用时才解析，这样伪造的 HOME（测试用）也会把配置重定向过去。 */
 export function currentConfigPath(): string {
   return path.join(os.homedir(), '.modsearch', 'config.json');
 }
@@ -166,7 +162,7 @@ const SETTABLE_ENGINE_FIELDS: Array<keyof EngineSettings> = [
   'proxy',
 ];
 
-/** Engines that used to be pinned globally, mapped to the role they serve. */
+/** 过去被全局固定的引擎，映射到它们承担的角色。 */
 const LEGACY_ENGINE_ROLES: Record<string, Role> = {
   'antigravity-cli': 'search',
   antigravity: 'search',
@@ -178,7 +174,7 @@ const LEGACY_ENGINE_ROLES: Record<string, Role> = {
   direct: 'fetch',
 };
 
-/** Aliases the registry accepts, mapped to the name settings are stored under. */
+/** 注册表接受的别名，映射到设置实际存储时使用的名称。 */
 const CANONICAL_ENGINE: Record<string, string> = {
   antigravity: 'antigravity-cli',
   agy: 'antigravity-cli',
@@ -188,33 +184,32 @@ const CANONICAL_ENGINE: Record<string, string> = {
 };
 
 /**
- * The canonical name for an engine, folding aliases (agy, http, direct, ...).
- * Own properties only: the aliases table is a plain object, and a bare index
- * walks the prototype chain, so "constructor" resolved to Object's constructor
- * function, read as truthy, and a `config set constructor.apiKey` wrote the
- * key onto that global, printed success, and saved nothing.
+ * 引擎的规范名，把别名（agy、http、direct 等）折叠进来。
+ * 只查自有属性：别名表是个普通对象，裸下标会走原型链，于是 "constructor"
+ * 解析成 Object 的构造函数、被当成真值，`config set constructor.apiKey`
+ * 就把 key 写到了那个全局对象上，还打印了成功，实际上什么都没保存。
  */
 export function canonicalEngineName(name: string): string {
   const trimmed = name.trim().toLowerCase();
   return Object.hasOwn(CANONICAL_ENGINE, trimmed) ? CANONICAL_ENGINE[trimmed] : trimmed;
 }
 
-/** JSON-parsed objects only: null, arrays, and prototype residents are not settings. */
+/** 只认 JSON 解析出来的对象：null、数组以及原型链上的居民都不算设置。 */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 interface LegacyConfig {
-  /** v2: one global provider name. */
+  /** v2：一个全局提供方名称。 */
   provider?: string;
   providers?: Record<string, EngineSettings>;
-  /** v3.0-3.1: one engine per role. */
+  /** v3.0-3.1：每个角色一个引擎。 */
   search?: LegacyRoleConfig;
   fetch?: LegacyRoleConfig;
   social?: LegacyRoleConfig;
 }
 
-/** 'true'/'false' (any case) or a real boolean to a boolean, else undefined. */
+/** 把 'true'/'false'（大小写任意）或真正的布尔值转成布尔值，其余一律返回 undefined。 */
 export function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') {
     return value;
@@ -232,23 +227,22 @@ export function coerceBoolean(value: unknown): boolean | undefined {
 }
 
 /**
- * Read a config file into the current shape. Two migrations run here, always,
- * so an older file keeps working without the user touching it:
+ * 把配置文件读成当前的形状。这里始终会跑两项迁移，
+ * 所以旧文件无需用户动手就能继续工作：
  *
- * - Alias engine keys (agy, antigravity, grok, http, direct) fold onto their
- *   canonical name, and configs written before roles existed (a global
- *   `provider` plus a `providers` map, or a per-role search/fetch/social block)
- *   collapse to the top-level `engine` preference.
- * - `allowPrivateNetwork` moved from a per-engine string to a top-level boolean.
- *   The old `engines.<name>.allowPrivateNetwork` position and the old `"true"`/
- *   `"false"` string form are both read and promoted to the new top-level key.
+ * - 别名的引擎键（agy、antigravity、grok、http、direct）折叠到各自的
+ *   规范名，而在角色出现之前写下的配置（一个全局 `provider` 加一个 `providers`
+ *   映射，或按角色的 search/fetch/social 段）会收敛为顶层的 `engine` 偏好。
+ * - `allowPrivateNetwork` 从单引擎的字符串迁移到顶层布尔值。
+ *   旧的 `engines.<name>.allowPrivateNetwork` 位置和旧的 `"true"`/
+ *   `"false"` 字符串形式都会被读取，并提升到新的顶层键。
  */
 /**
- * Every string apiKey the raw file carried, including ones the alias fold
- * displaced (two alias spellings of one engine can each bring a key; the merge
- * keeps one). A displaced key is gone from the config object but may survive
- * in another field's text, so config show must still know to scrub it. Keyed
- * by the migrated config object: this never touches the JSON shape.
+ * 原始文件携带过的每一个字符串 apiKey，包括被别名折叠挤掉的那些
+ * （同一个引擎的两种别名拼法可能各带一把 key，合并时只保留一把）。
+ * 被挤掉的 key 已不在配置对象里，却可能残留在其他字段的文本里，
+ * 所以 config show 仍然必须知道要把它抹掉。以迁移后的配置对象为键：
+ * 这从不改动 JSON 形状。
  */
 const SEEN_API_KEYS = new WeakMap<ModsearchConfig, string[]>();
 
@@ -256,30 +250,29 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   const hasLegacy = Boolean(raw.providers || raw.provider || raw.search || raw.fetch || raw.social);
   const seenApiKeys = new Set<string>();
 
-  // A top-level string form ("true"/"false") is coerced here too.
+  // 顶层的字符串形式（"true"/"false"）也在这里一并转换。
   let allowPrivateNetwork = coerceBoolean(
     (raw as { allowPrivateNetwork?: unknown }).allowPrivateNetwork,
   );
 
-  // Merge per engine, not per map: a new `engines.tavily.model` next to an old
-  // `providers.tavily.apiKey` used to drop the key entirely. The retired
-  // per-engine allowPrivateNetwork flag is lifted out to the top level.
+  // 按每个引擎合并，而不是按整个映射合并：以前在新的 `engines.tavily.model`
+  // 旁边放旧的 `providers.tavily.apiKey`，会把那把 key 整个丢掉。退役的
+  // 单引擎 allowPrivateNetwork 标志被提升到顶层。
   //
-  // Null prototype on purpose: the entry names come from a hand-editable file,
-  // and on a normal object literal `engines["__proto__"] = {...}` does not
-  // define a property, it SETS THE PROTOTYPE. The entry then hides from
-  // Object.entries and JSON.stringify (doctor would report an inherited key as
-  // present, and the next write would silently drop it) while dot-access still
-  // sees it. On a null-prototype object the same name is an ordinary own
-  // property: visible, serialized, and judged like any unknown engine.
+  // 故意使用 null 原型：条目名来自一个可以手工编辑的文件，而在普通对象字面量上
+  // `engines["__proto__"] = {...}` 并不定义一个属性，它会**设置原型**。
+  // 于是该条目在 Object.entries 和 JSON.stringify 里隐形（doctor 会把继承来的
+  // 键报成存在，下一次写入又会悄悄把它丢掉），而点号访问却仍然看得到它。
+  // 在 null 原型对象上，同一个名字只是一个普通的自有属性：可见、可序列化，
+  // 并像任何未知引擎一样被审视。
   const engines: Record<string, EngineSettings> = Object.create(null);
   const fold = (source: Record<string, Record<string, unknown>> | undefined) => {
     if (!isPlainObject(source)) {
       return;
     }
     for (const [name, rawSettings] of Object.entries(source)) {
-      // A hand-edited entry that is not an object (a string, an array) has no
-      // fields to merge; skip it rather than spreading its characters.
+      // 手工编辑出来、并非对象的条目（字符串、数组）没有字段可合并；
+      // 跳过它，而不是把它的字符合并进来。
       if (!isPlainObject(rawSettings)) {
         continue;
       }
@@ -311,17 +304,16 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   fold(raw.providers as Record<string, Record<string, unknown>> | undefined);
   fold(raw.engines as Record<string, Record<string, unknown>> | undefined);
 
-  // An engine entry that held nothing but the migrated flag is now empty: drop
-  // it so the effective config does not show a hollow `local: {}`.
+  // 一个曾经只装着迁移标志的引擎条目现在是空的：删掉它，
+  // 免得生效配置里出现一个空壳 `local: {}`。
   for (const [name, settings] of Object.entries(engines)) {
     if (Object.keys(settings).length === 0) {
       delete engines[name];
     }
   }
 
-  // Any older shape collapses to the preference: a per-role search engine, or a
-  // v2 global provider that happened to be a search engine. A current config
-  // keeps its `engine` verbatim, empty string included.
+  // 任何旧形状都收敛为这个偏好：按角色的搜索引擎，或一个恰好是搜索引擎的
+  // v2 全局提供方。当前形状的配置则原样保留它的 `engine`，空字符串也不例外。
   const legacySearch = raw.search?.engine?.trim();
   const pinned = raw.provider?.trim();
   const fromPin =
@@ -340,9 +332,9 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   if (allowPrivateNetwork !== undefined) {
     config.allowPrivateNetwork = allowPrivateNetwork;
   }
-  // This function rebuilds the config from a list of known keys, so a new
-  // top-level section is dropped unless it is carried across here. Omitting
-  // one would not fail loudly: the read path would just report the default.
+  // 这个函数会依据一份已知键清单重建配置，所以新增的顶层段
+  // 除非在这里被搬运过去，否则就会被丢掉。漏掉一个不会大声报错：
+  // 读取路径只会报告默认值。
   if (raw.aggregate !== undefined) {
     config.aggregate = raw.aggregate;
   }
@@ -363,9 +355,8 @@ export function loadConfigFile(configPath = currentConfigPath()): ModsearchConfi
   try {
     raw = fs.readFileSync(configPath, 'utf-8');
   } catch (error) {
-    // Only a missing file means "no config". Anything else (permissions, a
-    // directory in its place) is a real problem worth naming, not a silent
-    // downgrade to defaults.
+    // 只有文件缺失才意味着「没有配置」。其他任何情况（权限问题、本该是文件
+    // 的位置放了个目录）都是值得点名的真问题，而不是悄悄降级到默认值。
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return {};
     }
@@ -387,27 +378,27 @@ export function loadConfigFile(configPath = currentConfigPath()): ModsearchConfi
   }
 }
 
-/** The engine the user asked for, if any. */
+/** 用户指定的引擎，如果有的话。 */
 export function chosenEngine(config: ModsearchConfig): string | undefined {
   return config.engine?.trim() || undefined;
 }
 
-/** Whether the quota cooldown is active. On by default, off only when set to 'off'. */
+/** 配额冷却是否启用。默认开启，只有设为 'off' 时才关闭。 */
 export function cooldownEnabled(config: ModsearchConfig): boolean {
   return config.cooldown?.trim().toLowerCase() !== 'off';
 }
 
-/** Whether reserved and private address ranges are allowed. Off by default. */
+/** 是否允许保留地址与私有地址段。默认关闭。 */
 export function allowsPrivateNetwork(config: ModsearchConfig): boolean {
   return config.allowPrivateNetwork === true;
 }
 
-/** Fused by default; `chain` restores the one-engine-at-a-time behavior. */
+/** 默认融合；`chain` 恢复一次一个引擎的旧行为。 */
 export function aggregateMode(config: ModsearchConfig): AggregateMode {
   return config.aggregate?.mode === 'chain' ? 'chain' : 'rrf';
 }
 
-/** Total wall-clock budget for a fused run, in milliseconds. */
+/** 一次融合运行的总墙钟预算，单位为毫秒。 */
 export function aggregateDeadlineMs(config: ModsearchConfig): number {
   const configured = config.aggregate?.deadlineMs;
   if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
@@ -416,7 +407,7 @@ export function aggregateDeadlineMs(config: ModsearchConfig): number {
   return 8_000;
 }
 
-/** How long a fused result stays cacheable. 0 disables caching. */
+/** 融合结果保持可缓存的时间。0 表示关闭缓存。 */
 export function aggregateCacheTtlMs(config: ModsearchConfig): number {
   const configured = config.aggregate?.cacheTtlMs;
   if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0) {
@@ -426,8 +417,8 @@ export function aggregateCacheTtlMs(config: ModsearchConfig): number {
 }
 
 /**
- * How one engine exposes itself. Missing keys take the defaults a config
- * written before these settings existed should get.
+ * 一个引擎如何把自己暴露出去。缺失的键采用在这些设置出现之前
+ * 写下的配置本该得到的默认值。
  */
 export function exposeOf(settings: EngineSettings): { aggregate: boolean; tool: boolean } {
   const expose = isPlainObject(settings.expose) ? settings.expose : {};
@@ -437,7 +428,7 @@ export function exposeOf(settings: EngineSettings): { aggregate: boolean; tool: 
   };
 }
 
-/** Settings for one engine, with env vars overriding the file. */
+/** 单个引擎的设置，其中环境变量覆盖文件内容。 */
 export function engineSettings(
   engineName: string,
   config: ModsearchConfig,
@@ -451,10 +442,9 @@ export function engineSettings(
   const bindings = Object.hasOwn(ENV_BINDINGS, engineName) ? ENV_BINDINGS[engineName] : {};
 
   const settings: EngineSettings = { ...fromFile };
-  // An engine that is off unless asked takes the default only when the file
-  // has no opinion. Two things count as an opinion: an explicit enabled
-  // value here, and being the engine the file pins as its preference — pinning
-  // an engine and then refusing to run it is the config arguing with itself.
+  // 一个「除非点名否则关闭」的引擎，只在文件没有表态时才采用该默认。
+  // 有两样东西算作表态：这里显式给出的 enabled 值，以及它正是文件所钉住的
+  // 首选引擎——钉住一个引擎然后又拒绝运行它，就是配置在自相矛盾。
   if (
     Object.hasOwn(OFF_UNLESS_ENABLED, engineName) &&
     settings.enabled === undefined &&
@@ -473,10 +463,10 @@ export function engineSettings(
 }
 
 /**
- * Set a dotted key and persist with 0600 perms. Two shapes:
- *   search.engine tavily             role to engine
- *   engines.tavily.apiKey <key>      engine setting
- * The `engines.` prefix may be dropped: `tavily.apiKey` works too.
+ * 设置一个带点的键，并以 0600 权限落盘。两种形状：
+ *   search.engine tavily             角色到引擎
+ *   engines.tavily.apiKey <key>      引擎设置
+ * 可以省略 `engines.` 前缀：`tavily.apiKey` 也能用。
  */
 export function setConfigValue(
   dottedKey: string,
@@ -486,12 +476,11 @@ export function setConfigValue(
   const config = loadConfigFile(configPath);
   const parts = dottedKey.split('.').filter(Boolean);
 
-  // `engine <name>` is the whole role surface. `search.engine` still works so
-  // muscle memory from the previous shape does not hit an error. A non-empty
-  // value must name a real engine: the router tolerates a typo in a
-  // hand-edited file with a warning, but the CLI has no reason to create one,
-  // and doctor would echo the bad value back (which, pasted secrets included,
-  // is text better refused than displayed). Empty returns to automatic.
+  // `engine <name>` 就是角色层面的全部接口。`search.engine` 仍然可用，
+  // 免得旧形状形成的肌肉记忆撞上错误。非空值必须是真实存在的引擎名：
+  // 路由器在手工编辑的文件里遇到拼写错误会带着警告容忍过去，但 CLI 没有理由
+  // 制造这种错误，而 doctor 又会把错误值原样回显出来（其中还带着粘贴进来的
+  // 秘密，这种文本宁可拒绝也不要显示）。空值则回到自动模式。
   const isEngineKey =
     (parts.length === 1 && parts[0] === 'engine') ||
     (parts.length === 2 && parts[0] === 'search' && parts[1] === 'engine');
@@ -521,9 +510,9 @@ export function setConfigValue(
         `Invalid config key: ${dottedKey}. Use "engine" or "engines.<engine>.<${SETTABLE_ENGINE_FIELDS.join('|')}>".`,
       );
     }
-    // The file is read back by exact lowercase canonical key, so an unknown or
-    // miscased name would be stored, reported saved, and never read again.
-    // Refusing here turns silent data loss into an immediate, fixable error.
+    // 文件是按精确的小写规范名回读的，所以一个未知或大小写不对的名字会被存进去、
+    // 报成已保存，然后永远不再被读取。在这里拒绝，能把静默的数据丢失
+    // 变成一个立刻可以发现、可以修复的错误。
     const engineName = canonicalEngineName(rawEngineName);
     if (!findEngine(engineName)) {
       throw new Error(
@@ -535,8 +524,8 @@ export function setConfigValue(
         `Unknown engine setting: ${field}. Use ${SETTABLE_ENGINE_FIELDS.join(', ')}.`,
       );
     }
-    // A hand-edited file can put anything at these positions. Refuse to spread
-    // a non-object rather than corrupting the write.
+    // 手工编辑的文件在这些位置可能放任何东西。拒绝展开一个非对象，
+    // 而不是让写盘结果被弄脏。
     if (config.engines !== undefined && !isPlainObject(config.engines)) {
       throw new Error(
         `The "engines" section of the config file is not an object. Fix or remove it.`,
@@ -571,9 +560,8 @@ export function setConfigValue(
     }
     if (field === 'baseURL') {
       const trimmed = value.trim();
-      // Empty unsets the override, back to the official endpoint. Anything else
-      // must be a full origin, refused here rather than as a confusing fetch
-      // failure at search time.
+      // 空值会取消这项覆盖，回到官方端点。其他任何值都必须是完整的源，
+      // 在这里就拒绝，而不是留到搜索时变成一个让人困惑的抓取失败。
       if (trimmed === '') {
         delete config.engines?.[engineName]?.baseURL;
         writeConfigFile(config, configPath);
@@ -588,10 +576,9 @@ export function setConfigValue(
     }
     if (field === 'proxy') {
       const trimmed = value.trim();
-      // Empty unsets the override, back to following the environment. The
-      // stored value is a keyword or a URL, never a half-written one: the
-      // router resolves it on every run, so a value saved here that it cannot
-      // act on would fail far from this command.
+      // 空值会取消这项覆盖，回到跟随环境变量。存下的值要么是关键字、要么是 URL，
+      // 绝不会是半成品：路由器每次运行都会解析它，所以这里存下一个它无法
+      // 生效的值，等到出错时就离这条命令很远了。
       if (trimmed === '') {
         delete config.engines?.[engineName]?.proxy;
         writeConfigFile(config, configPath);
@@ -612,10 +599,9 @@ export function setConfigValue(
 }
 
 /**
- * The config directory holds key material, so it is created 0700. An existing
- * directory keeps whatever mode it has: re-tightening on every write would
- * override permissions a user set deliberately, and the files inside carry
- * their own 0600. chmod is best-effort for platforms without POSIX modes.
+ * 配置目录里存着密钥材料，所以按 0700 创建。已存在的目录保持它原有的权限模式：
+ * 每次写入都重新收紧，会覆盖用户有意设置的权限，而目录里的文件自带 0600。
+ * 在没有 POSIX 权限模式的平台上，chmod 尽力而为。
  */
 function ensurePrivateDir(dir: string): void {
   if (fs.existsSync(dir)) {
@@ -625,17 +611,16 @@ function ensurePrivateDir(dir: string): void {
   try {
     fs.chmodSync(dir, 0o700);
   } catch {
-    // best effort on platforms without chmod
+    // 在没有 chmod 的平台上尽力而为
   }
 }
 
 /**
- * Write key material as a fresh 0600 file and rename it into place.
- * writeFileSync's mode only applies when it CREATES the file: rewriting an
- * existing 0644 config would land the new key world-readable until the chmod,
- * and a pre-placed file owned by someone else would take the content into
- * their inode with the chmod failing silently. A same-directory temp file is
- * born 0600 and rename replaces the inode, so neither window exists.
+ * 把密钥材料写成一个崭新的 0600 文件，再改名就位。
+ * writeFileSync 的 mode 只在它**创建**文件时生效：重写一个已存在的 0644 配置，
+ * 会让新 key 在 chmod 之前处于人人可读状态；而一个被别人预先放好的文件，
+ * 会把内容收进对方的 inode，而 chmod 又会静默失败。同目录的临时文件天生就是
+ * 0600，改名替换的是 inode，于是这两个窗口都不存在。
  */
 function writePrivateFile(filePath: string, content: string): void {
   ensurePrivateDir(path.dirname(filePath));
@@ -648,14 +633,14 @@ function writePrivateFile(filePath: string, content: string): void {
     try {
       fs.unlinkSync(tmp);
     } catch {
-      // the rename failure is the error worth reporting
+      // 改名失败才是值得报告的那个错误
     }
     throw error;
   }
   try {
     fs.chmodSync(filePath, 0o600);
   } catch {
-    // best effort on platforms without chmod
+    // 在没有 chmod 的平台上尽力而为
   }
 }
 
@@ -664,18 +649,17 @@ function writeConfigFile(config: ModsearchConfig, configPath: string): void {
 }
 
 /**
- * The starter file holds nothing but the shape. Pre-filling every engine and
- * every default looked helpful and was not: it buried the real decisions in
- * placeholders, and writing today's defaults into the file freezes them, so a
- * later change to a default model would be silently overridden by this copy.
+ * 起始文件只放形状，不放别的东西。预先填满每个引擎和每个默认值，
+ * 看起来体贴、实则不是：它把真正的决策埋进了一堆占位符里，而且把今天的默认值
+ * 写进文件就等于把它们冻结了，以后默认模型一改，就会被这份副本悄悄覆盖掉。
  */
 export const CONFIG_TEMPLATE: ModsearchConfig = {
-  // Empty means: use the best engine available on this machine.
+  // 空表示：使用本机可用的最佳引擎。
   engine: '',
   engines: {},
 };
 
-/** Write a starter config. Refuses to overwrite unless force is set. */
+/** 写一个起始配置。除非设置了 force，否则拒绝覆盖已有文件。 */
 export function initConfigFile(configPath = currentConfigPath(), force = false): void {
   if (!force && fs.existsSync(configPath)) {
     throw new Error(`${configPath} already exists. Use --force to overwrite.`);
@@ -683,7 +667,7 @@ export function initConfigFile(configPath = currentConfigPath(), force = false):
   writePrivateFile(configPath, `${JSON.stringify(CONFIG_TEMPLATE, null, 2)}\n`);
 }
 
-/** Every API key the file or environment holds, displaced fold casualties included. */
+/** 文件或环境里持有的每一把 API key，包括被别名折叠挤掉的牺牲者。 */
 function knownApiKeys(config: ModsearchConfig, env: NodeJS.ProcessEnv): string[] {
   const keys = new Set<string>(SEEN_API_KEYS.get(config) ?? []);
   const enginesRoot = isPlainObject(config.engines) ? config.engines : {};
@@ -704,18 +688,15 @@ function knownApiKeys(config: ModsearchConfig, env: NodeJS.ProcessEnv): string[]
 }
 
 /**
- * Redact every known key from a value tree's strings, longest key first so an
- * overlapping shorter key cannot split a longer one into survivable halves.
- * No length assumption at all: the config layer imposes no minimum on an
- * apiKey and gateways issue what they issue, so even a one-character key is
- * scrubbed from every string it appears in. A short key shreds the view's
- * readability, and that is the right failure: this output exists to be pasted
- * into issues, and a shredded view is safe where a readable one leaking a
- * credential is not.
+ * 把已知的每一把 key 从值树的所有字符串里抹掉，最长的 key 优先，
+ * 免得互相重叠的较短 key 把较长的 key 切成还能复原的两半。
+ * 完全不假设长度：配置层对 apiKey 不设下限，网关发多短的 key 就是多短，
+ * 所以哪怕只有一个字符的 key，也要从它出现的每个字符串里抹掉。短 key 会把
+ * 视图的可读性撕碎，而这正是正确的失败方式：这份输出是用来粘进 issue 的，
+ * 撕碎的视图是安全的，而可读却泄露了凭据的视图不是。
  *
- * Values ONLY, by structural contract: every property name in the rendered
- * view is a compile-time constant or a registry engine name, and user data
- * (hand-written engine spellings included) lives inside values.
+ * 仅限值，这是结构性约定：渲染视图里的每个属性名要么是编译期常量、
+ * 要么是注册表里的引擎名，而用户数据（包括手写的引擎拼法）只存在于值里。
  */
 function redactValues<T>(value: T, keys: string[]): T {
   const ordered = [...keys].sort((a, b) => b.length - a.length);
@@ -729,11 +710,10 @@ function redactValues<T>(value: T, keys: string[]): T {
     return out;
   };
   const walk = (node: unknown): unknown => {
-    // The known-key split runs with no length floor, then the shape net
-    // (redactSecrets) catches token-shaped strings nobody declared as a key:
-    // an sk- credential pasted into a model note, an api_key= parameter in a
-    // gateway URL. A secret with no known shape living only in a non-secret
-    // field stays unknowable; the security doc says so.
+    // 已知 key 的拆抹不设长度下限，随后形状网（redactSecrets）再兜住那些
+    // 没人声明为 key、但长得像令牌的字符串：粘在模型备注里的 sk- 凭据、
+    // 网关 URL 里的 api_key= 参数。一个没有已知形状、又只住在非秘密字段里的
+    // 秘密仍是无从得知的；安全文档也是这么写的。
     if (typeof node === 'string') return redactSecrets(scrub(node));
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === 'object') {
@@ -749,19 +729,16 @@ function redactValues<T>(value: T, keys: string[]): T {
 }
 
 /**
- * Render the effective config: what modsearch will actually use, not just what
- * the file says. Environment variables are merged in the way `engineSettings`
- * merges them, every value is tagged with where it came from (`file` or `env`),
- * alias engine keys (agy, antigravity, grok, direct) are shown under their
- * canonical name, and API keys stay masked.
+ * 渲染生效配置：modsearch 实际会用什么，而不只是文件里写了什么。环境变量按
+ * `engineSettings` 合并它们的方式合并进来，每个值都标注来源（`file` 或 `env`），
+ * 别名的引擎键（agy、antigravity、grok、direct）显示在各自的规范名下，
+ * API key 则始终保持遮掩。
  *
- * Redaction is a boundary here, not a per-field habit: this output's product
- * contract is being safe to paste into an issue. A key is masked in its own
- * field, scrubbed from every other field on the same row (a key pasted into a
- * gateway URL or a model note used to print in full one field over from its
- * own mask), URL credentials are masked, unknown engine names become note
- * values rather than property names, and a final pass scrubs every known key
- * from every string in the tree.
+ * 脱敏在这里是一条边界，而不是逐字段的习惯：这份输出的产品契约就是
+ * 「可以安全地粘进 issue」。key 在它自己的字段里被遮掩，在同一行的其他所有
+ * 字段里被抹掉（以前一把粘进网关 URL 或模型备注里的 key，会在隔着它自己那个
+ * 遮掩位的相邻字段里被完整打印出来），URL 里的凭据被遮掩，未知的引擎名变成
+ * note 值而不是属性名，最后再对整个树里的每个字符串做一遍已知 key 的抹除。
  */
 export function renderEffectiveConfig(
   config: ModsearchConfig,
@@ -790,20 +767,19 @@ export function renderEffectiveConfig(
     }
     let text = String(value);
     if (field === 'baseURL' || field === 'proxy') {
-      // Both can carry credentials in their userinfo (`http://user:pass@host`),
-      // and this output is meant to be safe to paste into an issue.
+      // 两者都可能在 userinfo 里携带凭据（`http://user:pass@host`），
+      // 而这份输出是要能安全粘进 issue 的。
       text = maskUrlCredentials(text);
     }
-    // Same-row wash: the row's own key must not survive in its other fields.
+    // 同行清洗：这一行自己的 key 不能存活在它的其他字段里。
     for (const entryKey of entryKeys) {
       text = text.split(entryKey).join('[redacted]');
     }
     return text;
   };
 
-  // File settings first, alias keys folded onto their canonical engine. An
-  // engine name the registry does not know never becomes a property name: a
-  // hand-written spelling is user data, and user data lives in values only.
+  // 先处理文件里的设置，别名的键折叠到各自的规范引擎。注册表不认识的引擎名
+  // 永远不会变成属性名：手写的拼法是用户数据，而用户数据只存在于值里。
   for (const [rawName, settings] of Object.entries(config.engines ?? {})) {
     if (!isPlainObject(settings)) {
       notes.push(`engines entry is not an object and was ignored`);
@@ -827,8 +803,8 @@ export function renderEffectiveConfig(
     }
   }
 
-  // Environment overrides, exactly the bindings engineSettings applies. An env
-  // value wins over the file, so it overwrites the tag too.
+  // 环境变量覆盖，用的正是 engineSettings 应用的那套绑定。环境变量的值
+  // 压过文件，所以它连来源标注也一并覆盖。
   for (const [engineName, bindings] of Object.entries(ENV_BINDINGS)) {
     const canonical = canonicalEngineName(engineName);
     const entryKeys = splitApiKeys(bindings.apiKey ? env[bindings.apiKey] : undefined);
@@ -847,8 +823,8 @@ export function renderEffectiveConfig(
   if (notes.length > 0) {
     out.notes = notes;
   }
-  // The last line of defense: no known key survives in any string of the view,
-  // whatever field or note it was pasted into.
+  // 最后一道防线：视图里的任何字符串都不许有已知 key 存活下来，
+  // 无论它被粘进了哪个字段或哪条 note。
   return JSON.stringify(redactValues(out, knownApiKeys(config, env)), null, 2);
 }
 

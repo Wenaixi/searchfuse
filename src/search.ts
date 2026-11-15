@@ -234,22 +234,19 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
   const context = { mode, query, url, timeoutMs, deadline, config, env, options };
 
   // 融合模式并发跑所有合格引擎，再把它们的列表融合起来。
-  // 链式模式是原有行为，保持逐字节不变
-  // below. Fetch never fuses: it returns one page, and merging two engines'
-  // renderings of it would be a different product.
+  // 链式模式是原有行为，保持逐字节不变。
+  // 抓取永不融合：它返回一个页面，把两个引擎对它的渲染合并起来是另一个产品。
+  //
+  // Fusion replaces the web entry, and the chain must NOT also run it: a
+  // `--source web,x` run would otherwise query the public index twice and
+  // spend twice the quota for one answer. So the web plan is dropped from the
+  // chain whenever the fusion answered, and put back only if it did not.
+  let fusedWeb: SourceResult | undefined;
+  let chainPlans = plans;
   if (mode === 'search' && aggregateMode(config) === 'rrf') {
-    const fused = await runFused(config, env, query, timeoutMs, options);
-    if (fused !== undefined) {
-      return {
-        mode,
-        query: query ?? null,
-        url: null,
-        results: [fused],
-        meta: {
-          generatedAt: new Date().toISOString(),
-          durationSeconds: (Date.now() - startedAt) / 1000,
-        },
-      };
+    fusedWeb = await runFused(config, env, query, timeoutMs, options);
+    if (fusedWeb !== undefined) {
+      chainPlans = plans.filter((plan) => plan.source !== 'web');
     }
     // 没有任何引擎够格参与融合（都退出了，或者都在冷却），于是
     // run falls through to the chain rather than answering empty.
@@ -259,13 +256,13 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
   // web,x run costs about the time of its slowest source, not their sum.
   // Promise.all preserves index order regardless of which settled first.
   const results = await Promise.all(
-    plans.map((plan) =>
+    chainPlans.map((plan) =>
       runOneSource(plan, context).catch((error): SourceResult => {
         // A single-source run keeps its exact prior behavior: the failure
         // propagates and the CLI exits. With more than one source, one source
         // failing must not sink the others, so it becomes an explicit
         // unavailable entry, matching the router's own unavailable semantics.
-        if (plans.length === 1) {
+        if (chainPlans.length === 1) {
           throw error;
         }
         return failedSourceEntry(plan, error);
@@ -277,7 +274,10 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
     mode,
     query: query ?? null,
     url: url ?? null,
-    results,
+    // The fused answer takes the web slot at the front; every other source
+    // keeps what the chain produced for it. With no fusion, this is exactly
+    // the chain's own list.
+    results: fusedWeb === undefined ? results : [fusedWeb, ...results],
     meta: {
       generatedAt: new Date().toISOString(),
       durationSeconds: (Date.now() - startedAt) / 1000,
@@ -395,13 +395,13 @@ async function runFused(
       url: string;
       snippet: string;
     }>(targets, request, budgetMs, AbortSignal.timeout(budgetMs), { skipped });
-  } catch {
-    // 所有引擎都失败了。这里交回给链式而不是抛错
-    // here keeps one behavior for "nothing worked": the chain raises the
-    // error the user already knows, naming the source and each engine's
-    // attempt. A second, differently worded total-failure message from the
-    // fused path would be a worse error for the same situation.
-    return undefined;
+  } catch (error) {
+    // Every engine failed. Rethrow instead of handing the run back to the
+    // chain: the chain would query the same engines a second time for the
+    // same failure, spending the quota twice to produce a differently worded
+    // version of the error we already have. fanout's message names each source
+    // and its reason, which is what the chain's message does too.
+    throw error;
   }
   const { outputs, failures } = fanoutResult;
   const fused = rrfFuse(outputs);
