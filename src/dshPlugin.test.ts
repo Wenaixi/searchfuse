@@ -497,6 +497,11 @@ function house(options: { settings?: Record<string, unknown> | null } = {}) {
     tools: {
       register: (definition: RegisteredTool) => {
         tools.set(definition.name, definition);
+        // 真宿主返回一个精确的撤销句柄，工具因此能单独撤掉。这个假宿主也得
+        // 这么做：否则「先撤旧的再注册新的」这条路径在测试里根本走不到。
+        return () => {
+          tools.delete(definition.name);
+        };
       },
     },
     web: {
@@ -1135,6 +1140,68 @@ describe('dsh settings card route', () => {
       },
       { settingsCard: false },
     );
+  });
+});
+
+describe('engine tool hot reload', () => {
+  it('replaces the engine tools when the config file names a different engine', async () => {
+    // Web users have no terminal, so `expose.tool` is switched from the card.
+    // Without this, flipping it took a restart to show up.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await withConfig(
+        { engine: 'tavily', engines: { tavily: { expose: { tool: true } } } },
+        async (_handler, file, stage) => {
+          // 初始注册：哪台机器都还没有文件时，这里就该已经有工具了。
+          expect([...stage.tools.keys()].sort()).toEqual(['read_page', 'tavily_search']);
+
+          // 换成 exa：模拟用户从卡片上关掉 tavily、打开 exa 之后落盘的那份文件。
+          fs.writeFileSync(
+            file,
+            JSON.stringify({ engine: 'exa', engines: { exa: { expose: { tool: true } } } }),
+          );
+          await vi.advanceTimersByTimeAsync(6_000);
+
+          expect([...stage.tools.keys()].sort()).toEqual(['exa_search', 'read_page']);
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves the tools alone when only a key changed', async () => {
+    // 换一把密钥不该让工具在屏幕上消失又出现一次：用户是看着这个列表点
+    // 下去的，工具忽隐忽现等于界面上出现了一次假故障。
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await withConfig(
+        { engine: 'tavily', engines: { tavily: { apiKey: 'first', expose: { tool: true } } } },
+        async (_handler, file, stage) => {
+          expect([...stage.tools.keys()].sort()).toEqual(['read_page', 'tavily_search']);
+          let reRegistered = 0;
+          const original = stage.tools.get('tavily_search');
+          stage.tools.set = ((key: string, value: RegisteredTool) => {
+            reRegistered += 1;
+            return Map.prototype.set.call(stage.tools, key, value);
+          }) as typeof stage.tools.set;
+
+          fs.writeFileSync(
+            file,
+            JSON.stringify({
+              engine: 'tavily',
+              engines: { tavily: { apiKey: 'second', expose: { tool: true } } },
+            }),
+          );
+          await vi.advanceTimersByTimeAsync(6_000);
+
+          expect(reRegistered).toBe(0);
+          expect(stage.tools.get('tavily_search')).toBe(original);
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

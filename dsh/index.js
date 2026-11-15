@@ -53,8 +53,11 @@ const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
 /**
  * 插件多久重新检查一次配置文件的 mtime。文件很小，stat 也很便宜；几秒钟
  * 足够短，用户刚保存完一个服务器，下一轮就期望看到它的工具。
+ *
+ * MCP 工具与独立引擎工具共用这一个节奏：两处盯的是同一个文件，各起一套
+ * 定时器只会让两者在改动后出现短暂的看法不一致。
  */
-const MCP_CONFIG_POLL_MS = 5_000;
+const CONFIG_POLL_MS = 5_000;
 
 const PROVIDER_TIMEOUT_MS = 40_000;
 const PROVIDER_DEADLINE_MS = 55_000;
@@ -66,6 +69,10 @@ export function apply(ctx, config = {}) {
   if (config.searchProvider !== false) {
     registerSearchProvider(ctx, config);
   }
+  // 两条热重载入口。它们登记在下面唯一的那套监视器上：插件自己拥有
+  // ~/.modsearch/config.json，宿主的 profile 重载信号永远不会为它触发，所以
+  // 只能自己定时看一看。
+  const reloaders = [];
   // MCP 服务器，在 ~/.modsearch/config.json 的 `mcp` 下配置。协议实现作为
   // 独立的构建模块发布，因为本文件是手写的 JavaScript，无法导入 TypeScript
   // 源码。
@@ -74,7 +81,7 @@ export function apply(ctx, config = {}) {
   // 宿主会原地重载插件而不重新求值模块，于是模块级的 session 会活得比它自己
   // 的 fiber 更久，还会被下一代实例共享。
   if (config.mcp !== false) {
-    registerMcpTools(ctx);
+    reloaders.push(registerMcpTools(ctx));
   }
   // 以裸 JSON-Schema 工具定义的形式注册（不导入任何 dsh 包：developer-preview
   // 注册表接受这种定义，而 @deepseek-ai/dsh-tools 的树外解析目前还不可靠），
@@ -92,7 +99,20 @@ export function apply(ctx, config = {}) {
   // 独立引擎工具，注册在 MCP 之前：内置名字正是 MCP 服务器不该碰的，而用户
   // 自己命名的引擎工具就属于用户。
   if (config.engineTools !== false) {
-    registerEngineTools(ctx);
+    reloaders.push(registerEngineTools(ctx));
+  }
+  if (reloaders.length > 0) {
+    // 唯一的监视器。文件一改，两边都看一眼；各自的签名比对决定谁真的需要重建
+    // 自己的工具，所以改 `mcp` 不会惊动引擎工具，反之亦然。
+    watchModsearchConfigFile(ctx, () => {
+      for (const reload of reloaders) {
+        try {
+          reload();
+        } catch (error) {
+          console.error(`[modsearch] config reload failed: ${error?.message ?? error}`);
+        }
+      }
+    });
   }
   // 设置卡片。dsh web 用户没有终端，所以 `modsearch config set` 在那里够不着，
   // 引擎密钥也就没有入口。浏览器那一半（dsh/client.js）贡献的卡片连的是下面
@@ -1031,6 +1051,56 @@ function isValidProxyValue(value) {
 }
 
 /**
+ * 盯着配置文件，发现改动就回调。
+ *
+ * 宿主的 profile 重载信号永远不会为这份文件触发——它是插件自己的，不在
+ * profile 里。每隔几秒 stat 一次是最便宜的发现办法；文件很小，代价可以忽略。
+ *
+ * 定时器用 unref 放掉，免得它自己把进程撑住；拆除登记在 ctx 上，所以插件
+ * 卸载时不会留下一个还在跑的定时器。回调抛出的东西由调用方自己接住：这个
+ * 助手只负责发现改动，不替调用方决定失败该怎么办。
+ *
+ * @returns 停止监视的函数。正常路径用不到它——ctx 卸载时会自己停掉。
+ */
+function watchModsearchConfigFile(ctx, onChange) {
+  const file = modsearchConfigPath();
+  let lastMtime;
+  try {
+    lastMtime = statSync(file).mtimeMs;
+  } catch {
+    // 还没有配置文件：把它当成「什么都没有」，第一次创建就是一次改动。
+    lastMtime = undefined;
+  }
+  const pollTimer = setInterval(() => {
+    let mtime;
+    try {
+      mtime = statSync(file).mtimeMs;
+    } catch {
+      // 文件被删掉也是一次值得理会的改动。
+      mtime = undefined;
+    }
+    if (mtime === lastMtime) {
+      return;
+    }
+    lastMtime = mtime;
+    onChange();
+  }, CONFIG_POLL_MS);
+  if (typeof pollTimer?.unref === 'function') {
+    pollTimer.unref();
+  }
+  const stop = () => {
+    clearInterval(pollTimer);
+  };
+  try {
+    ctx.effect(() => () => stop(), 'modsearch: config watch');
+  } catch {
+    // 一个已经失效的 ctx 没有 fiber 可以挂拆除；定时器会活到进程结束，
+    // 这正是宿主对一个从不卸载的插件的处理方式。
+  }
+  return stop;
+}
+
+/**
  * 绑定配置文件 `mcp` 下点名的 MCP 服务器。
  *
  * 两条性质要紧：
@@ -1048,7 +1118,6 @@ function registerMcpTools(ctx) {
   let disposed = false;
   let lastSignature = '';
   let inFlight = false;
-  let pollTimer = null;
 
   /** 配置里决定「哪些工具存在」的那一部分。 */
   const signatureOf = (servers) => {
@@ -1148,9 +1217,6 @@ function registerMcpTools(ctx) {
   try {
     ctx.effect(() => () => {
       disposed = true;
-      if (pollTimer !== null) {
-        clearInterval(pollTimer);
-      }
       result?.closeAll().catch(() => undefined);
     }, 'modsearch: mcp sessions');
   } catch {
@@ -1158,56 +1224,13 @@ function registerMcpTools(ctx) {
     // 结束，这正是宿主对一个从不卸载的插件的处理方式。
   }
 
-  // 配置文件是插件自己的，所以宿主的 profile 重载信号永远不会为它触发。每隔
-  // 几秒做一次 stat，是发现改动最便宜的办法：mtime 变了就重新跑一遍注册，
-  // 从而在不重载插件的情况下替换服务器的工具。用 unref 让这个定时器自己不会
-  // 把进程撑住。
-  const watchConfig = () => {
-    const file = modsearchConfigPath();
-    let lastMtime;
-    try {
-      lastMtime = statSync(file).mtimeMs;
-    } catch {
-      lastMtime = undefined;
-    }
-    pollTimer = setInterval(() => {
-      if (disposed) {
-        return;
-      }
-      let mtime;
-      try {
-        mtime = statSync(file).mtimeMs;
-      } catch {
-        // 配置被删掉就意味着没有 MCP 服务器；由 settle() 来处理。
-        mtime = undefined;
-      }
-      if (mtime === lastMtime) {
-        return;
-      }
-      lastMtime = mtime;
-      settle().catch((error) => {
-        console.error(`[modsearch] mcp reload failed: ${error?.message ?? error}`);
-      });
-    }, MCP_CONFIG_POLL_MS);
-    if (typeof pollTimer?.unref === 'function') {
-      pollTimer.unref();
-    }
-    try {
-      // 单独登记，好让定时器即便在上面那个 effect 从未跑到的路径上也能被清掉。
-      ctx.effect(() => () => {
-        if (pollTimer !== null) {
-          clearInterval(pollTimer);
-        }
-      }, 'modsearch: mcp config watch');
-    } catch {
-      // 同上
-    }
-  };
-
+  // 配置文件是插件自己的，所以宿主的 profile 重载信号永远不会为它触发。监视器
+  // 由 apply 统一建一套，这里只把重载入口交出去：MCP 与独立引擎工具读的是同一
+  // 份文件，各起一套定时器只会让两边在改动后短暂地看法不一致。
   settle().catch((error) => {
     console.error(`[modsearch] mcp setup failed: ${error?.message ?? error}`);
   });
-  watchConfig();
+  return settle;
 }
 
 /** 服务器请求隐藏的 `<serverKey>/<toolName>` 条目。 */
@@ -1247,45 +1270,101 @@ function collectMcpToolNames(servers) {
  * 个文件，而不是变成一个莫名其妙什么都不做的工具。
  */
 function registerEngineTools(ctx) {
-  let config;
-  try {
-    config = readModsearchConfig();
-  } catch (error) {
-    console.error(`[modsearch] engine tools skipped: ${error?.message ?? error}`);
-    return;
-  }
-  const engines = isPlainObject(config.engines) ? config.engines : {};
-  const claimed = new Set(BASE_TOOL_NAMES);
-  for (const [rawName, rawSettings] of Object.entries(engines)) {
-    if (!isPlainObject(rawSettings)) {
-      continue;
+  /** 上一轮注册的撤销句柄，以及那一轮对应的配置签名。 */
+  const registered = [];
+  let lastSignature;
+
+  /**
+   * 配置里决定「哪些引擎工具存在」的那一部分：名字、引擎、以及开关。
+   *
+   * 密钥、代理、baseURL 之类刻意不进签名：换一把密钥不该让工具在屏幕上消失
+   * 又出现一次，而用户是看着那个列表点下去的。
+   */
+  const signatureOf = (engines) => {
+    const shape = Object.entries(engines)
+      .filter(([, settings]) => isPlainObject(settings))
+      .map(([rawName, settings]) => {
+        const expose = isPlainObject(settings.expose) ? settings.expose : {};
+        return [
+          rawName,
+          expose.tool === true,
+          coerceBoolean(settings.enabled) !== false,
+          typeof settings.toolName === 'string' ? settings.toolName.trim() : '',
+        ];
+      })
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    return JSON.stringify(shape);
+  };
+
+  const disposeAll = () => {
+    for (const undo of registered) {
+      try {
+        undo();
+      } catch {
+        // 已经消失的工具不值得当成错误上报。
+      }
     }
-    const expose = isPlainObject(rawSettings.expose) ? rawSettings.expose : {};
-    if (expose.tool !== true) {
-      continue;
+    registered.length = 0;
+  };
+
+  const reload = () => {
+    let config;
+    try {
+      config = readModsearchConfig();
+    } catch (error) {
+      // 配置文件坏了：保留现有工具，而不是先把它们撤掉再发现没东西可注册。
+      // 一份写着半截 JSON 的文件不该让模型手里的工具突然消失。
+      console.error(`[modsearch] engine tools reload skipped: ${error?.message ?? error}`);
+      return;
     }
-    // `enabled: false` 是彻底的总开关，不只是「不参与融合」。用户关掉的引擎
-    // 不能再以工具的身份出现：否则这个开关的含义就跟它说的不一样了。
-    if (coerceBoolean(rawSettings.enabled) === false) {
-      continue;
+    const engines = isPlainObject(config.engines) ? config.engines : {};
+    const signature = signatureOf(engines);
+    if (signature === lastSignature) {
+      return;
     }
-    const engine = canonicalEngine(rawName);
-    if (!CARD_ENGINES.includes(engine)) {
-      console.error(`[modsearch] engine tool skipped: unknown engine "${rawName}"`);
-      continue;
+    // 旧的一代先走：新工具与旧工具同名的场合，同时存在会让整趟注册失败。
+    disposeAll();
+    lastSignature = signature;
+
+    const claimed = new Set(BASE_TOOL_NAMES);
+    for (const [rawName, rawSettings] of Object.entries(engines)) {
+      if (!isPlainObject(rawSettings)) {
+        continue;
+      }
+      const expose = isPlainObject(rawSettings.expose) ? rawSettings.expose : {};
+      if (expose.tool !== true) {
+        continue;
+      }
+      // `enabled: false` 是彻底的总开关，不只是「不参与融合」。用户关掉的引擎
+      // 不能再以工具的身份出现：否则这个开关的含义就跟它说的不一样了。
+      if (coerceBoolean(rawSettings.enabled) === false) {
+        continue;
+      }
+      const engine = canonicalEngine(rawName);
+      if (!CARD_ENGINES.includes(engine)) {
+        console.error(`[modsearch] engine tool skipped: unknown engine "${rawName}"`);
+        continue;
+      }
+      const name =
+        typeof rawSettings.toolName === 'string' && rawSettings.toolName.trim() !== ''
+          ? rawSettings.toolName.trim()
+          : `${engine}_search`;
+      if (claimed.has(name)) {
+        console.error(`[modsearch] engine tool skipped: "${name}" is already taken`);
+        continue;
+      }
+      claimed.add(name);
+      const undo = ctx.tools.register(
+        engineToolDefinition({ name, engine, describe: engineDescription(engine) }),
+      );
+      if (typeof undo === 'function') {
+        registered.push(undo);
+      }
     }
-    const name = typeof rawSettings.toolName === 'string' && rawSettings.toolName.trim() !== ''
-      ? rawSettings.toolName.trim()
-      : `${engine}_search`;
-    if (claimed.has(name)) {
-      console.error(`[modsearch] engine tool skipped: "${name}" is already taken`);
-      continue;
-    }
-    claimed.add(name);
-    ctx.tools.register(
-      engineToolDefinition({ name, engine, describe: engineDescription(engine) }),
-    );
-  }
+  };
+
+  reload();
+  return reload;
 }
 
 /** 把一个引擎做成独立工具：它自己的 source、它自己的引擎钉住项。 */
