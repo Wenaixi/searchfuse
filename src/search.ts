@@ -99,13 +99,13 @@ function engineSpend(usage: unknown): { cost?: number; credits?: number } {
   return spend;
 }
 
-/** One source's answer. Engine result fields are flattened in beside them. */
+/** 一个来源的答案。引擎的结果字段会被摊平，与这些字段并排放。 */
 export interface SourceResult {
-  /** The corpus this entry actually came from. May differ from requestedSource. */
+  /** 这条答案实际来自的语料库。可能与 requestedSource 不同。 */
   source: Source;
-  /** The corpus that was asked for. Equals `source` unless the run degraded. */
+  /** 请求的语料库。除非本次运行降级，否则等于 `source`。 */
   requestedSource: Source;
-  /** Which engine answered, or null when the source was unreachable. */
+  /** 是哪个引擎作答的；来源不可达时为 null。 */
   engine: string | null;
   model?: string;
   /**
@@ -130,7 +130,7 @@ export interface RunSearchResult {
   mode: RunMode;
   query: string | null;
   url: string | null;
-  /** Always an array, one entry per source, so the shape never changes. */
+  /** 永远是数组，每个来源一条，保证结构始终不变。 */
   results: SourceResult[];
   meta: {
     generatedAt: string;
@@ -138,21 +138,21 @@ export interface RunSearchResult {
   };
 }
 
-/** Ceiling on cached fusions, so the file stays bounded without a background job. */
+/** 缓存融合结果的上限，让文件大小有界，无需后台任务来清理。 */
 const CACHE_ENTRY_CAP = 100;
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 // 先给引擎自己的超时一个开火的机会；SIGTERM 只是兜底。
 const KILL_GRACE_MS = 30_000;
 // 在有运行截止时间的情况下宽限期很短，所以一个无视自身超时的引擎
-// timeout cannot spend the time a fallback engine was meant to have.
+// 不能把回退引擎本该拿到的时间也耗掉。
 const DEADLINE_KILL_GRACE_MS = 5_000;
 
 /**
- * A source ran out of engines. Carries the per-engine attempts so a multi-source
- * run can surface them in the source's `attempts` instead of losing them to the
- * throw. Its message is unchanged from the old plain Error, so the single-source
- * path (which lets this reach the CLI) prints exactly what it always did.
+ * 某个来源的引擎全都没能作答。它携带每个引擎的尝试记录，好让多来源运行时
+ * 能把这些记录呈现在该来源的 `attempts` 里，而不是把它们丢给抛错。
+ * 它的消息与旧版朴素 Error 完全一致，所以单来源那条路径（也就是能走到 CLI
+ * 的那条）打印出来的内容与以前一模一样。
  */
 class SourceRunError extends Error {
   constructor(
@@ -164,7 +164,7 @@ class SourceRunError extends Error {
   }
 }
 
-/** Turn a source that exhausted its engines into an explicit unavailable entry. */
+/** 把一个耗尽了全部引擎的来源，转成显式的 unavailable 条目。 */
 function failedSourceEntry(plan: SourcePlan, error: unknown): SourceResult {
   const message = error instanceof Error ? error.message : String(error);
   return {
@@ -234,10 +234,10 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
   // 链式模式是原有行为，保持逐字节不变。
   // 抓取永不融合：它返回一个页面，把两个引擎对它的渲染合并起来是另一个产品。
   //
-  // Fusion replaces the web entry, and the chain must NOT also run it: a
-  // `--source web,x` run would otherwise query the public index twice and
-  // spend twice the quota for one answer. So the web plan is dropped from the
-  // chain whenever the fusion answered, and put back only if it did not.
+  // 融合会替换 web 条目，而链式那边绝不能再去跑它：一次
+  // `--source web,x` 运行否则会把公共索引查两遍，为同一个答案
+  // 花掉双倍配额。所以只要融合作答了，web 计划就从链式里摘掉，
+  // 只有在融合没答上来时才放回去。
   let fusedWeb: SourceResult | undefined;
   let chainPlans = plans;
   if (mode === 'search' && aggregateMode(config) === 'rrf') {
@@ -246,19 +246,18 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
       chainPlans = plans.filter((plan) => plan.source !== 'web');
     }
     // 没有任何引擎够格参与融合（都退出了，或者都在冷却），于是
-    // run falls through to the chain rather than answering empty.
+    // 运行落回链式，而不是给出空答案。
   }
 
-  // 并发跑每个来源的计划，再按请求顺序重新组装，这样
-  // web,x run costs about the time of its slowest source, not their sum.
-  // Promise.all preserves index order regardless of which settled first.
+  // 并发跑每个来源的计划，再按请求顺序重新组装，这样一次
+  // web,x 运行花的时间约等于最慢来源的耗时，而不是它们的总和。
+  // Promise.all 无论谁先完成都保持下标顺序。
   const results = await Promise.all(
     chainPlans.map((plan) =>
       runOneSource(plan, context).catch((error): SourceResult => {
-        // A single-source run keeps its exact prior behavior: the failure
-        // propagates and the CLI exits. With more than one source, one source
-        // failing must not sink the others, so it becomes an explicit
-        // unavailable entry, matching the router's own unavailable semantics.
+        // 单来源运行保持它原有的精确行为：失败照原样传播、CLI 退出。
+        // 多于一个来源时，一个来源失败不能把其他来源一起拖垮，所以它变成
+        // 一条显式的 unavailable 条目，与路由层自己的 unavailable 语义一致。
         if (chainPlans.length === 1) {
           throw error;
         }
@@ -271,9 +270,9 @@ export async function runSearch(options: RunSearchOptions): Promise<RunSearchRes
     mode,
     query: query ?? null,
     url: url ?? null,
-    // The fused answer takes the web slot at the front; every other source
-    // keeps what the chain produced for it. With no fusion, this is exactly
-    // the chain's own list.
+    // 融合答案占据最前面的 web 槽位；其余每个来源
+    // 保留链式为它产出的东西。没有融合时，这份列表就完全
+    // 是链式自己那份。
     results: fusedWeb === undefined ? results : [fusedWeb, ...results],
     meta: {
       generatedAt: new Date().toISOString(),
@@ -331,11 +330,10 @@ async function runFused(
       continue;
     }
     const keyCount = splitApiKeys(settings.apiKey).length;
-    // coolingEngineEntry, not coolingEntry: the latter takes a key INDEX and
-    // asking it about "key 2" on an engine with two keys queries a state key
-    // that usually does not exist, so a cooling engine would slip into the
-    // fused run anyway. This one asks the question the router asks: is any key
-    // of this engine cooling?
+    // 这里必须用 `coolingEngineEntry`，不能改用 `coolingEntry`：后者接受的
+    // 是密钥下标，拿「第 2 个密钥」去问一个只有两个密钥的引擎，查的是一个
+    // 通常并不存在的状态键，于是处于冷却的引擎会照样混进融合运行。
+    // 而这个函数问的是路由层问的那个问题：这个引擎的任意一个密钥在冷却吗？
     if (controller && coolingEngineEntry(controller.state, engine.name, keyCount, controller.now)) {
       skipped.push(`${engine.name}: 处于冷却期，本次未参与（配额恢复后自动回归）`);
       continue;
@@ -357,14 +355,12 @@ async function runFused(
     allowPrivateNetwork: options.allowPrivateNetwork === true || config.allowPrivateNetwork === true,
   };
   const budgetMs = aggregateDeadlineMs(config);
-  // 重复的查询会真实消耗免密钥引擎的额度（Firecrawl 的
-  // monthly credits, You.com's daily per-IP allowance), and an agent often
-  // asks the same thing twice while narrowing a problem. A short disk cache
-  // turns that second ask into a disk read.
+  // 重复的查询会真实消耗免密钥引擎的额度（Firecrawl 的每月额度、
+  // You.com 的每日每 IP 配额），而智能体在收窄问题的过程中往往会把
+  // 同一句话问两遍。一份短期的磁盘缓存能把第二次提问变成一次磁盘读取。
   //
-  // 键里包含引擎集合，因为不同的集合就是不同的
-  // answer; it excludes engine order because that is routing, not the
-  // question.
+  // 缓存键里包含引擎集合，因为不同的集合就是不同的答案；
+  // 它不包含引擎顺序，因为那是路由，不是问题本身。
   const cachePath = currentCachePath();
   const cacheTtl = aggregateCacheTtlMs(config);
   const key = cacheKey({
@@ -391,20 +387,19 @@ async function runFused(
       snippet: string;
     }>(targets, request, budgetMs, AbortSignal.timeout(budgetMs), { skipped });
   } catch (error) {
-    // Every engine failed. Rethrow instead of handing the run back to the
-    // chain: the chain would query the same engines a second time for the
-    // same failure, spending the quota twice to produce a differently worded
-    // version of the error we already have. fanout's message names each source
-    // and its reason, which is what the chain's message does too.
+    // 所有引擎都失败了。直接抛出去，而不是把运行交回给链式：链式会
+    // 为同一个失败把同样的引擎再查一遍，花掉双倍配额，换来的只是
+    // 我们手里这条错误的另一种说法。fanout 的消息会点名每个来源及其
+    // 原因，而链式的消息也是这么做的。
     throw error;
   }
   const { outputs, failures } = fanoutResult;
   const fused = rrfFuse(outputs);
   const enginesUsed = outputs.map((o) => o.engine);
 
-  // 在作答前把融合结果写进缓存。写入失败只意味着
-  // second query costs quota again, not that the answer is wrong, so the
-  // error is swallowed rather than surfaced.
+  // 在作答前把融合结果写进缓存。写入失败只意味着下一次
+  // 同样的查询又要再花配额，并不代表答案有错，所以这个
+  // 错误被吞掉，而不是上报出去。
   try {
     writeCache(
       cachePath,
@@ -439,10 +434,10 @@ async function runFused(
 }
 
 /**
- * Assemble the entry a fused run answers with.
+ * 组装一次融合运行作答所用的条目。
  *
- * One function so a cached replay and a fresh run cannot drift apart in
- * wording; the only difference the caller sees is that a replay took no time.
+ * 只用一个函数，好让缓存重放与新鲜运行不会在措辞上跑偏；
+ * 调用方看到的唯一差别，就是重放没有花时间。
  */
 function buildFusedResult(input: {
   items: Array<Record<string, unknown>>;
@@ -494,9 +489,9 @@ async function runOneSource(
 ): Promise<SourceResult> {
   const { mode, query, url, timeoutMs, deadline, config, env, options } = context;
 
-  // 这个来源被请求了，但没有任何东西能服务它。返回一个显式的
-  // empty entry rather than dropping the slot, so a consumer sees it was
-  // requested and came back empty on purpose.
+  // 这个来源被请求了，但没有任何东西能服务它。返回一条显式的
+  // 空条目，而不是把这个槽位丢掉，这样调用方能看到它确实被请求过，
+  // 并且是有意地空着回来的。
   if (plan.unavailable) {
     return {
       source: plan.source,
@@ -505,8 +500,8 @@ async function runOneSource(
       status: 'unavailable',
       summary: '',
       items: [],
-      // The router's notes (e.g. the X-degrade caveat) are about routing, not
-      // facts, so they belong in warnings. Nothing ran, so no attempts.
+      // 路由层的备注（比如 X 降级的告诫）说的是路由，不是事实，
+      // 所以它们归入 warnings。什么都没跑，所以没有 attempts。
       uncertainty: [],
       warnings: plan.notes,
       attempts: [],
@@ -518,8 +513,7 @@ async function runOneSource(
 
   if (candidates.length === 0) {
     const base = noEngineMessage(SOURCE_ROLE[plan.source] === 'social' ? 'social' : mode);
-    // A typo in --engine is the actual problem: do not bury it under generic
-    // setup advice.
+    // --engine 拼错了才是真正的问题：不要把它埋进泛泛的安装建议里。
     throw new SourceRunError(plan.notes.length > 0 ? `${plan.notes.join(' ')}\n${base}` : base, []);
   }
 
@@ -527,11 +521,11 @@ async function runOneSource(
   const failures: string[] = [];
   const attempts: EngineAttempt[] = [];
   // 这次运行的全局网络策略：配置里的顶层开关，或者
-  // --allow-private-network flag as a one-off override for this run.
+  // --allow-private-network 这个仅对本次运行生效的一次性覆盖。
   const allowPrivateNetwork =
     options.allowPrivateNetwork === true || config.allowPrivateNetwork === true;
-  // 关于本次运行中撞上配额墙的引擎的说明，放在
-  // that finally answers so the reader sees who is now cooling and until when.
+  // 关于本次运行中撞上配额墙的引擎的说明，挂在最终作答的那个来源上，
+  // 让读者看到谁现在在冷却、冷却到什么时候。
   const cooldownNotes: string[] = [];
   for (const engine of candidates) {
     const failuresBeforeEngine = failures.length;
@@ -564,8 +558,8 @@ async function runOneSource(
       const keyRun = keyRuns[runIndex];
       const budget = attemptBudget(timeoutMs, deadline);
       if (!budget) {
-        // 运行时间用完了：把这个引擎记成跳过，而不是
-        // starting it, so the trail shows the deadline, not a silent gap.
+        // 运行时间用完了：把这个引擎记成跳过，而不是启动它，
+        // 这样记录里显示的是截止时间，而不是一段无声的空白。
         const message = `skipped: the run deadline of ${deadline?.ms} ms was used up before it could start.`;
         failures.push(`${engine.name}: ${message}`);
         attempts.push({ engine: engine.name, ok: false, error: message, durationSeconds: null });
@@ -595,7 +589,7 @@ async function runOneSource(
         break;
       } catch (error) {
         // 引擎会自行脱敏自己的错误，但 attempts 与 warnings 会进入
-        // output and model contexts, so the record gets the belt too.
+        // 输出与模型上下文，所以这份记录也再脱敏一遍兜底。
         const message = redactSecrets(
           error instanceof Error ? error.message : String(error),
           apiKeys,
@@ -610,7 +604,7 @@ async function runOneSource(
           durationSeconds: (Date.now() - startedAt) / 1000,
         });
         // 会记住那些持续性的失败（配额、区域锁定），好让后续运行
-        // fails over first. A transient one (rate limit, timeout) records nothing.
+        // 优先跳过它们。暂时性的失败（限流、超时）什么也不记。
         if (controller) {
           const entry = controller.record(engine.name, error, keyRun.keyIndex);
           if (entry) {
@@ -634,7 +628,7 @@ async function runOneSource(
 
     const durationSeconds = (Date.now() - successfulStartedAt) / 1000;
     // 把引擎自己的花费（exa 的美元、firecrawl 的额度）显示在
-    // attempt, when it reported any. The orchestrator otherwise drops it.
+    // 有尝试记录时，附上它。否则编排层会把它丢掉。
     attempts.push({
       engine: engine.name,
       ...(apiKeys.length > 1 ? { keyIndex: successfulKeyIndex } : {}),
@@ -645,8 +639,8 @@ async function runOneSource(
     // 这个引擎作答了，所以清掉它之前携带的任何冷却状态。
     controller?.clear(engine.name, successfulKeyIndex);
 
-    // 路由与运行期警告，与引擎的认识论性
-    // uncertainty. Config typos and degrade caveats travel on the plan.
+    // 路由与运行期警告，与引擎自身的认识论不确定性分开。
+    // 配置笔误与降级告诫随计划一起走。
     const warnings = [...plan.notes, ...cooldownNotes, ...(controller?.warnings ?? [])];
     if (failures.length > 0) {
       const rotatedWithinEngine =
@@ -666,9 +660,9 @@ async function runOneSource(
     }
 
     // 这个答案真正来自哪个语料库。一个由网页引擎服务的 X 计划
-    // (Grok missing or dead) is second-hand web data: label it `web` with
-    // `status: "degraded"` so nobody reads it as X coverage. A social engine
-    // answering an X plan is the real thing.
+    // （Grok 缺失或已死）属于二手网页数据：标成 `web`，并给出
+    // `status: "degraded"`，免得有人把它当成对 X 的覆盖。由社交引擎
+    // 应答一个 X 计划，那才是真东西。
     const requestedSource = plan.source;
     let actualSource: Source = plan.source;
     let status: SourceStatus = 'ok';
@@ -683,14 +677,14 @@ async function runOneSource(
         : ({ result: output.result } as Record<string, unknown>);
 
     // 本地引擎会把自己的运行期通告作为 `warnings` 交回。把它们合并
-    // those in after the routing ones. Other engines emit no warnings key.
+    // 排在路由类之后。其他引擎不产出 warnings 键。
     const engineWarnings = Array.isArray(body.warnings)
       ? (body.warnings as unknown[]).filter((line): line is string => typeof line === 'string')
       : [];
 
     // 路由事实与 warnings/attempts 通道由 modsearch 打标，
-    // never by the engine: strip any key the engine returned with these names so
-    // it cannot rewrite who answered or forge a routing warning.
+    // 绝不能由引擎来打：把引擎用这些名字返回的任何键剥掉，
+    // 让它没法改写「谁作答的」，也没法伪造一条路由警告。
     delete body.source;
     delete body.requestedSource;
     delete body.engine;
@@ -719,17 +713,16 @@ async function runOneSource(
   );
 }
 
-/** The run-wide deadline: when it falls, and the budget it came from. */
+/** 全轮截止时间：它在什么时候落下，以及它来自哪份预算。 */
 interface RunDeadline {
   at: number;
   ms: number;
 }
 
 /**
- * The time one attempt may take: the engine's own timeout, and the moment the
- * run stops waiting on an engine that ignores it (a subprocess is killed then).
- * Both are capped by what the run deadline has left. Null when the deadline is
- * already spent.
+ * 一次尝试允许花的时间：引擎自身的超时，以及运行不再等待一个无视该超时
+ * 的引擎的那个时刻（到点就杀掉子进程）。两者都受运行截止时间剩余量的
+ * 限制。截止时间已经用完时返回 null。
  */
 function attemptBudget(
   timeoutMs: number,
@@ -738,8 +731,8 @@ function attemptBudget(
   if (!deadline) {
     return { engineTimeoutMs: timeoutMs, killAfterMs: timeoutMs + KILL_GRACE_MS };
   }
-  // 取整毫秒：起始时钟可能带小数，而引擎交回的
-  // this to AbortSignal.timeout, which rejects a fractional delay.
+  // 取整毫秒：起始时钟可能带小数，而这个值会被交给
+  // AbortSignal.timeout，它不接受小数延迟。
   const remaining = Math.floor(deadline.at - Date.now());
   if (remaining <= 0) {
     return null;
@@ -772,9 +765,9 @@ async function callEngine(
 }
 
 /**
- * Stop waiting on an in-process engine that overran its own timeout. Engines
- * cancel their own requests on time, so this only fires on an engine bug, and
- * it keeps that bug from holding the run past its deadline.
+ * 停止等待一个超出自身超时的进程内引擎。引擎都会按时取消自己的请求，
+ * 所以这里只会在引擎出 bug 时触发，并且能防止这个 bug 把整次运行
+ * 拖过它的截止时间。
  */
 async function withinTime<T>(engineName: string, work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -792,8 +785,8 @@ async function withinTime<T>(engineName: string, work: Promise<T>, ms: number): 
 }
 
 /**
- * Nothing on this machine can do this job. Say what would fix it, one line per
- * engine, instead of naming a single dependency as if it were mandatory.
+ * 这台机器上没有任何东西能干这件事。说清怎么才能修好，每个引擎一行，
+ * 而不是只点名某一个依赖，仿佛它是必需的。
  */
 export function noEngineMessage(role: 'search' | 'fetch' | 'social'): string {
   const options = enginesForRole(role)

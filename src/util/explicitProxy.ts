@@ -25,8 +25,8 @@ export function resolveExplicitProxy(value: string | undefined): string | null |
   if (lower === 'direct' || lower === 'none') {
     return null;
   }
-  // A proxy needs both a scheme undici can act on and a host to connect to;
-  // "http://" alone parses as a URL but names no endpoint.
+  // 一个代理既需要 undici 能识别的协议，也需要一个能连上的主机；
+  // 单写 `http://` 能被解析成 URL，却没有指明任何端点。
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
