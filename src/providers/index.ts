@@ -103,26 +103,24 @@ const ENGINES: Record<string, SearchEngine> = {
 };
 
 /**
- * Engine preference per role, best first. Availability filters this, so a
- * machine with nothing installed still lands on something that works.
+ * 各角色的引擎偏好顺序，越靠前越优先。可用性会过滤这个列表，
+ * 所以一台什么都没装的机器仍然能落到一个能用的引擎上。
  */
 export const ROLE_PREFERENCE: Record<Role, string[]> = {
-  // Firecrawl leads: its keyless allowance works on a bare machine with no
-  // signup, which is the product's zero-setup promise. Keenable is the second
-  // keyless engine, so a bare machine still has a fallback when Firecrawl's
-  // daily allowance runs out. You.com is the third, smallest keyless pool
-  // (100 a day per IP), there for when both run dry on a busy IP. SearXNG
-  // follows them because it needs a configured instance but no key: it is
-  // ready sooner than the keyed engines without being available on a fresh
-  // machine. agy synthesizes and cites but its weekly quota is small, so it
-  // backs the keyless engines up rather than fronting the chain. Tavily and
-  // Exa are keyed backups.
+  // Firecrawl 打头阵：它的免注册免费额度在有网的裸机上就能用，
+  // 这正是产品「零配置」的承诺。Keenable 是第二个免密钥引擎，
+  // 所以 Firecrawl 的每日额度耗尽时裸机仍有余地。You.com 是第三个、
+  // 也是最小的免密钥池（每 IP 每天 100 次），留给前两个在热门 IP 上
+  // 都用尽的时候。SearXNG 排在它们之后，因为它需要一个已配置的实例
+  // 但不需要密钥：它比需要密钥的引擎更早可用，但又不像它们那样在
+  // 全新机器上就现成。agy 会合成并引用，但每周额度很小，所以只做
+  // 免密钥引擎的后备而不是排在链首。Tavily 与 Exa 是需要密钥的备份。
   //
-  // antigravity-cli is listed here even though it stays out of automatic
-  // routing by default. AGENTS.md promises that every engine participates
-  // unless `enabled: false` says otherwise, so the exclusion belongs in the
-  // config default (OFF_UNLESS_ENABLED in config.ts), not in this list.
-  // Keeping it here is what lets "enabled: true" put it back.
+  // antigravity-cli 仍然列在这里，尽管它默认不参与自动路由。AGENTS.md
+  // 的约定是「每个引擎默认参与，除非用 `enabled: false` 排除」，所以
+  // 排除应当落在配置默认值里（config.ts 的 OFF_UNLESS_ENABLED），而不是
+  // 从这个列表里删掉。把它留在这里，正是 `enabled: true` 能把它加回来的
+  // 原因。
   search: [
     'firecrawl',
     'keenable',
@@ -133,17 +131,17 @@ export const ROLE_PREFERENCE: Record<Role, string[]> = {
     'tavily',
     'exa',
   ],
-  // Firecrawl runs a cloud browser for JS-heavy pages, keyless by default
-  // (opt out with firecrawl.keylessFetch false). agy extracts to a focus. The
-  // local needs no setup and returns the page as served, so it stays the
-  // default floor unless the user disables it.
+  // Firecrawl 会为 JS 重的页面起云端浏览器，默认免密钥（用
+  // firecrawl.keylessFetch 设 false 可退出）。agy 能抽取到指定焦点。
+  // local 无需任何配置、原样返回页面，所以除非用户主动禁用它，
+  // 它始终是兜底。
   fetch: ['firecrawl', 'antigravity-cli', 'local'],
-  // Only xAI can see inside X. Left in place: this chain has exactly one
-  // member, and x_search registers only when the user asks for it.
+  // 只有 xAI 能看见 X 内部。保留在此：这条链只有一个成员，
+  // 而 x_search 只在用户主动要求时才注册。
   social: ['grok-cli'],
 };
 
-/** Engine that never needs setup and serves as the default page-fetch floor. */
+/** 永远不需要配置、作为页面抓取默认兜底的引擎。 */
 export const FETCH_FLOOR = 'local';
 
 export function resolveEngine(engineName: string): SearchEngine {

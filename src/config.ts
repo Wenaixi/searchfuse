@@ -1,62 +1,55 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-// Runtime-safe: providers/index.ts imports nothing from this module at runtime
-// (its config import is type-only), so this does not create an import cycle.
+// 运行期安全：providers/index.ts 在运行时并不从这个模块导入任何东西
+// （它对 config 的导入只是类型级的），所以这里不会形成循环导入。
 import { findEngine, listEngines } from './providers/index.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
 import { resolveExplicitProxy } from './util/explicitProxy.ts';
 import { maskUrlCredentials, redactSecrets } from './util/redact.ts';
 
-// Layered configuration: CLI flags > environment variables > ~/.modsearch/config.json > built-ins.
+// 分层配置：命令行参数 > 环境变量 > ~/.modsearch/config.json > 内置默认。
 //
-// `engine` is the soft preference. `engines.<name>.enabled` decides which
-// engines automatic routing may use, with missing meaning enabled. Everything
-// else follows from engine capability. Credentials and binaries also live
-// under `engines`.
+// `engine` 是软偏好。`engines.<name>.enabled` 决定自动路由可以使用哪些引擎，
+// 缺省即视为启用。其余一切由引擎自身能力决定。凭据与可执行文件路径也放在
+// `engines` 下面。
 
 export type Role = 'search' | 'fetch' | 'social';
 
 export const ROLES: Role[] = ['search', 'fetch', 'social'];
 
-/** The role whose preferred engine is stored at the top level. */
+/** 首选引擎存放在顶层字段的那个角色。 */
 export const CONFIGURED_ROLE: Role = 'search';
 
 export type AggregateMode = 'rrf' | 'chain';
 
 export interface AggregateConfig {
-  /** 'rrf' fuses concurrently, 'chain' tries one engine at a time. */
+  /** 'rrf' 并发融合，'chain' 一次试一个引擎。 */
   mode?: AggregateMode;
   /**
-   * Wall-clock budget for a fused run, shared across every source. Past it,
-   * stragglers are recorded as failures and the run proceeds with what
-   * arrived. Ignored in chain mode, which has its own per-engine budget.
+   * 一次融合运行的墙钟预算，所有来源共享。过了这个点，还没回来的记为失败，
+   * 运行带着已到达的部分继续。链式模式下忽略此项——那条路有自己的单引擎预算。
    */
   deadlineMs?: number;
   /**
-   * How long a fused result is served from cache, in milliseconds. 0 switches
-   * caching off. Default 5 minutes: long enough that an agent narrowing a
-   * problem reuses its own answer, short enough that a search about today's
-   * news is not stale by the time it is read.
+   * 融合结果从缓存提供的时间，毫秒。0 表示关闭缓存。默认 5 分钟：足够长，
+   * 让正在缩小问题范围的 agent 复用自己的答案；也足够短，让关于今日新闻的
+   * 搜索结果读到的时候还没过时。
    */
   cacheTtlMs?: number;
 }
 
 /**
- * Engines that are registered, resolvable and diagnosable, but stay out of
- * automatic routing until the user asks for them.
+ * 已注册、可解析、可诊断，但在用户主动要求之前不参与自动路由的引擎。
  *
- * This is not the same thing as deleting the engine from the role preference:
- * AGENTS.md promises that every engine participates by default and that
- * `enabled: false` is what excludes one, so the exclusion has to be an
- * ordinary setting a user can flip rather than a special case in the router.
- * The value here is the default the engine gets when the config file says
- * nothing about it.
+ * 这不等同于从角色偏好里删掉该引擎：AGENTS.md 承诺每个引擎默认都参与，
+ * 排除某个引擎的唯一手段是 `enabled: false`，所以这种排除必须是一个用户
+ * 可以随手切换的普通设置，而不是路由器里的特例。这里的值就是配置文件
+ * 对该引擎只字未提时它得到的默认。
  *
- * antigravity-cli is here because it synthesizes with a model and takes a
- * minute or more, which outlasts any useful fused budget; left in the chain it
- * could only ever be skipped. A user who wants it writes
- * `engines.antigravity-cli.enabled: true` and gets it back.
+ * antigravity-cli 之所以在这里，是因为它靠模型合成结果、要花一分钟甚至更久，
+ * 超过任何有用的融合预算；留在链里也只能被跳过。想要它的用户写上
+ * `engines.antigravity-cli.enabled: true` 就能把它拿回来。
  */
 const OFF_UNLESS_ENABLED: Record<string, true> = {
   'antigravity-cli': true,
@@ -66,49 +59,45 @@ export interface EngineSettings {
   apiKey?: string;
   model?: string;
   bin?: string;
-  /** Participate in automatic routing. Undefined means enabled. */
+  /** 是否参与自动路由。未设置即视为启用。 */
   enabled?: boolean;
   /**
-   * Allow Firecrawl to fetch public URLs without an API key. On by default
-   * (undefined means on); set false to keep page fetch off Firecrawl's cloud.
+   * 允许 Firecrawl 在没有 API key 的情况下抓取公开 URL。默认开启
+   * （未设置即视为开启）；设为 false 可让页面抓取不走 Firecrawl 的云端。
    */
   keylessFetch?: boolean;
   /**
-   * Endpoint base for the HTTP engines (tavily, exa, firecrawl, keenable), replacing the
-   * official host: a third-party compatible gateway, a proxy, a self-hosted
-   * deployment. The engine appends its documented path (`/search`, `/v2/scrape`)
-   * and sends its API key to whatever host this names, which is exactly the
-   * point and exactly the risk: only name a host you trust with that key.
+   * HTTP 引擎（tavily、exa、firecrawl、keenable）的端点基址，用来替换官方主机：
+   * 可以是第三方兼容网关、代理或自托管部署。引擎会追加自己文档里规定的路径
+   * （`/search`、`/v2/scrape`），并把 API key 发给这里指定的主机——这既是
+   * 该设置的意义所在，也正是它的风险所在：只填你愿意托付这把 key 的主机。
    */
   baseURL?: string;
   /**
-   * Per-engine proxy. Unset follows the machine's http_proxy / https_proxy /
-   * no_proxy; `direct` or `none` forces a direct connection for this engine
-   * alone; a full http(s) URL sends only this engine through it. Engines share
-   * one process, so this is the only way to route one of them differently —
-   * a keyless engine through a local relay, a regional API through a regional
-   * egress, or an engine bypassing a proxy the rest of the machine needs.
+   * 单引擎代理。未设置则跟随机器的 http_proxy / https_proxy / no_proxy；
+   * `direct` 或 `none` 强制只有这个引擎走直连；完整的 http(s) URL 则只让这个
+   * 引擎走该代理。所有引擎共享同一个进程，所以这是让其中一个引擎走不同路由的
+   * 唯一办法——让无 key 的引擎走本地中继、让区域 API 走区域出口，或者让某个
+   * 引擎绕过机器其余部分需要的代理。
    */
   proxy?: string;
   /**
-   * How this engine takes part in a fused search. Both keys default to
-   * `aggregate: true, tool: false`, which is the behavior a config written
-   * before these existed gets.
+   * 这个引擎如何参与融合搜索。两个键的默认值都是
+   * `aggregate: true, tool: false`，这也是在这些设置出现之前写下的配置所得到的行为。
    *
-   * - `aggregate` — its result joins the `web_search` fusion.
-   * - `tool` — it also becomes a tool of its own, callable by name.
+   * - `aggregate` — 它的结果进入 `web_search` 的融合。
+   * - `tool` — 它同时成为一个独立工具，可以按名称调用。
    *
-   * Both at once is allowed: the engine contributes to the fused answer and
-   * can be addressed directly when the model wants that one source alone.
+   * 两者可以同时开启：这个引擎既参与融合答案，又能在模型只想要这一个来源时
+   * 被直接点名调用。
    */
   expose?: {
     aggregate?: boolean;
     tool?: boolean;
   };
   /**
-   * Name for the standalone tool when `expose.tool` is on. Defaults to
-   * `<engine>_search`. Two engines may not claim the same name, and the
-   * reserved names of the built-in tools are refused.
+   * `expose.tool` 开启时独立工具使用的名称。默认是
+   * `<engine>_search`。两个引擎不能占用同一个名称，内置工具的保留名也会被拒绝。
    */
   toolName?: string;
 }
@@ -125,6 +114,12 @@ export interface ModsearchConfig {
    * first that answers.
    */
   aggregate?: AggregateConfig;
+  /**
+   * MCP 服务端列表，由插件在加载时读取并注册成工具。这一段的形状由
+   * mcp 客户端自己定义（transport/url/headers/allowTools/toolNames），
+   * 配置层只负责原样搬运，不解释内容。
+   */
+  mcp?: Record<string, Record<string, unknown>>;
   /**
    * Quota cooldown switch: 'on' (default) or 'off'. On, a quota-spent engine is
    * remembered and moved to the back of the fallback chain until it recovers.
@@ -350,6 +345,12 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   // one would not fail loudly: the read path would just report the default.
   if (raw.aggregate !== undefined) {
     config.aggregate = raw.aggregate;
+  }
+  // 同一个陷阱的第二个实例：MCP 服务端配置住在这一份文件里（D3 决定的），
+  // 而这里是一次白名单式的重建，不搬运就会在每一次 `config set` 之后把整个
+  // mcp 段抹掉。它不会报错，只会让工具在下次加载时安静地消失。
+  if (raw.mcp !== undefined) {
+    config.mcp = raw.mcp;
   }
   if (seenApiKeys.size > 0) {
     SEEN_API_KEYS.set(config, [...seenApiKeys]);

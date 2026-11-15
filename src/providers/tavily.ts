@@ -2,7 +2,7 @@
 // engine contract: schema-shaped result, no fabricated relevance score,
 // uncertainty as an array. Search mode only.
 //
-// This talks to the Tavily REST API directly with the built-in fetch. The
+// 这里用内置 fetch 直接与 Tavily REST API 通信。
 // official @tavily/core SDK dragged in ~30 production dependencies (an axios
 // chain with known advisories) to wrap a single POST, so it is gone. See
 // https://docs.tavily.com/documentation/api-reference/endpoint/search

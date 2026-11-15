@@ -1,15 +1,13 @@
-// SearXNG (https://docs.searxng.org/dev/search_api.html). In-process search
-// engine, search only, in the same shape as the other keyless API engines.
+// SearXNG（https://docs.searxng.org/dev/search_api.html）。进程内搜索引擎，
+// 只做搜索，形状与其他免密钥 API 引擎一致。
 //
-// No default host: a public instance almost always answers 403 because
-// `format: json` is off in its settings.yml, so guessing a host would turn a
-// configuration omission into a run-time failure. `baseURL` is therefore
-// required, and isAvailable reports false without it.
+// 没有默认主机：公共实例几乎总是返回 403，因为它的 settings.yml 里
+// `format: json` 是关的，猜一个主机只会把「配置遗漏」变成「运行时故障」。
+// 因此 `baseURL` 是必需的，没有它 isAvailable 就报 false。
 //
-// One instance already fans out to dozens of upstream engines internally, so
-// this provider contributes one ranked list like any other. Weight is not
-// raised to reflect that: RRF fusion measures agreement between independent
-// sources, and inflating a single source's vote would distort it.
+// 一个实例内部已经扇出到几十个上游引擎，所以这个提供方与其他引擎一样
+// 只贡献一份排序列表。不因此调高权重：RRF 融合衡量的是独立来源之间的共识，
+// 抬高单一来源的票数只会扭曲它。
 import { redactSecrets } from '../util/redact.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
@@ -56,8 +54,8 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
 
   if (!response.ok) {
     const detail = redactSecrets(text.trim(), [options.settings.baseURL]);
-    // 403 on a healthy instance is the format gate far more often than it is
-    // an access problem, so the message names the setting that fixes it.
+    // 健康实例上的 403 绝大多数是格式闸门，而不是访问权限问题，
+    // 所以错误消息直接点出该改哪个设置。
     if (response.status === 403) {
       throw new Error(
         `searxng refused the request (403). A public instance usually has format=json disabled; enable it with "search: formats: [html, json]" in that instance's settings.yml, or point engines.searxng.baseURL at your own instance.${detail ? ` (${detail})` : ''}`,

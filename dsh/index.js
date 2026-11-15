@@ -1,19 +1,16 @@
-// DeepSeek Harness (dsh) plugin: routes the harness's web capability through
-// the modsearch CLI that ships in this very package. dsh already owns a web
-// seam (`ctx.web`) with a native `web_search` tool over pluggable providers,
-// so search plugs in as a provider instead of a competing tool: the model
-// keeps the stable `web_search` schema and the UI keeps its citation cards,
-// while the backend becomes modsearch's keyless engine chain. The two corpora
-// dsh has no seam for, X and focused page reading, are registered as tools of
-// their own; like modlens's `read_image`, a registered tool schema reaches
-// the model on every request, so there is no trigger gamble. The engine is
-// spawned from ../dist/main.js inside this package: no PATH lookup, no npx,
-// the plugin and its engine version-lock together.
+// DeepSeek Harness (dsh) 插件：把 harness 的 web 能力接到本包自带的 modsearch
+// CLI 上。dsh 本身已经有一个 web seam（`ctx.web`），它基于可插拔的 provider
+// 提供原生 `web_search` 工具，所以搜索以 provider 的身份接入，而不是再立一个
+// 竞争性的工具：模型继续用稳定的 `web_search` schema，UI 继续显示引用卡片，
+// 后端则换成 modsearch 的免密钥引擎链。dsh 没有 seam 覆盖的两块语料，X 和
+// 聚焦式页面阅读，各自注册为独立工具；与 modlens 的 `read_image` 同理，注册
+// 出去的工具 schema 每次请求都会送到模型面前，不存在「触发与否靠运气」的
+// 问题。引擎从本包内的 ../dist/main.js 拉起：不走 PATH 查找，不用 npx，插件
+// 与它的引擎版本锁定在一起。
 //
-// Loaded via the cordis.patch.yml rows (see the package.json `dsh.bundle`
-// manifest): one row mounts this plugin, one repoints the `web` seam's
-// `searchProvider` at it. Engines, keys, and routing keep living in
-// ~/.modsearch/config.json, shared with every harness.
+// 通过 cordis.patch.yml 的条目加载（见 package.json 的 `dsh.bundle` manifest）：
+// 一条条目挂载本插件，另一条把 `web` seam 的 `searchProvider` 指向它。引擎、
+// 密钥和路由仍然保存在 ~/.modsearch/config.json，与所有 harness 共用。
 import {
   chmodSync,
   existsSync,
@@ -31,8 +28,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnHidden } from './spawnHidden.js';
 
 const CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
-// Kept in lockstep with src/schema.ts by a repo test; the plugin file cannot
-// import the TS source and stays fully dependency-free (node builtins only).
+// 由仓库里的一个测试与 src/schema.ts 保持同步；插件文件无法导入 TS 源码，
+// 且要保持完全零依赖（只用 node 内置模块）。
 const SEARCH_OUTPUT_SCHEMA = JSON.parse(
   readFileSync(new URL('./search-schema.json', import.meta.url), 'utf8'),
 );
@@ -40,24 +37,22 @@ const FETCH_OUTPUT_SCHEMA = JSON.parse(
   readFileSync(new URL('./fetch-schema.json', import.meta.url), 'utf8'),
 );
 
-// The CLI's --timeout is per engine, and a failed engine hands over to the
-// next with a fresh budget, so each path also passes --deadline: the whole
-// run's wall clock. The per-engine share stays well under the deadline so a
-// failover engine still gets its turn, and the deadline stays under the
-// harness budget so the run always ends in a result or the CLI's descriptive
-// error, never the host's bare abort.
+// CLI 的 --timeout 是按引擎计算的，而一个引擎失败后会把一份全新的预算交给
+// 下一个引擎，所以每条路径还会传 --deadline：整轮运行的墙钟时间上限。单个
+// 引擎分到的时间远低于 deadline，好让故障转移的引擎仍有轮次可用；而 deadline
+// 又低于 harness 的预算，于是整轮运行最终总是落在结果上，或落在 CLI 那句有
+// 描述性的错误上，绝不会变成宿主那边一句光秃秃的 abort。
 //
-// Own tools: up to 120s per engine, 180s for the run, plus a cooperative
-// backstop past the deadline.
+// 自有工具：每引擎最多 120 秒，整轮 180 秒，外加一个越过 deadline 的协作式
+// 兜底。
 const OWN_TOOL_ENGINE_TIMEOUT_MS = 120_000;
 const OWN_TOOL_DEADLINE_MS = 180_000;
 const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
-// The provider path runs under tool-web's budget (60s for the shipped search
-// route): 40s for one engine leaves a fast fallback room inside a 55s run.
+// provider 路径运行在 tool-web 的预算之下（随包发布的搜索路由是 60 秒）：
+// 单个引擎给 40 秒，就能在 55 秒的一整轮里给一次快速回退留出余地。
 /**
- * How often the plugin re-checks the config file's mtime. The file is small
- * and a stat is cheap; a few seconds is short enough that a user who just
- * saved a server expects its tools on the next turn.
+ * 插件多久重新检查一次配置文件的 mtime。文件很小，stat 也很便宜；几秒钟
+ * 足够短，用户刚保存完一个服务器，下一轮就期望看到它的工具。
  */
 const MCP_CONFIG_POLL_MS = 5_000;
 
@@ -71,48 +66,43 @@ export function apply(ctx, config = {}) {
   if (config.searchProvider !== false) {
     registerSearchProvider(ctx, config);
   }
-  // MCP servers, configured under `mcp` in ~/.modsearch/config.json. The
-  // protocol implementation ships as its own built module because this file
-  // is hand-written JavaScript that cannot import the TypeScript source.
+  // MCP 服务器，在 ~/.modsearch/config.json 的 `mcp` 下配置。协议实现作为
+  // 独立的构建模块发布，因为本文件是手写的 JavaScript，无法导入 TypeScript
+  // 源码。
   //
-  // Everything stateful lives in this closure, never at module scope: the
-  // host reloads a plugin in place without re-evaluating the module when no
-  // file changed, so a module-level session would outlive its own fiber and
-  // be shared with the next generation.
+  // 所有带状态的东西都活在这个闭包里，绝不放模块作用域：在没有文件变更时，
+  // 宿主会原地重载插件而不重新求值模块，于是模块级的 session 会活得比它自己
+  // 的 fiber 更久，还会被下一代实例共享。
   if (config.mcp !== false) {
     registerMcpTools(ctx);
   }
-  // Registered as raw JSON-Schema tool definitions (no dsh package imports:
-  // the developer-preview registry accepts these and out-of-tree resolution
-  // of @deepseek-ai/dsh-tools is not yet reliable), so this plugin owns its
-  // own argument validation inside execute.
-  // Off by default: X search needs a signed-in Grok, and on a machine without
-  // one it can only answer degraded. Registering a tool that cannot do its
-  // job costs the model a schema on every request and a failed call the first
-  // time it is tried. The engine itself stays registered, so `doctor` still
-  // reports whether Grok is signed in and a user can switch this on the
-  // moment it is.
+  // 以裸 JSON-Schema 工具定义的形式注册（不导入任何 dsh 包：developer-preview
+  // 注册表接受这种定义，而 @deepseek-ai/dsh-tools 的树外解析目前还不可靠），
+  // 所以本插件在 execute 内部自己负责参数校验。
+  // 默认关闭：X 搜索需要有登录状态的 Grok，在没登录的机器上它只能给出降级
+  // 答案。注册一个干不了自己活的工具，代价是模型每次请求都要带一份 schema，
+  // 以及首次尝试时的一次失败调用。引擎本身仍保持注册，于是 `doctor` 依然能
+  // 报告 Grok 是否已登录，而用户可以在它登录的那一刻立刻把这个开关打开。
   if (config.xSearch === true) {
     registerXSearchTool(ctx);
   }
   if (config.readPage !== false) {
     registerReadPageTool(ctx);
   }
-  // Standalone engine tools, before MCP: the built-in names are what MCP
-  // servers are kept away from, and an engine tool the user named is theirs.
+  // 独立引擎工具，注册在 MCP 之前：内置名字正是 MCP 服务器不该碰的，而用户
+  // 自己命名的引擎工具就属于用户。
   if (config.engineTools !== false) {
     registerEngineTools(ctx);
   }
-  // The settings card. dsh web users have no terminal, so `modsearch config
-  // set` is out of reach there and an engine key had no way in. The card the
-  // browser half (dsh/client.js) contributes talks to the settings route
-  // below rather than to a settings schema, because the values live in
-  // ~/.modsearch/config.json, shared with the CLI and every other harness.
+  // 设置卡片。dsh web 用户没有终端，所以 `modsearch config set` 在那里够不着，
+  // 引擎密钥也就没有入口。浏览器那一半（dsh/client.js）贡献的卡片连的是下面
+  // 这条设置路由，而不是某个 settings schema，因为这些值住在
+  // ~/.modsearch/config.json，与 CLI 和其他所有 harness 共用。
   //
-  // webServer exists only under the web profile, and this cordis has no
-  // optional-inject form, so both halves ride scoped ctx.inject calls: the
-  // closure runs where the service exists and never runs where it does not.
-  // A headless profile keeps the plugin's tools and search provider untouched.
+  // webServer 只在 web profile 下存在，而这个 cordis 没有「可选注入」的写法，
+  // 所以两半都搭在带作用域的 ctx.inject 调用上：闭包只在服务存在的地方运行，
+  // 服务不存在的地方它根本不运行。headless profile 则原样保留插件的工具和
+  // 搜索 provider。
   if (config.settingsCard !== false && typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (scope) => {
       try {
@@ -120,20 +110,17 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         console.error(`[modsearch] settings card route skipped: ${error}`);
       }
-    });    // From rc.7 to 0.1.6-alpha.1 the settings page dispatched plugin cards
-    // by served settings namespace: a card rendered only when its slot key
-    // matched a namespace the host answered for. The namespace registered
-    // here is an empty pass-through, because its whole job is to make the
-    // card dispatchable. The values stay in the config file behind the route
-    // above. The schema is duck-typed to what the seam calls on it, callable
-    // plus toJSON, so this plugin needs no dsh package import to describe
-    // nothing.
+    });    // 从 rc.7 到 0.1.6-alpha.1，设置页是按已服务的 settings 命名空间来分发插件
+    // 卡片的：只有当卡片的槽位键匹配上宿主应答过的命名空间，卡片才会被渲染。
+    // 这里注册的命名空间是个空的透传，因为它的全部职责就是让卡片可被分发。
+    // 值仍然留在上面那条路由背后的配置文件里。schema 按这个 seam 实际会对它
+    // 调用的东西做了鸭子类型：可调用，加上 toJSON，于是本插件不需要导入任何
+    // dsh 包就能描述「什么都没有」。
     //
-    // 0.1.6-alpha.2 moved the card to the Plugins page, keyed by package name,
-    // and 0.1.7 removed the registry: its settings service only lists
-    // `.volatile()` Config fields, which this plugin has none of. A host
-    // without register has nothing to serve here, so the namespace is
-    // skipped without a word.
+    // 0.1.6-alpha.2 把卡片挪到了 Plugins 页，按包名索引；0.1.7 又移除了注册表：
+    // 它的 settings 服务只列出 `.volatile()` 的 Config 字段，而本插件一个都没
+    // 有。没有 register 的宿主在这里没什么可服务的，于是这个命名空间被静默
+    // 跳过。
     ctx.inject(['settings'], (scope) => {
       if (typeof scope.settings.register !== 'function') {
         return;
@@ -153,24 +140,19 @@ export function apply(ctx, config = {}) {
 }
 
 /**
- * The web seam's search capability, backed by the modsearch engine chain
- * (Firecrawl keyless by default with no signup, agy by sign-in, Tavily and Exa
- * by key, with cooldown-aware fallback). `available()` must stay cheap and
- * offline, and the CLI plus its
- * router always ship, so it answers true and leaves the honest verdict to
- * execution: a run with no usable engine fails with the per-engine attempt
- * list, which beats a silent false here.
+ * web seam 的搜索能力，由 modsearch 引擎链支撑（默认 Firecrawl 免密钥、无需
+ * 注册，agy 靠登录，Tavily 和 Exa 靠密钥，带冷却感知的故障转移）。`available()`
+ * 必须保持廉价且离线，而 CLI 加上它的路由始终随包发布，所以这里返回 true，
+ * 把真实的判定留给执行阶段：一次没有可用引擎的运行会带着逐引擎的尝试清单失败，
+ * 这比在这里悄悄返回 false 要好。
  */
 /**
- * The wall-clock budgets for one `web_search` call.
+ * 一次 `web_search` 调用的墙钟预算。
  *
- * The plugin config wins, because a deployment may size this differently from
- * the CLI. Failing that, the config FILE's `aggregate.deadlineMs` is read —
- * so a user who sets one number there gets it for both the command line and
- * the model-facing tool, instead of two numbers that disagree. The built-in
- * default is the widest of the three: under the web seam the caller is a
- * person waiting on a model answer, which tolerates a longer wait than a
- * terminal does.
+ * 插件配置优先，因为不同部署可能给这个值定不同的大小。其次读配置文件的
+ * `aggregate.deadlineMs`——这样用户在文件里设一个数，命令行和面向模型的工具
+ * 就都用它，而不是出现两个互相打架的数。内置默认值是三者中最宽的：在 web
+ * seam 之下，调用方是一个正在等模型回答的人，比终端能容忍更长的等待。
  */
 function providerBudgets(config) {
   const fromPlugin = {
@@ -191,21 +173,19 @@ function providerBudgets(config) {
       fromFile = configured;
     }
   } catch {
-    // An unreadable config file is not a reason to fail a search; the
-    // defaults below still work.
+    // 配置文件读不出来，并不构成让一次搜索失败的理由；下面的默认值照样能用。
   }
   const deadlineMs = fromPlugin.deadlineMs ?? fromFile ?? PROVIDER_DEADLINE_MS;
-  // The per-engine budget has to leave the slowest engine room inside the
-  // run budget, so it follows the deadline rather than being a second number
-  // to keep in sync.
+  // 单引擎预算必须给最慢的引擎在整轮预算里留出余地，所以它跟着 deadline 走，
+  // 而不是变成第二个需要手动同步的数字。
   const timeoutMs = fromPlugin.timeoutMs ?? Math.min(PROVIDER_TIMEOUT_MS, deadlineMs);
   return { timeoutMs, deadlineMs };
 }
 
 function registerSearchProvider(ctx, config) {
   if (typeof ctx.web?.registerSearchProvider !== 'function') {
-    // A developer-preview surface move: degrade to the tools-only plugin,
-    // but say so in the harness log instead of vanishing.
+    // developer-preview 阶段的一次接口迁移：降级成「只有工具」的插件，但要在
+    // harness 日志里说出来，而不是无声消失。
     console.error('[modsearch] web seam has no registerSearchProvider; search provider skipped');
     return;
   }
@@ -236,7 +216,7 @@ function registerSearchProvider(ctx, config) {
       return {
         content: lines.filter(Boolean).join('\n'),
         sources: toSources(entry.items),
-        // The CLI already enforces --max-results; the seam re-caps regardless.
+        // CLI 本身已经执行了 --max-results；seam 这边无论如何都会再封一次顶。
         truncated: false,
       };
     },
@@ -244,10 +224,9 @@ function registerSearchProvider(ctx, config) {
 }
 
 /**
- * X (Twitter) search: the corpus the web seam has no notion of. Routed by the
- * CLI to Grok Build when it is installed and signed in; otherwise a web
- * engine stands in and the answer is marked degraded, so second-hand evidence
- * is explicit in the canonical value, never silent.
+ * X（Twitter）搜索：web seam 完全没有概念的那块语料。当 Grok Build 已安装且
+ * 已登录时，CLI 把请求路由给它；否则由一个 web 引擎顶替，答案被标记为降级，
+ * 于是「二手证据」在权威值里是显式的，绝不静默。
  */
 function registerXSearchTool(ctx) {
   ctx.tools.register({
@@ -271,11 +250,11 @@ function registerXSearchTool(ctx) {
     output: {
       schema: SEARCH_OUTPUT_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: renderSearchEvidence(value) }],
-      // Durable projection for the native citation card; derived only from
-      // the canonical value, so it replays without re-running anything.
+      // 给原生引用卡片用的持久投影；只从权威值派生，所以回放时无需重跑任何
+      // 东西。
       presentationMeta: (_args, value) => ({ sources: toSources(value.items) }),
     },
-    // The CLI enforces its own deadline; this is the cooperative backstop.
+    // CLI 自己会执行 deadline；这里只是协作式的兜底。
     timeoutMs: OWN_TOOL_BACKSTOP_MS,
     isConcurrencySafe: () => true,
     presentCall: (args) => ({
@@ -299,8 +278,8 @@ function registerXSearchTool(ctx) {
         cliArgs.push('--max-results', String(Math.floor(args.max_results)));
       }
       const entry = await runCli(cliArgs, exec.signal);
-      // The canonical value is the evidence plus its provenance; routing
-      // details (attempts, durations, engine spend) stay operational.
+      // 权威值是证据加上它的来源信息；路由细节（尝试记录、耗时、引擎消耗）
+      // 留在运行层，不进权威值。
       return {
         status: entry.status,
         source: entry.source,
@@ -313,14 +292,12 @@ function registerXSearchTool(ctx) {
 }
 
 /**
- * Focused page reading: fetch one URL and return evidence, optionally shaped
- * by an answer focus. Deliberately a tool of its own rather than a web-seam
- * fetch provider: the seam's fetch contract is safe raw retrieval (real
- * status code, undigested body) and excludes reading focus by design, while
- * this is an LLM-processed read with a summary, extracted content, links,
- * an uncertainty list, and operational warnings. The CLI blocks private-network
- * targets by default, and this tool exposes no override for that. dsh also
- * exposes its own raw web_fetch by default, so the description names the split.
+ * 聚焦式页面阅读：抓一个 URL 并返回证据，可选地由一个问题焦点来塑形。故意做成
+ * 独立工具，而不是 web seam 的 fetch provider：seam 的 fetch 契约是安全的原始
+ * 抓取（真实状态码、未经消化的正文），并且按设计排除了阅读焦点；而这里是
+ * LLM 处理过的阅读，带摘要、抽取后的内容、外链、不确定性清单和运行层警告。
+ * CLI 默认拦截私网目标，本工具不提供任何绕过它的方式。dsh 默认也暴露它自己的
+ * 原始 web_fetch，所以描述里点明了二者的分工。
  */
 function registerReadPageTool(ctx) {
   ctx.tools.register({
@@ -374,7 +351,7 @@ function registerReadPageTool(ctx) {
   });
 }
 
-/** The CLI budget flags for the plugin's own tools. */
+/** 给插件自有工具用的 CLI 预算参数。 */
 function ownToolBudget() {
   return [
     '--timeout',
@@ -385,23 +362,22 @@ function ownToolBudget() {
 }
 
 /**
- * Run the CLI once and return the single source entry from its envelope.
- * Throws with the per-engine attempt trail when the run failed or the source
- * came back unavailable, so the harness error names what was actually tried.
+ * 跑一次 CLI，从它的 envelope 里取出那一条 source 记录。当运行失败、或该
+ * source 返回 unavailable 时抛出异常并带上逐引擎的尝试轨迹，这样 harness 的
+ * 错误信息里说的就是实际试过什么。
  */
 /**
- * The environment a spawned CLI needs. Electron exposes the desktop
- * executable as process.execPath, and its child must enter Node mode or the
- * CLI path and flags are handed back to the app.
+ * 被拉起的 CLI 所需的环境。Electron 会把桌面可执行文件暴露为 process.execPath，
+ * 它的子进程必须进入 Node 模式，否则 CLI 的路径和参数会被交回给应用本身。
  */
 function childEnv() {
   return process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env;
 }
 
 /**
- * The CLI this plugin spawns. Only the npm package ships dist/: a GitHub
- * source install (DSH's add dialog takes a repo URL) carries no build, and
- * the bare "Cannot find module" Node prints then names no way out.
+ * 本插件拉起的 CLI。只有 npm 包才带 dist/：从 GitHub 源码安装（DSH 的添加
+ * 对话框接受仓库 URL）没有构建产物，此时 Node 打印的那句光秃秃的
+ * "Cannot find module" 也没指出任何出路。
  */
 function cliPath() {
   const cli = process.env.MODSEARCH_DSH_CLI || CLI_PATH;
@@ -443,7 +419,7 @@ async function runCli(args, signal) {
   return entry;
 }
 
-/** Map CLI result items to the seam's citeable-source shape, dropping junk. */
+/** 把 CLI 的结果条目映射成 seam 的可引用来源结构，顺手丢掉垃圾项。 */
 function toSources(items) {
   if (!Array.isArray(items)) {
     return [];
@@ -518,19 +494,18 @@ function renderFetchEvidence(value) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings card, host half: it reads and writes ~/.modsearch/config.json, the
-// same file the CLI edits, so a key set in the browser is the key every other
-// harness uses. The browser never receives a key, only whether one is stored.
+// 设置卡片，宿主这一半：它读写 ~/.modsearch/config.json，也就是 CLI 编辑的
+// 同一个文件，所以在浏览器里设的密钥，就是其他每个 harness 用的密钥。浏览器
+// 永远收不到密钥本身，只会收到「有没有存过」。
 // ---------------------------------------------------------------------------
 
-/** The tool names this plugin registers itself. An MCP server may not claim
- * one of them: a silent overwrite would replace a built-in tool with
- * whatever a third-party server chose to call its own.
+/** 本插件自己注册的工具名。MCP 服务器不得占用其中之一：一次静默覆盖会把
+ * 内置工具替换成第三方服务器随便起的名字。
  */
 const BASE_TOOL_NAMES = ['x_search', 'read_page'];
 
-/** Every engine the config promoted to a standalone tool, named as it is
- * registered. Read fresh so a save takes effect on the next load. */
+/** 配置提升为独立工具的每个引擎，按它们注册时的名字。每次新鲜读取，使保存的
+ * 改动在下一次加载时生效。 */
 function engineToolNames() {
   try {
     const config = readModsearchConfig();
@@ -541,8 +516,8 @@ function engineToolNames() {
           isPlainObject(settings) &&
           isPlainObject(settings.expose) &&
           settings.expose.tool === true &&
-          // Same rule registerEngineTools applies: a switched-off engine is
-          // not a tool, so its name is free for another one to claim.
+          // 与 registerEngineTools 遵循的规则相同：被关掉的引擎不是工具，所以
+          // 它的名字可以被别人占用。
           coerceBoolean(settings.enabled) !== false,
       )
       .map(([rawName, settings]) =>
@@ -555,7 +530,7 @@ function engineToolNames() {
   }
 }
 
-/** The engines the card offers, in the order the docs introduce them. */
+/** 卡片提供的引擎，顺序就是文档介绍它们的顺序。 */
 const CARD_ENGINES = [
   'antigravity-cli',
   'tavily',
@@ -568,26 +543,23 @@ const CARD_ENGINES = [
   'grok-cli',
   'local',
 ];
-/** Engines that take an API key. */
+/** 需要 API 密钥的引擎。 */
 const KEYED_ENGINES = ['tavily', 'exa', 'firecrawl', 'keenable'];
 /**
- * Engines that take a `baseURL`. SearXNG belongs here without being keyed:
- * it needs a host to talk to but no credential, and the two capabilities are
- * validated separately so a card save cannot put an API key on an engine that
- * has nothing to do with one.
+ * 需要 `baseURL` 的引擎。SearXNG 在这里而不在需要密钥的那组：它需要一个
+ * 对端主机来通信，但不需要凭证，这两种能力分开校验，所以一次卡片保存不会
+ * 把 API 密钥写到跟它毫无关系的引擎上。
  */
 const ENDPOINT_ENGINES = [...KEYED_ENGINES, 'searxng'];
 /**
- * Engines whose `model` setting a run actually reads. The others are shown
- * without the field rather than with one nothing is behind: the HTTP engines
- * ignore it, and grok-cli follows whatever Grok Build is signed in
- * with.
+ * 一次运行真的会读取其 `model` 设置的引擎。其余引擎不显示这个字段，而不是
+ * 显示一个背后什么都没有的输入框：HTTP 引擎忽略它，而 grok-cli 跟随的
+ * 是 Grok Build 当前登录的账号。
  */
 const MODEL_ENGINES = ['antigravity-cli'];
 /**
- * Every accepted spelling, mirroring CANONICAL_ENGINE in src/config.ts.
- * Settings saved under an alias are the same engine's settings, so the card
- * has to read and write them where they already are.
+ * 所有被接受的拼写，与 src/config.ts 里的 CANONICAL_ENGINE 对应。用别名保存
+ * 的设置就是同一个引擎的设置，所以卡片必须在它们本来所在的地方读写。
  */
 const ENGINE_ALIASES = {
   antigravity: 'antigravity-cli',
@@ -597,9 +569,9 @@ const ENGINE_ALIASES = {
   direct: 'local',
 };
 /**
- * The variables that override the file per field, mirroring ENV_BINDINGS in
- * src/config.ts. A card that read only the file would show an empty form for
- * a container that exports its key, and call a working engine unconfigured.
+ * 按字段覆盖文件值的环境变量，与 src/config.ts 的 ENV_BINDINGS 对应。一张
+ * 只读文件的卡片，对一个通过环境变量导出密钥的容器会显示空表单，并把一个
+ * 正常工作的引擎报告成未配置。
  */
 const ENGINE_ENV_BINDINGS = {
   tavily: { apiKey: 'TAVILY_API_KEY', baseURL: 'TAVILY_BASE_URL' },
@@ -608,7 +580,7 @@ const ENGINE_ENV_BINDINGS = {
   keenable: { apiKey: 'KEENABLE_API_KEY', baseURL: 'KEENABLE_BASE_URL' },
 };
 
-/** The canonical engine a stored name means, or '' when it names none. */
+/** 一个存储名所指的规范引擎；它什么都不指时返回 ''。 */
 function canonicalEngine(name) {
   if (typeof name !== 'string') {
     return '';
@@ -617,17 +589,17 @@ function canonicalEngine(name) {
   if (CARD_ENGINES.includes(trimmed)) {
     return trimmed;
   }
-  // Own properties only: a bare index walks the prototype chain, so
-  // "constructor" would come back as a function and read as an engine.
+  // 只查自有属性：裸下标会走原型链，于是 "constructor" 会以一个函数的身份
+  // 返回来，并被当成一个引擎。
   return Object.hasOwn(ENGINE_ALIASES, trimmed) ? ENGINE_ALIASES[trimmed] : '';
 }
 
-/** JSON objects only: null, arrays and prototype residents are not settings. */
+/** 只认 JSON 对象：null、数组和原型上的成员都不算设置。 */
 function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Match the CLI's hand-edited boolean handling without migrating the file. */
+/** 对齐 CLI 对手改布尔值的处理方式，但不迁移文件。 */
 function coerceBoolean(value) {
   if (typeof value === 'boolean') {
     return value;
@@ -644,7 +616,7 @@ function coerceBoolean(value) {
   return undefined;
 }
 
-/** Whether a comma-separated API-key value contains at least one real key. */
+/** 逗号分隔的 API 密钥值里是否至少含一个真实密钥。 */
 function hasApiKeys(value) {
   return (
     typeof value === 'string' &&
@@ -655,19 +627,17 @@ function hasApiKeys(value) {
   );
 }
 
-/** ~/.modsearch/config.json, the one file every harness shares. */
+/** ~/.modsearch/config.json，每个 harness 共用的那一个文件。 */
 function modsearchConfigPath() {
   return join(homedir(), '.modsearch', 'config.json');
 }
 
 /**
- * The shared config, verbatim. Only a missing file reads as empty: a file
- * that exists but cannot be parsed is somebody's configuration, and a card
- * that treated it as empty would overwrite it on the next save.
+ * 共享配置，原样读出。只有文件不存在才当作空：一个存在却解析不了的文件
+ * 是某人的配置，一张把它当作空的卡片会在下次保存时覆盖掉它。
  *
- * Deliberately not the CLI's loadConfigFile: that one migrates legacy shapes
- * on the way in, and a save is not the moment to rewrite a file the user did
- * not ask about. What the card does not own, it does not touch.
+ * 刻意不用 CLI 的 loadConfigFile：那个在读取时会迁移遗留结构，而一次保存
+ * 并不是重写用户没要求处理的文件的时机。卡片不拥有的东西，它就不碰。
  */
 function readModsearchConfig() {
   const file = modsearchConfigPath();
@@ -692,16 +662,15 @@ function readModsearchConfig() {
   return parsed;
 }
 
-/** The file entry keys holding one engine's settings: its own, plus aliases. */
+/** 持有某个引擎设置的文件条目键：它自己的，加上别名。 */
 function fileKeysFor(engine, config) {
   const engines = isPlainObject(config.engines) ? config.engines : {};
   return Object.keys(engines).filter((key) => canonicalEngine(key) === engine);
 }
 
 /**
- * One engine's file settings, alias entries merged the way the CLI merges
- * them: in file order, so a later entry wins, exactly as migrateLegacyConfig
- * folds them.
+ * 某个引擎的文件设置，别名条目按 CLI 的方式合并：按文件顺序，所以靠后的
+ * 条目胜出，正是 migrateLegacyConfig 折叠它们的方式。
  */
 function fileSettingsFor(engine, config) {
   const engines = isPlainObject(config.engines) ? config.engines : {};
@@ -714,7 +683,7 @@ function fileSettingsFor(engine, config) {
   return settings;
 }
 
-/** One engine's environment settings, per field, as engineSettings applies them. */
+/** 某个引擎的环境设置，按字段，与 engineSettings 应用它们的方式一致。 */
 function envSettingsFor(engine, env = process.env) {
   const settings = {};
   const bindings = Object.hasOwn(ENGINE_ENV_BINDINGS, engine) ? ENGINE_ENV_BINDINGS[engine] : {};
@@ -728,10 +697,9 @@ function envSettingsFor(engine, env = process.env) {
 }
 
 /**
- * What the card is allowed to know: every engine's endpoint and model, plus
- * whether a key is stored and where it came from, and never the key itself. A
- * browser that cannot read a secret cannot leak one, and cannot write a blank
- * one back over it either.
+ * 卡片被允许知道的内容：每个引擎的端点和模型，外加是否存过密钥以及它来自
+ * 哪里，且永远不包括密钥本身。读不到秘密的浏览器泄漏不了秘密，也写不回一个
+ * 空白值把它盖掉。
  */
 function engineSummary(config = readModsearchConfig(), env = process.env) {
   const engines = {};
@@ -745,22 +713,19 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
       model: typeof fromFile.model === 'string' ? fromFile.model : '',
       hasKey: envKey || fileKey,
       enabled: coerceBoolean(fromFile.enabled) !== false,
-      // The exposure matrix and the two fields that go with it. Only the
-      // engine's own values are reported: a blank proxy means the file has
-      // none, which is what the card shows.
+      // 曝光矩阵以及随之而来的两个字段。只报告引擎自己的值：代理为空意味着
+      // 文件里没有，这就是卡片显示的内容。
       expose: isPlainObject(fromFile.expose) ? fromFile.expose : {},
       proxy: typeof fromFile.proxy === 'string' ? fromFile.proxy : '',
       toolName: typeof fromFile.toolName === 'string' ? fromFile.toolName : '',
-      // An environment key wins over a file key at run time, so a card that
-      // reported the file's would explain the wrong thing when a save appears
-      // to change nothing.
+      // 环境变量里的密钥在运行时压过文件里的密钥，所以一张报告文件密钥的
+      // 卡片，会在一次看起来什么也没改的保存之后解释错误的原因。
       keySource: envKey ? 'env' : fileKey ? 'file' : null,
     };
   }
   return {
-    // Three states kept apart: pinned to an engine, pinned by one of its
-    // aliases (reported canonically), or not pinned at all, which means the
-    // chain picks by availability.
+    // 三种状态分开：钉在某个引擎上、由它的某个别名钉住（按规范名报告），
+    // 或者根本没有钉住，也就是由引擎链按可用性挑选。
     engine: canonicalEngine(config.engine),
     engines,
     keyed: KEYED_ENGINES,
@@ -770,21 +735,20 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
 }
 
 /**
- * Apply one card submission to the shared file. Only the card's three concerns
- * can move: the engine preference, the named engine's own key, endpoint and
- * model, and automatic participation. `bin`, `allowPrivateNetwork`, `cooldown`
- * and `keylessFetch` stay CLI only, and every other key is copied through.
+ * 把一次卡片提交应用到共享文件。只有卡片的三个关注点能动：引擎偏好、被点名
+ * 的那个引擎自己的密钥、端点和模型，以及自动参与。`bin`、
+ * `allowPrivateNetwork`、`cooldown` 和 `keylessFetch` 只留给 CLI，其余每个
+ * 键都原样抄过去。
  *
- * An absent or empty `apiKey` leaves the stored one alone: the card never
- * receives a key, so it must never be able to clear one by submitting the
- * blank field it was shown.
+ * 缺失或空的 `apiKey` 不动已存的那一个：卡片从不收到密钥，所以它也绝不能被
+ * 一个它自己显示出来的空白字段给清掉。
  */
 function applyCardSettings(patch) {
   const config = readModsearchConfig();
   if (patch?.engine !== undefined) {
     const pin = typeof patch.engine === 'string' ? patch.engine.trim() : '';
     if (pin === '') {
-      // Empty is the CLI's own spelling of automatic, not a missing value.
+      // 空串是 CLI 自己表示「自动」的拼法，不是一个缺失的值。
       config.engine = '';
     } else {
       const engine = canonicalEngine(pin);
@@ -794,9 +758,8 @@ function applyCardSettings(patch) {
       config.engine = engine;
     }
   }
-  // Engine fields are edited one engine at a time, named by `target`. Absent
-  // means this save touched no engine settings, which is what a pin-only save
-  // looks like.
+  // 引擎字段一次编辑一个引擎，由 `target` 点名。缺失意味着这次保存没有碰任何
+  // 引擎设置，这正是「只改钉住项」的保存的样子。
   if (patch?.target !== undefined) {
     const engine = canonicalEngine(patch.target);
     if (!CARD_ENGINES.includes(engine)) {
@@ -814,9 +777,9 @@ function applyCardSettings(patch) {
     if (config.engines !== undefined && !isPlainObject(config.engines)) {
       throw new Error('the "engines" section of the config file is not an object');
     }
-    // Write where the read takes effect: the last entry holding this engine's
-    // settings is the one the merge lets win, so a key saved under an alias is
-    // updated rather than shadowed by a second copy the CLI never reads.
+    // 写到读取时真正生效的位置：持有该引擎设置的最后一个条目，就是合并时
+    // 胜出的那个，所以用别名保存的密钥是被更新，而不是被一份 CLI 永远读不到
+    // 的第二份副本遮蔽。
     const holders = fileKeysFor(engine, config);
     const target = holders.length > 0 ? holders[holders.length - 1] : engine;
     config.engines = { ...config.engines };
@@ -827,11 +790,11 @@ function applyCardSettings(patch) {
     if (patch.baseURL !== undefined) {
       const baseURL = typeof patch.baseURL === 'string' ? patch.baseURL.trim() : '';
       if (baseURL === '') {
-        // Empty unsets the override, back to the official endpoint.
+        // 空串取消这个覆盖，回到官方端点。
         delete settings.baseURL;
       } else if (!/^https?:\/\//i.test(baseURL)) {
-        // The same rule the CLI applies, and for the same reason: this host
-        // receives the engine's API key.
+        // CLI 应用的也是同一条规则，理由也一样：这个主机会收到该引擎的 API
+        // 密钥。
         throw new Error(
           `invalid base URL: ${baseURL}. Use a full http(s) URL, e.g. https://api.example.com`,
         );
@@ -851,10 +814,9 @@ function applyCardSettings(patch) {
     if (apiKey !== '') {
       settings.apiKey = apiKey;
     }
-    // A blank proxy field is "leave it alone", not "clear it": the card shows
-    // an empty field for an engine whose proxy lives in the file, so treating
-    // blank as a deletion would erase a value the user never saw. The CLI's
-    // `config set <engine>.proxy ""` is how a proxy is removed on purpose.
+    // 空白的代理字段是「别动它」，不是「清掉它」：对代理保存在文件里的引擎，
+    // 卡片显示的是空字段，所以把空白当成删除，会抹掉用户从没看见过的值。要
+    // 故意移除代理，用 CLI 的 `config set <engine>.proxy ""`。
     if (typeof patch.proxy === 'string' && patch.proxy.trim() !== '') {
       const proxy = patch.proxy.trim();
       if (!isValidProxyValue(proxy)) {
@@ -864,7 +826,7 @@ function applyCardSettings(patch) {
       }
       settings.proxy = proxy;
     }
-    // The exposure matrix. Absent means this save did not touch it.
+    // 曝光矩阵。缺失意味着这次保存没有碰它。
     if (isPlainObject(patch.expose)) {
       const aggregate = coerceBoolean(patch.expose.aggregate);
       const tool = coerceBoolean(patch.expose.tool);
@@ -893,9 +855,8 @@ function applyCardSettings(patch) {
     }
     config.engines[target] = settings;
   }
-  // Automatic routing grants. Missing means this save did not touch the
-  // engine chain. `true` removes the override because enabled is the built-in
-  // default. Only an opt-out needs to exist in the file.
+  // 自动路由授权。缺失意味着这次保存没有碰引擎链。`true` 移除覆盖项，因为
+  // 启用是内置默认值。文件中只需要存在「退出」这一种状态。
   if (isPlainObject(patch?.enabled)) {
     if (config.engines !== undefined && !isPlainObject(config.engines)) {
       throw new Error('the "engines" section of the config file is not an object');
@@ -908,8 +869,8 @@ function applyCardSettings(patch) {
       }
       const holders = fileKeysFor(engine, config);
       if (enabled) {
-        // Remove every alias override. Deleting only the last one could expose
-        // an earlier `enabled: false` that the merged config would then read.
+        // 移除每一个别名上的覆盖。只删最后一个，可能暴露出更早的
+        // `enabled: false`，而合并后的配置会把它读进去。
         for (const holder of holders) {
           if (!isPlainObject(config.engines[holder])) {
             throw new Error(`the "engines.${holder}" entry of the config file is not an object`);
@@ -935,16 +896,14 @@ function applyCardSettings(patch) {
 }
 
 /**
- * Write the config back the way src/config.ts writes it: a fresh 0600 file in
- * the same directory, renamed into place. writeFileSync's mode only applies
- * when it CREATES the file, so rewriting an existing 0644 config would land
- * the new key world-readable until the chmod.
+ * 按 src/config.ts 写配置的方式写回：在同目录下新建一个 0600 权限的文件，再
+ * 改名就位。writeFileSync 的 mode 只在它「创建」文件时生效，所以重写一个已存在
+ * 的 0644 配置，会让新密钥以全局可读的权限落地，直到 chmod 才收紧。
  */
 function writeConfigFile(config) {
   const file = modsearchConfigPath();
-  // A symlink here would write through to wherever it points, so it is
-  // refused rather than followed: the CLI writes a real file, and anything
-  // else is a setup this card should not silently honor.
+  // 这里的符号链接会穿透到它指向的任何地方去写，所以直接拒绝而不是跟随：
+  // CLI 写的是真实文件，别的形态都是这张卡片不该默默接受的安排。
   try {
     if (lstatSync(file).isSymbolicLink()) {
       throw new Error(`${file} is a symlink; edit the file it points at instead`);
@@ -965,28 +924,27 @@ function writeConfigFile(config) {
     try {
       unlinkSync(tmp);
     } catch {
-      // the rename failure is the error worth reporting
+      // 改名失败才是值得报告的那个错误
     }
     throw error;
   }
   try {
     chmodSync(file, 0o600);
   } catch {
-    // best effort on platforms without POSIX modes
+    // 在没有 POSIX 权限位的平台上尽力而为
   }
 }
 
 /**
- * The read-only readiness list behind the card's auto-mode section: which
- * engines are set up on this machine. `doctor --json` already answers that
- * without network or quota, so the route spawns the CLI this package ships
- * and lifts the per-engine verdicts out of its roles. Cached briefly, since
- * one probe costs a process start and re-expanding the card should not re-pay
- * it, and keyed by the CLI path so a different binary is a different answer.
+ * 卡片自动模式区背后那份只读的就绪清单：这台机器上哪些引擎已经配好了。
+ * `doctor --json` 不需要网络也没有配额，就能回答这个问题，所以这条路由拉起
+ * 本包自带的 CLI，并从它的 roles 里取出逐引擎的判定。结果短暂缓存，因为一次
+ * 探测要付出启动一个进程的代价，而重新展开卡片不该再付一遍；缓存以 CLI 路径
+ * 为键，所以不同的二进制就是不同的答案。
  */
 const READINESS_TTL_MS = 60_000;
 const READINESS_TIMEOUT_MS = 20_000;
-/** Search first: the card is about searching, and it is the configured role. */
+/** 搜索角色优先：卡片讲的是搜索，而且这也是被配置的那个角色。 */
 const READINESS_ROLES = ['search', 'social', 'fetch'];
 let readinessCache = null;
 
@@ -998,8 +956,8 @@ async function engineReadiness() {
     }
   }
   try {
-    // Bounded and abortable: a probe that hung would hang the card's expand,
-    // and the card can live without this section.
+    // 有界且可中止：卡住的探测会把卡片的展开也卡住，而卡片没有这一区照样
+    // 能活。
     const { stdout, code } = await run(
       process.execPath,
       [cli, 'doctor', '--json'],
@@ -1020,8 +978,8 @@ async function engineReadiness() {
     for (const role of ordered) {
       for (const candidate of Array.isArray(role?.candidates) ? role.candidates : []) {
         const engine = canonicalEngine(candidate?.engine);
-        // An engine judged by its own role, once: firecrawl serves search and
-        // fetch with different verdicts, and the card is about search.
+        // 一个引擎只按它自己的角色判定一次：firecrawl 在 search 和 fetch 两个
+        // 角色下服务、判定还不同，而卡片讲的是搜索。
         if (!CARD_ENGINES.includes(engine) || found.has(engine)) {
           continue;
         }
@@ -1043,22 +1001,19 @@ async function engineReadiness() {
 }
 
 /**
- * GET /modsearch/config: the summary above. POST: one card submission.
- * Deployment authentication must cover this route. The raw webServer registry
- * does not inherit dsh Connection authentication, and the plugin applies no
- * Host, Origin, or Fetch Metadata policy of its own.
+ * GET /modsearch/config：上面那份摘要。POST：一次卡片提交。部署层的鉴权必须
+ * 覆盖这条路由。裸的 webServer 注册表不继承 dsh 的 Connection 鉴权，而本插件
+ * 自己也不施加任何 Host、Origin 或 Fetch Metadata 策略。
  *
- * The registry hands back a disposer and ties it to nobody's lifetime, and
- * the server outlives this plugin: the Plugins page switches a bundle off and
- * on without a restart. Held by an effect, the route goes when the plugin
- * does. Left loose, it kept serving the config file for a plugin that was off
- * and made the next switch-on a duplicate registration.
+ * 注册表会返回一个 disposer，但不把它绑定到任何人的生命周期上，而服务器的
+ * 寿命比本插件长：Plugins 页面会不重启地关掉再打开一个 bundle。用 effect 持有
+ * 它，路由就随插件一起走。放任不管的话，它会继续为一个已经关闭的插件提供配置
+ * 文件，还让下一次打开变成重复注册。
  */
 /**
- * The same three-valued rule the CLI applies to `engines.<name>.proxy`.
- * Duplicated rather than imported because this file is hand-written
- * JavaScript that cannot reach the TypeScript source; the lockstep test that
- * covers the engine lists is the model for keeping these in step.
+ * 与 CLI 应用于 `engines.<name>.proxy` 的三值规则相同。这里重复实现而不是
+ * 导入，因为本文件是手写的 JavaScript，够不到 TypeScript 源码；覆盖引擎清单
+ * 的那个同步测试，就是让它们保持一致的样板。
  */
 function isValidProxyValue(value) {
   if (value === 'direct' || value === 'none') {
@@ -1076,19 +1031,17 @@ function isValidProxyValue(value) {
 }
 
 /**
- * Bind the MCP servers named under `mcp` in the config file.
+ * 绑定配置文件 `mcp` 下点名的 MCP 服务器。
  *
- * Two properties matter:
+ * 两条性质要紧：
  *
- * - A server that fails to connect must not stop the plugin. Search is the
- *   product; MCP is an addition. Each failure becomes a line in the log and
- *   the remaining servers still register.
- * - The sessions outlive this call (the registered tools use them), so their
- *   teardown is registered on the fiber. Unloading the plugin closes them.
+ * - 一个服务器连不上，绝不能拖住插件。搜索是产品；MCP 是附加项。每次失败
+ *   变一行日志，其余服务器照常注册。
+ * - session 活得比本次调用更久（已注册的工具要用它们），所以它们的拆除登记
+ *   在 fiber 上。卸载插件会关掉它们。
  *
- * Registration is async, and `apply` is synchronous. The work is started and
- * the tools appear when it settles; on a machine where a server is slow or
- * unreachable, search is usable immediately rather than after a round trip.
+ * 注册是异步的，而 `apply` 是同步的。工作启动后，等它落定工具才出现；在一台
+ * 服务器慢或不可达的机器上，搜索立刻可用，而不是等一个来回之后才可用。
  */
 function registerMcpTools(ctx) {
   let result;
@@ -1097,7 +1050,7 @@ function registerMcpTools(ctx) {
   let inFlight = false;
   let pollTimer = null;
 
-  /** The part of the config that decides which tools exist. */
+  /** 配置里决定「哪些工具存在」的那一部分。 */
   const signatureOf = (servers) => {
     const shape = Object.entries(servers)
       .filter(([, server]) => isPlainObject(server))
@@ -1130,17 +1083,15 @@ function registerMcpTools(ctx) {
       ([, server]) => isPlainObject(server) && server.enabled !== false,
     );
     const signature = signatureOf(servers);
-    // Nothing changed since the last pass: the tools already registered
-    // answer exactly this configuration, so replacing them would drop and
-    // rebuild live tool definitions for no reason.
+    // 自上一趟以来没有任何变化：已注册的工具正是对这一份配置的应答，替换它们
+    // 只会毫无理由地把活着的工具定义删掉再重建。
     if (signature === lastSignature && result !== undefined) {
       inFlight = false;
       return;
     }
 
-    // The old generation goes first. Registering the new tools while the old
-    // ones are still claimed would collide on the same names and fail the
-    // whole pass.
+    // 旧的一代先走。旧工具仍被占用时注册新工具，会在同名上冲突，让整趟注册
+    // 失败。
     if (result !== undefined) {
       result.disposeTools();
       await result.closeAll().catch(() => undefined);
@@ -1152,8 +1103,8 @@ function registerMcpTools(ctx) {
       inFlight = false;
       return;
     }
-    // The registry names its own output; the host accepts raw JSON-Schema
-    // definitions, so this plugin still imports no @deepseek-ai package.
+    // 注册表自己产出它要的东西；宿主接受裸 JSON-Schema 定义，所以本插件仍然
+    // 不导入任何 @deepseek-ai 包。
     let mod;
     try {
       mod = await import('../dist/mcp-registry.js');
@@ -1171,9 +1122,8 @@ function registerMcpTools(ctx) {
         servers: Object.fromEntries(enabled),
         allowTools: collectMcpAllowLists(servers),
         toolNames: collectMcpToolNames(servers),
-        // Both the built-ins and any engine the user promoted to a tool:
-        // those names are already on screen, and a server silently taking one
-        // would swap a working tool for someone else's.
+        // 既有内置工具，也有用户提升为工具的任何引擎：这些名字已经在屏幕上
+        // 了，一个服务器悄悄占用其中一个，等于把一个能用的工具换成别人的。
         reservedNames: [...BASE_TOOL_NAMES, ...engineToolNames()],
       });
     } catch (error) {
@@ -1183,9 +1133,8 @@ function registerMcpTools(ctx) {
     }
     inFlight = false;
     if (disposed) {
-      // The plugin went away while this was in flight: the tools it just
-      // registered are already disposed with the fiber, but the sessions are
-      // this call's own responsibility.
+      // 插件在它进行中时消失了：它刚注册的工具已经随 fiber 一起拆除，但 session
+      // 是这一次调用自己的责任。
       await result.closeAll().catch(() => undefined);
       return;
     }
@@ -1205,16 +1154,14 @@ function registerMcpTools(ctx) {
       result?.closeAll().catch(() => undefined);
     }, 'modsearch: mcp sessions');
   } catch {
-    // A dead ctx has no fiber to hang the teardown on; the sessions then live
-    // as long as the process, which is what the host does for a plugin that
-    // never unloads.
+    // 一个已经失效的 ctx 没有 fiber 可以把拆除挂上去；于是 session 会活到进程
+    // 结束，这正是宿主对一个从不卸载的插件的处理方式。
   }
 
-  // The config file is the plugin's own, so the host's profile reload signal
-  // never fires for it. A stat every few seconds is the cheapest way to notice
-  // an edit: a changed mtime re-runs the registration, which replaces the
-  // server's tools without a plugin reload. Unref'd so it never holds the
-  // process open on its own.
+  // 配置文件是插件自己的，所以宿主的 profile 重载信号永远不会为它触发。每隔
+  // 几秒做一次 stat，是发现改动最便宜的办法：mtime 变了就重新跑一遍注册，
+  // 从而在不重载插件的情况下替换服务器的工具。用 unref 让这个定时器自己不会
+  // 把进程撑住。
   const watchConfig = () => {
     const file = modsearchConfigPath();
     let lastMtime;
@@ -1231,7 +1178,7 @@ function registerMcpTools(ctx) {
       try {
         mtime = statSync(file).mtimeMs;
       } catch {
-        // A deleted config means no MCP servers; settle() handles it.
+        // 配置被删掉就意味着没有 MCP 服务器；由 settle() 来处理。
         mtime = undefined;
       }
       if (mtime === lastMtime) {
@@ -1246,15 +1193,14 @@ function registerMcpTools(ctx) {
       pollTimer.unref();
     }
     try {
-      // Registered separately so the interval is cleared even on the path
-      // where the effect above never ran.
+      // 单独登记，好让定时器即便在上面那个 effect 从未跑到的路径上也能被清掉。
       ctx.effect(() => () => {
         if (pollTimer !== null) {
           clearInterval(pollTimer);
         }
       }, 'modsearch: mcp config watch');
     } catch {
-      // see above
+      // 同上
     }
   };
 
@@ -1264,7 +1210,7 @@ function registerMcpTools(ctx) {
   watchConfig();
 }
 
-/** `<serverKey>/<toolName>` entries a server asked to hide. */
+/** 服务器请求隐藏的 `<serverKey>/<toolName>` 条目。 */
 function collectMcpAllowLists(servers) {
   const allow = {};
   for (const [key, server] of Object.entries(servers)) {
@@ -1275,7 +1221,7 @@ function collectMcpAllowLists(servers) {
   return allow;
 }
 
-/** `<serverKey>/<rawName>` to a caller-chosen tool name. */
+/** `<serverKey>/<rawName>` 映射到调用方选定的工具名。 */
 function collectMcpToolNames(servers) {
   const names = {};
   for (const [key, server] of Object.entries(servers)) {
@@ -1291,16 +1237,14 @@ function collectMcpToolNames(servers) {
 }
 
 /**
- * Standalone engine tools.
+ * 独立引擎工具。
  *
- * An engine marked `expose.tool` becomes a tool the model can call by name,
- * whether or not it also joins the fused answer. That is the second half of
- * the exposure matrix: without it, "standalone tool only" would configure an
- * engine that no model can reach.
+ * 标了 `expose.tool` 的引擎就变成模型能按名字调用的工具，无论它是否也加入
+ * 融合答案。这是曝光矩阵的另一半：没有它，「只做独立工具」就配置出一个任何
+ * 模型都够不着的引擎。
  *
- * Registration is synchronous and reads the config file directly, so a
- * configuration problem shows up at load time with the file named, rather
- * than as a tool that mysteriously does nothing.
+ * 注册是同步的，而且直接读配置文件，所以配置问题会在加载时暴露，并点名是哪
+ * 个文件，而不是变成一个莫名其妙什么都不做的工具。
  */
 function registerEngineTools(ctx) {
   let config;
@@ -1320,9 +1264,8 @@ function registerEngineTools(ctx) {
     if (expose.tool !== true) {
       continue;
     }
-    // `enabled: false` is a total off switch, not just "stay out of the
-    // fusion". An engine the user switched off must not reappear as a tool:
-    // that would make the switch mean something other than what it says.
+    // `enabled: false` 是彻底的总开关，不只是「不参与融合」。用户关掉的引擎
+    // 不能再以工具的身份出现：否则这个开关的含义就跟它说的不一样了。
     if (coerceBoolean(rawSettings.enabled) === false) {
       continue;
     }
@@ -1345,7 +1288,7 @@ function registerEngineTools(ctx) {
   }
 }
 
-/** One engine as a standalone tool: its own source, its own engine pin. */
+/** 把一个引擎做成独立工具：它自己的 source、它自己的引擎钉住项。 */
 function engineToolDefinition({ name, engine, describe }) {
   return {
     name,
@@ -1408,12 +1351,11 @@ function engineToolDefinition({ name, engine, describe }) {
   };
 }
 
-/** What a lone engine tool tells the model about itself. */
+/** 一个孤立的引擎工具向模型描述它自己的方式。 */
 function engineDescription(engine) {
   const base = `Search the web through the ${engine} engine alone, pinned to it with no fallback. Use it when you want exactly this engine's index rather than a fused answer. Returns structured evidence with a summary, per-item results, and an uncertainty list.`;
-  // The browser half keeps its own keyless list; this half has no reason to
-  // duplicate it just to add one sentence, and the sentence is true either
-  // way for a user who has a key.
+  // 浏览器那一半有它自己的免密钥清单；这一半没有理由仅仅为了加一句话就复制
+  // 一份，而对一个有密钥的用户来说，那句话在哪种情况下都成立。
   return base;
 }
 
@@ -1431,8 +1373,7 @@ function registerConfigRoute(ctx) {
         try {
           const summary = engineSummary();
           if (new URL(req.url, 'http://localhost').searchParams.has('doctor')) {
-            // null when the probe failed: the card then shows no readiness
-            // section rather than inventing one.
+            // 探测失败时为 null：卡片于是不显示就绪区，而不是凭空编出一份。
             summary.readiness = await engineReadiness();
           }
           send(200, summary);
@@ -1458,9 +1399,8 @@ function registerConfigRoute(ctx) {
           chunks.push(chunk);
         }
         applyCardSettings(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-        // The cached verdict was about the file this save just rewrote. Serving
-        // it for another minute would tell the card an engine is still unset
-        // right after the key that sets it was stored.
+        // 缓存里的判定说的是这次保存刚刚重写之前的那个文件。继续用一分钟，
+        // 会在设置它的密钥刚存进来之后，告诉卡片某个引擎仍未配置。
         readinessCache = null;
         send(200, engineSummary());
       } catch (error) {
@@ -1471,10 +1411,9 @@ function registerConfigRoute(ctx) {
   ctx.effect(() => ctx.webServer.register(route), 'modsearch: settings route');
 }
 
-// The half of the settings card that lives on this side of the socket,
-// reachable from the test suite the way client.js exposes `__card`. It reads
-// and writes a real file and a real environment, so it is tested against both
-// rather than only through the HTTP route.
+// 设置卡片的另一半，住在 socket 的这一侧，可以像 client.js 暴露 `__card` 那样
+// 从测试套件里够到。它读写真实的文件和真实的环境变量，所以它是针对这两者被
+// 测试的，而不是只通过 HTTP 路由测。
 export const __config = { engineSummary, applyCardSettings, modsearchConfigPath };
 
 function run(command, args, signal, env) {

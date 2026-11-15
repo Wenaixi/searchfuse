@@ -1,7 +1,7 @@
 import type { EngineRequest, SearchEngine } from '../providers/index.ts';
 import { rrfFuse, type RankedList } from './rrf.ts';
 
-/** One engine to run, already resolved against settings and inclusion rules. */
+/** 一个要运行的引擎，配置与纳入规则都已经解析好。 */
 export interface FanoutTarget {
   engine: SearchEngine;
   settings: EngineRequest['settings'];
@@ -9,9 +9,9 @@ export interface FanoutTarget {
 
 export interface FanoutOptions {
   /**
-   * Sources the caller deliberately left out of this run (a cooling engine,
-   * say). Reported alongside real failures but worded as "not run" rather
-   * than "failed", because the two mean different things to a reader.
+   * 调用方故意在这次运行里排除的来源（比如一个正在冷却的引擎）。
+   * 它们与真正的失败一起上报，但措辞是「未参与」而不是「失败」，
+   * 因为对读者来说这两件事含义不同。
    */
   skipped?: string[];
 }
@@ -23,24 +23,20 @@ export interface FanoutResult<T> {
 }
 
 /**
- * Run every target at once, under one wall-clock budget.
+ * 在同一个墙钟预算下，把每个目标一次性跑完。
  *
- * Two properties matter more than the parallelism itself:
+ * 有两件事比并行本身更重要：
  *
- * 1. **A broken source costs only itself.** Each target settles independently
- *    and its rejection is recorded as a failure line. The result is
- *    `Promise.allSettled`, not `Promise.all`, so one 401 cannot erase three
- *    healthy answers.
+ * 1. **一个来源坏掉只由它自己承担。** 每个目标独立结算，它的拒绝被记成
+ *    一条失败记录。用的是 `Promise.allSettled` 而不是 `Promise.all`，
+ *    所以一个 401 不会抹掉另外三个健康的答案。
  *
- * 2. **The budget is total, not per-engine.** A slow source must not extend
- *    the user's wait just because it happens to still be running. The shared
- *    signal is the caller's abort linked to a deadline, so whatever is left
- *    when it fires is recorded as a failure and the fusion proceeds with
- *    what arrived.
+ * 2. **预算是总的，不是单引擎的。** 慢的来源不该因为它碰巧还在跑，
+ *    就延长用户的等待。共享信号是调用方的中止信号与截止时间链接起来的，
+ *    它触发时还没回来的一律记为失败，融合继续用已经到手的部分往下走。
  *
- * Only when nothing succeeded does this throw: an empty answer would be
- * indistinguishable from "no results", and the per-source reasons are the
- * actionable part.
+ * 只有一项都没成功时它才抛错：空答案与「确实没有结果」无法区分，
+ * 而每个来源的原因才是可操作的那部分信息。
  */
 export async function fanout<T extends { url?: string; snippet?: string }>(
   targets: FanoutTarget[],
@@ -58,10 +54,9 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
   const linked = AbortSignal.any([signal, deadline]);
   const cancelledByCaller = () => signal.aborted;
 
-  // Each target races its own execution against the shared signal. Waiting on
-  // allSettled alone would hold the whole run until the slowest engine
-  // finished, which is exactly what a total budget must prevent: a source
-  // that ignores its signal would still delay everyone else's answer.
+  // 每个目标让它自己的执行与共享信号赛跑。只等 allSettled 会把整次运行
+  // 拖到最慢的引擎结束为止，而这正是总预算必须阻止的：一个无视自身信号的
+  // 来源，仍然会拖住其他所有来源的答案。
   const raceStop = new Promise<'stopped'>((resolve) => {
     if (linked.aborted) {
       resolve('stopped');
@@ -115,7 +110,7 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
   return { outputs, failures, skipped };
 }
 
-/** Fuse what fanout collected into one ranked list. */
+/** 把 fanout 收集到的各引擎列表融合成一个排序列表。 */
 export function fuse<T extends { url?: string; snippet?: string }>(
   outputs: RankedList<T>[],
 ): Array<T & { score: number; foundIn: string[] }> {

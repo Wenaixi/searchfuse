@@ -1,4 +1,4 @@
-// Exa search (https://docs.exa.ai). In-process fetch engine, search only, in
+// Exa 搜索（https://docs.exa.ai）。进程内抓取引擎，只做搜索，
 // the same shape as tavily.ts: one POST with the built-in fetch, an
 // AbortController that genuinely cancels on timeout, and no fabricated relevance
 // score. Exa returns ranked links with highlight snippets but writes no answer,

@@ -1,19 +1,17 @@
 /**
- * Turn an engine's `proxy` setting into the value `requestText` acts on.
+ * 把一个引擎的 `proxy` 设置转成 `requestText` 真正依据的取值。
  *
- * Three states, and the distinction between the first two is the feature:
+ * 三种状态，而前两种之间的区分正是这个功能的要点：
  *
- * - `undefined` — nothing was configured, so the machine's http_proxy /
- *   https_proxy / no_proxy keep deciding. This is the pre-existing behavior and
- *   stays the default.
- * - `null` — the user wrote `direct` or `none`, asking that this engine bypass
- *   whatever proxy the machine would otherwise use.
- * - a URL — that proxy, and only that proxy, carries this engine's traffic.
+ * - `undefined` —— 什么都没配置，于是机器上的 http_proxy / https_proxy /
+ *   no_proxy 继续说了算。这是既有行为，也仍是默认。
+ * - `null` —— 用户写了 `direct` 或 `none`，要求这个引擎绕过机器本来会用的
+ *   任何代理。
+ * - 一个 URL —— 就用那个代理，且只有那个代理承载这个引擎的流量。
  *
- * A value that is neither a recognized keyword nor a full http(s) URL is
- * refused rather than ignored. Falling back to the environment would hide a
- * hand-edited typo and quietly route traffic through a proxy the user was
- * trying to avoid, which is the failure this field exists to prevent.
+ * 既不是可识别关键字、又不是完整 http(s) URL 的值会被拒绝，而不是被忽略。
+ * 退回环境变量会掩盖一处手改出来的笔误，并悄悄把流量送进用户正想避开的
+ * 那个代理——而这正是这个字段存在的意义所在。
  */
 export function resolveExplicitProxy(value: string | undefined): string | null | undefined {
   if (value === undefined) {

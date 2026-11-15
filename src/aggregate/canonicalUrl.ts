@@ -1,17 +1,14 @@
 /**
- * The URL two engines must agree on for the same page.
+ * 两个引擎对同一个页面必须达成一致的那个 URL。
  *
- * Fusion dedupes by this key. Everything removed here is something that does
- * not change what the page says: a fragment never selects a different document,
- * tracking parameters are appended by whoever shared the link, and parameter
- * order is an accident of how the URL was assembled. What is deliberately NOT
- * removed is the `www.` prefix and the path case — those do name different
- * pages often enough that merging them would silently drop a real second
- * source, which is worse than showing one page twice.
+ * 融合层用这个键去重。这里被去掉的东西，都是不改变页面内容的：片段标识
+ * 从不选中另一份文档，追踪参数是分享链接的人追加的，参数顺序只是 URL 拼装
+ * 过程的偶然产物。**故意不**去掉的是 `www.` 前缀和路径大小写——它们确实
+ * 经常指向不同页面，合并它们会悄悄丢掉一个真实的第二来源，那比同一个页面
+ * 出现两次更糟。
  *
- * An unparseable input comes back unchanged. A provider handing back a broken
- * URL must not abort a whole search; its entry stays visible under its own
- * spelling.
+ * 无法解析的输入原样返回。某个提供方给了坏 URL，不该中断整个搜索；
+ * 它的条目以自己的拼写继续可见。
  */
 const TRACKING_PARAMETERS = new Set([
   'fbclid',
@@ -42,8 +39,8 @@ export function canonicalUrl(raw: string): string {
 
   url.hash = '';
   url.hostname = url.hostname.toLowerCase();
-  // Setting the port to '' drops an explicit default port and keeps a
-  // non-default one, which is what the URL API does.
+  // 把端口设成空串会去掉显式写出的默认端口、保留非默认端口，
+  // 这正是 URL API 自身的行为。
   if (
     (url.protocol === 'https:' && url.port === '443') ||
     (url.protocol === 'http:' && url.port === '80')
@@ -66,8 +63,7 @@ export function canonicalUrl(raw: string): string {
   url.search = query.toString();
 
   let out = url.toString();
-  // A trailing slash on a non-root path is the same page; the root's slash is
-  // part of the address.
+  // 非根路径的尾斜杠指向同一页面；根路径的那个斜杠是地址的一部分。
   if (url.pathname !== '/' && out.endsWith('/')) {
     out = out.slice(0, -1);
   }

@@ -1,6 +1,5 @@
-// JSON schemas enforced on the engine via structured output.
-// Numeric relevance scores were dropped: models fabricate them, and item
-// order already carries ranking.
+// 通过结构化输出在引擎上强制执行的 JSON schema。
+// 数值型相关度分数已移除：模型会编造它们，而条目顺序本身已经承载了排序。
 
 export const SEARCH_RESULT_SCHEMA = {
   type: 'object',
@@ -16,9 +15,9 @@ export const SEARCH_RESULT_SCHEMA = {
           snippet: { type: 'string' },
           source: { type: 'string' },
           published_at: { type: 'string' },
-          // Present only on a fused result: which engines returned this page.
-          // A chain run answers from one engine, so the field is absent there
-          // rather than a one-element list.
+          // 只出现在融合结果里：哪些引擎返回过这个页面。
+          // 链式运行只由一个引擎作答，所以那里没有这个字段，
+          // 而不是给一个长度为 1 的列表。
           foundIn: { type: 'array', items: { type: 'string' } },
         },
         required: ['title', 'url', 'snippet'],

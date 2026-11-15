@@ -1,30 +1,25 @@
-// Bind MCP servers to the DSH tool registry.
+// 把 MCP 服务端绑定到 DSH 的工具注册表。
 //
-// Kept separate from protocol.ts so the wire format can be tested against a
-// local fake with no Cordis in sight, and the binding can be reasoned about
-// without the wire details.
+// 与 protocol.ts 分开，是为了让线格式可以在不含任何 Cordis 痕迹的本地
+// 假服务端上测试，而绑定逻辑也能在不牵扯线格式细节的情况下推敲。
 //
-// Two properties are load-bearing:
+// 有两条承重性质：
 //
-// 1. A server that cannot be reached must not stop the plugin from starting.
-//    Search keeps working with no MCP at all, so a dead server is a missing
-//    convenience, not a failed boot.
-// 2. Every registration goes through ctx.tools.register, which is already tied
-//    to the calling fiber, so unloading the plugin removes the tools without
-//    this module holding a list of its own. The disposers ARE collected and
-//    returned anyway, because the plugin watches the config file and has to
-//    replace a server's tools when its settings change mid-run: a fiber-wide
-//    teardown is too coarse for that.
+// 1. 连不上的服务端绝不能阻止插件启动。没有 MCP，搜索照样工作，所以一个
+//    死掉的服务端只是少了一项便利，不是启动失败。
+// 2. 每次注册都走 ctx.tools.register，它本来就绑在调用方的 fiber 上，
+//    所以卸载插件就会移除这些工具，本模块无需自己维护一份清单。但清理
+//    句柄仍然会被收集并返回，因为插件要监视配置文件、在服务端设置于运行中
+//    变更时替换它的工具：整条 fiber 级的拆除对这种粒度来说太粗了。
 import type { McpServerConfig, McpToolSpec } from './protocol.ts';
 import { McpConnection as Connection, isServerNameValid, publicToolName } from './protocol.ts';
 
 /**
- * The output shape the DSH tool runtime accepts.
+ * DSH 工具运行时接受的输出形状。
  *
- * `assertSupportedJsonSchema` only allows a small subset of JSON Schema, and
- * an MCP tool's result is an arbitrary content array. Wrapping it in this
- * record is what makes it registrable; the shape mirrors the host's own MCP
- * client so a tool looks the same whichever side registered it.
+ * `assertSupportedJsonSchema` 只允许 JSON Schema 的一小部分子集，而 MCP
+ * 工具的结果是任意的内容数组。把它包进这个记录里才使它可注册；这个形状
+ * 照抄宿主自己的 MCP 客户端，好让同一种工具无论由哪一侧注册看起来都一样。
  */
 export const MCP_OUTPUT_SCHEMA = {
   type: 'object',
@@ -137,8 +132,8 @@ export async function registerMcpServers(
     };
 
     if (!isServerNameValid(serverKey)) {
-      // The key becomes part of the tool name, so an unusable key means
-      // unusable tools. Say so instead of registering something half-named.
+      // 这个键会成为工具名的一部分，所以不可用的键等于不可用的工具。
+      // 明说出来，而不是注册一堆半成品的名字。
       report.error = `server key "${serverKey}" must match [A-Za-z0-9_-]{1,32}`;
       reports.push(report);
       continue;
@@ -181,8 +176,8 @@ export async function registerMcpServers(
               },
             ],
           },
-          // Fanned-out search engines run concurrently; an MCP tool that
-          // declares itself unsafe would serialize behind every other call.
+          // 扇出的搜索引擎是并发跑的；一个声明自己不安全的 MCP 工具
+          // 会排在其他所有调用后面串行执行。
           isConcurrencySafe: () => true,
           async execute(args: unknown, exec: { signal?: AbortSignal }) {
             if (exec?.signal?.aborted) {
@@ -200,16 +195,15 @@ export async function registerMcpServers(
         report.tools.push(name);
       }
       report.connected = true;
-      // The connection stays open: the tools just registered will call it on
-      // every use, and tearing the session down here would cost a fresh
-      // handshake per tool call. The plugin fiber owns its lifetime — a
-      // `ctx.effect` in the caller closes it on unload.
+      // 连接会保持打开：刚注册的工具每次使用都会调用它，在这里拆除会话
+      // 会让每次工具调用都付出一次重新握手的代价。生命周期由插件的 fiber
+      // 负责——调用方的一个 `ctx.effect` 会在卸载时关闭它。
       keepAlive.push(connection);
       connection = undefined;
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error);
-      // A server that failed here registered nothing, so nothing needs
-      // unwinding; the connection is closed below either way.
+      // 走到这里的失败服务端什么都没注册，所以没有需要回滚的东西；
+      // 无论哪种情况，下面都会把连接关掉。
     } finally {
       if (connection !== undefined) {
         await connection.close().catch(() => undefined);
@@ -223,7 +217,7 @@ export async function registerMcpServers(
       try {
         undo();
       } catch {
-        // A tool already gone is not an error worth reporting.
+        // 已经消失的工具不值得当成错误上报。
       }
     }
     disposeTools_.length = 0;

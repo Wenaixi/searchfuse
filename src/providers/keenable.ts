@@ -1,4 +1,4 @@
-// Keenable (https://docs.keenable.ai). In-process fetch engine, search only,
+// Keenable（https://docs.keenable.ai）。进程内抓取引擎，只做搜索，
 // in the same shape as exa.ts. With no key it calls the keyless `/public`
 // twin of the endpoint, which Keenable caps at 1,000 requests an hour per IP
 // and which needs an `X-Keenable-Title` header naming the calling app. A key

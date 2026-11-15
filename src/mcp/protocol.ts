@@ -1,27 +1,24 @@
-// A hand-written MCP client for the Streamable HTTP transport.
+// 手写的 MCP 客户端，只实现 Streamable HTTP 传输。
 //
-// Scope is deliberately narrow: tools only, no stdio, no OAuth, no resources
-// or prompts, no stream resumption. That is what `mcp.grep.app` and
-// `mcp.context7.com` need, and both answer anonymously.
+// 范围刻意收窄：只做工具，不做 stdio、不做 OAuth、不做 resources 与 prompts、
+// 不做流续传。这正是 `mcp.grep.app` 与 `mcp.context7.com` 需要的，而两者
+// 都允许匿名访问。
 //
-// The protocol work this client does that a naive POST would miss:
+// 这个客户端做了、而一个朴素 POST 会漏掉的协议工作：
 //
-// - `initialize` must be the first request, and `notifications/initialized`
-//   must follow it before any `tools/*` call. Most servers reject an
-//   out-of-order call.
-// - A response arrives as `application/json` OR as an SSE stream; both are
-//   normal and both must be read.
-// - A server may assign `Mcp-Session-Id`, which then has to be echoed on
-//   every later request. If it expires the server answers 404 with no body,
-//   and the only recovery is a fresh handshake.
-// - `MCP-Protocol-Version` has to be sent after negotiation.
+// - `initialize` 必须是第一个请求，之后必须先发 `notifications/initialized`
+//   才能调任何 `tools/*`。多数服务端会拒绝顺序不对的调用。
+// - 响应可能是 `application/json`，也可能是 SSE 流；两种都正常，两种都得能读。
+// - 服务端可能会分配 `Mcp-Session-Id`，之后每个请求都必须回显它。它过期时
+//   服务端返回无 body 的 404，唯一的补救是重新握手。
+// - 协商完成后必须发送 `MCP-Protocol-Version`。
 import { createHash } from 'node:crypto';
 
 export interface McpServerConfig {
   transport: 'streamable-http';
   url: string;
   enabled?: boolean;
-  /** Extra request headers, e.g. a Context7 API key. */
+  /** 附加的请求头，例如 Context7 的 API 密钥。 */
   headers?: Record<string, string>;
   timeoutMs?: number;
 }
@@ -43,7 +40,7 @@ interface JsonRpcMessage {
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 const HANDSHAKE_PROTOCOL_VERSION = DEFAULT_PROTOCOL_VERSION;
 
-/** The host's own tool-name contract, mirrored so a name means the same thing. */
+/** 宿主自己的工具名契约，这里等价复制，好让同一个名字在两边含义一致。 */
 const MAX_PUBLIC_NAME_LENGTH = 64;
 const INVALID_NAME_CHARS = /[^A-Za-z0-9_-]/g;
 const HASH_LENGTH = 12;
@@ -60,10 +57,9 @@ export function isServerNameValid(name: string): boolean {
 export function publicToolName(serverName: string, rawName: string): string {
   const joined = `mcp__${serverName}__${rawName}`;
   const normalized = joined.replace(INVALID_NAME_CHARS, '_');
-  // Folding characters is not what triggers the hash: a name that had to be
-  // folded but still fits is perfectly readable. Only length forces a
-  // shortened, hash-suffixed form, and the hash is what keeps two tools that
-  // fold to the same prefix distinct.
+  // 折叠字符并不是触发哈希的原因：一个不得不折叠但长度仍够的名字完全可读。
+  // 只有超长才会强制成带哈希后缀的缩短形式，而哈希正是用来让两个折叠后
+  // 前缀相同的工具保持区分的东西。
   if (normalized.length <= MAX_PUBLIC_NAME_LENGTH) {
     return normalized;
   }
@@ -96,7 +92,7 @@ export function parseSseMessages(body: string): JsonRpcMessage[] {
     try {
       messages.push(JSON.parse(dataLines.join('\n')) as JsonRpcMessage);
     } catch {
-      // A frame this client cannot read is not an error the caller can act on.
+      // 这个客户端读不懂的一帧，不是调用方能够处理的那种错误。
     }
   }
   return messages;
@@ -175,7 +171,7 @@ export class McpConnection {
       return {};
     }
     if (response.status === 404 && allowReconnect) {
-      // The session may have expired. Start over once; a second 404 is real.
+      // 会话可能已经过期。重来一次；第二次再 404 就是真的了。
       this.sessionId = undefined;
       this.initialized = false;
       await this.handshake();
@@ -248,7 +244,7 @@ export class McpConnection {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
 
-    // The session id lives on this response's headers, before any body parse.
+    // 会话 id 藏在这个响应的响应头里，要在解析 body 之前就取出来。
     const assigned = response.headers.get('mcp-session-id');
     if (assigned) {
       this.sessionId = assigned;
@@ -332,8 +328,7 @@ export class McpConnection {
         signal: AbortSignal.timeout(5_000),
       });
     } catch {
-      // The connection is being abandoned anyway; a failed goodbye is not a
-      // user-visible problem.
+      // 连接本来就要被丢弃了；一次失败的告别不是用户能看见的问题。
     }
     this.sessionId = undefined;
     this.initialized = false;

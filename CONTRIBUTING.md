@@ -46,4 +46,4 @@ Follow `docs/commit.md`: Conventional Commits, one change per commit, imperative
 summary under 72 characters, no trailing period. Do not mix a pure refactor or
 formatting pass with a behavior change.
 
-The architecture lives in `AGENTS.md` if you need the lay of the land.
+The architecture lives in `README.md` and `docs/` if you need the lay of the land.

@@ -1,26 +1,24 @@
-// Browser half of the modsearch dsh plugin: the settings card.
+// modsearch dsh 插件的浏览器半边：设置卡片。
 //
-// dsh web users have no terminal, so `modsearch config set` is out of reach
-// there and an engine key had no way in. dsh renders no generic form from a
-// settings schema, so this card is contributed through a slot rather than
-// declared as one: `plugins.bundle.config` on the Plugins page from dsh
-// 0.1.6-alpha.2 on, `settings.plugin.item` in Settings before. It reads and
-// writes the plugin's own route, which owns ~/.modsearch/config.json: the
-// browser never sees an API key, and never sends a blank one back over a
-// stored one.
+// dsh 的 Web 用户没有终端，`modsearch config set` 在那里够不着，引擎密钥
+// 也就没有输入的口子。dsh 不会按设置 schema 渲染通用表单，所以这张卡片
+// 通过 slot 贡献出去，而不是声明成一份 schema：dsh 0.1.6-alpha.2 起是
+// 插件页上的 `plugins.bundle.config`，之前是设置页里的
+// `settings.plugin.item`。它读写插件自己的路由，那条路由掌管
+// ~/.modsearch/config.json：浏览器永远看不到 API 密钥，也永远不会拿空值
+// 覆盖已保存的密钥。
 //
-// Hand-written in the lazy-CJS bundle protocol (window.__ModuleLoader__.load
-// with a factory returning cordis-plugin exports), so no build step and no
-// imports from dsh client packages: the same zero-dependency stance as the
-// host half.
+// 按 lazy-CJS 包协议手写（window.__ModuleLoader__.load，工厂函数返回
+// cordis-plugin 的导出），所以没有构建步骤，也不从 dsh 客户端包里 import：
+// 与宿主半边同样的零依赖立场。
 window.__ModuleLoader__.load({
   id: '@liustack/modsearch',
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
 
-    // The engines the card offers, in the order the docs introduce them. The
-    // host half carries the same list; both sides name what they show.
+    // 卡片提供的引擎，按文档介绍它们的顺序排列。宿主半边带着同一份列表；
+    // 两边各自写明自己要展示的东西。
     var ENGINES = [
       'antigravity-cli',
       'tavily',
@@ -34,28 +32,27 @@ window.__ModuleLoader__.load({
       'local',
     ];
 
-    // Engines that search with no key and no signup.
+    // 既不需要密钥、也不需要注册就能搜索的引擎。
     var KEYLESS_ENGINES = ['firecrawl', 'keenable', 'youcom', 'searxng'];
 
-    // The chain is a row of search engines, so the page fetcher is not in it.
-    // `local` reads a URL it is handed and searches for nothing, and a tickbox
-    // among these would invite a decision that changes no search.
+    // 故障转移链是一排搜索引擎，所以取页器不在其中。`local` 只读取交给它
+    // 的一个 URL，本身不做任何搜索；在这一排里给它一个勾选框，只会招来一个
+    // 不改变任何搜索的决定。
     var CHAIN_ENGINES = ENGINES.filter((name) => name !== 'local');
 
-    // The Plugins page dispatches a bundle's configuration by npm package name.
+    // 插件页按 npm 包名把配置分派给对应的 bundle。
     var PACKAGE_NAME = '@liustack/modsearch';
 
-    // Two short label sets rather than a locale bundle: the card has a couple
-    // of dozen strings, and a bundle would be more machinery than the thing it
-    // labels.
+    // 用两套短标签，而不是一个 locale 包：这张卡片总共几十个字符串，
+    // 为它配一个包，机械开销比被标注的东西本身还大。
     var TEXT = {
       en: {
         title: 'Search engine (ModSearch)',
         subtitle: 'Search engine provider configuration.',
-        // The heading on the Plugins page, which already names the plugin.
+        // 插件页上的小标题，那里已经写着插件名。
         section: 'Engine settings',
         automatic: 'Automatic (chain order decides)',
-        // The keyless default is stated in the list, where an engine is chosen.
+        // 免密钥这个默认说法放在列表里，也就是用户选引擎的地方。
         keylessSuffix: ' (keyless free tier)',
         pickToConfigure: 'Pick an engine above to configure its key and endpoint.',
         engine: 'Preferred engine',
@@ -83,8 +80,8 @@ window.__ModuleLoader__.load({
         autoHint: 'Checked engines may join failover. Only engines ready here are listed.',
         autoUnknown: 'Engine status is unavailable right now, so every engine is listed.',
         autoEmpty: 'No engine is ready on this machine yet.',
-        // Two engine-specific asides, each rendered by a branch of its own so
-        // either can be dropped without touching the rest of the card.
+        // 两条针对具体引擎的附注，各自由独立分支渲染，删掉任何一条都不必
+        // 动卡片的其他部分。
         socialOnly: 'X search only',
         keylessTier: 'Runs on the keyless free tier by default. Add a key to raise the quota.',
         loadFailed: 'load failed',
@@ -162,12 +159,11 @@ window.__ModuleLoader__.load({
       },
     };
 
-    // The copy this card speaks. `active` is dsh's own interface language,
-    // when its locale service was there to say. Asked first because the page
-    // language is not an answer: the built index.html freezes
-    // `<html lang="zh-CN">` and never rewrites it, so a user set to English
-    // would still read a Chinese card. Absent the service (older hosts,
-    // profiles that ship no locale) the page then the browser decide.
+    // 这张卡片说的语言。`active` 是 dsh 自己的界面语言，前提是 locale
+    // 服务在场能报出来。优先问它，因为页面语言并不是答案：构建出来的
+    // index.html 把 `<html lang="zh-CN">` 冻死了，从不重写，于是设为英文的
+    // 用户仍会读到一张中文卡片。服务缺席时（老版本宿主、不带 locale 的
+    // profile），才由页面语言、再退到浏览器语言来定。
     function labels(active) {
       var lang = (
         active ||
@@ -178,44 +174,41 @@ window.__ModuleLoader__.load({
       return lang.indexOf('zh') === 0 ? TEXT.zh : TEXT.en;
     }
 
-    // What the footer says when a request fails. Whatever the server said
-    // travels untranslated ('unknown engine: x', a path error): that is the
-    // diagnosis, and mapping it to error codes would buy a translation table
-    // with a much larger contact surface than this card is worth. Only the
-    // silent case, where there is no detail to show, gets a localized line.
+    // 请求失败时页脚显示什么。服务器说了什么就原样带过来，不翻译
+    // （'unknown engine: x'、某个路径错误）：那是诊断信息，把它映射成错误码
+    // 换来的会是一张翻译表，接触面远大于这张卡片本身的价值。只有静默的
+    // 情况——没有任何细节可显示——才给一行本地化文案。
     function noteFrom(error, fallback) {
-      // An Error whose message is empty is the no-detail case, not a thing to
-      // stringify: String(error) on it reads 'Error'.
+      // message 为空的 Error 属于「没有细节」那一类，不该被字符串化：
+      // 对它调 String(error) 只会得到 'Error'。
       var detail =
         error && typeof error.message === 'string' ? error.message : error ? String(error) : '';
       return detail || fallback;
     }
 
-    /** Whether this engine has a key and an endpoint to configure at all. */
+    /** 这个引擎是否根本就有密钥和接口地址可配。 */
     function keyed(summary, engine) {
       return engine !== '' && (summary.keyed || []).indexOf(engine) >= 0;
     }
 
-    /** Whether this engine takes a base URL (keyed engines and SearXNG). */
+    /** 这个引擎是否接受 base URL（需要密钥的引擎与 SearXNG）。 */
     function endpointable(summary, engine) {
       return engine !== '' && (summary.endpoints || []).indexOf(engine) >= 0;
     }
 
     /**
-     * Whether a run reads this engine's `model` setting. */
+     * 某次运行是否读取这个引擎的 `model` 设置。 */
     function modelled(summary, engine) {
       return engine !== '' && (summary.models || []).indexOf(engine) >= 0;
     }
 
     /**
-     * An engine's exposure as one of four named states.
+     * 一个引擎的露出形态，取自四个具名状态之一。
      *
-     * `aggregate` and `tool` are orthogonal, so showing them as two
-     * independent checkboxes invites the reading that they are unrelated
-     * switches. They are a choice of form: an engine joins the fused answer,
-     * becomes a tool the model can call by name, does both, or is off.
-     * Collapsing them into one selection makes that choice visible as what it
-     * is.
+     * `aggregate` 和 `tool` 彼此正交，若把它们显示成两个独立的勾选框，就会
+     * 引导出「这是两个互不相关的开关」这种读法。它们其实是对形态的一次
+     * 选择：一个引擎加入融合答案、变成模型可以点名调用的工具、两者兼得，
+     * 或者关闭。把二者收拢成一次单选，这项选择才以它本来的样子呈现。
      */
     var EXPOSE_STATES = ['both', 'aggregate', 'tool', 'off'];
 
@@ -236,12 +229,12 @@ window.__ModuleLoader__.load({
       if (tool) {
         return 'tool';
       }
-      // Neither flag set: the engine still answers directly, so calling it off
-      // would be a lie the save cannot back up.
+      // 两个标记都没设：引擎仍然能直接应答，所以把它称作关闭，会是一句
+      // 保存动作兜不住谎。
       return 'off';
     }
 
-    /** The `enabled`/`expose` a state stands for. */
+    /** 某个状态所代表的 `enabled`/`expose`。 */
     function stateToSetting(state) {
       if (state === 'off') {
         return { enabled: false, expose: { aggregate: false, tool: false } };
@@ -255,28 +248,26 @@ window.__ModuleLoader__.load({
       return { enabled: true, expose: { aggregate: true, tool: false } };
     }
 
-    /** The tool name shown when the state includes a standalone tool. */
+    /** 状态包含独立工具时显示的工具名。 */
     function toolNameFor(summary, engine) {
       var settings = (summary.engines && summary.engines[engine]) || {};
       return settings.toolName || engine + '_search';
     }
 
-    // The next draft when the engine changes or a summary arrives. The fields
-    // belong to the newly selected engine, so switching engines can never copy
-    // one engine's endpoint onto another.
+    // 引擎切换或新的摘要到达时的下一份草稿。那些字段属于新选中的引擎，
+    // 所以切换引擎永远不会把一个引擎的接口地址拷贝到另一个引擎上。
     function nextDraft(summary, engine, keepEnabled) {
-      // engine '' is its own answer: not pinned, availability decides. There
-      // is then no single engine whose key belongs in these fields, so they
-      // stay empty and the card says how to get them back.
+      // engine 为 '' 本身就是一种答案：未固定，由可用性决定。此时不存在
+      // 某个引擎的密钥该放进这些字段，于是它们保持为空，卡片再说明怎么把
+      // 它们找回来。
       var current = summary.engines?.[engine] || { baseURL: '', model: '' };
       return {
         engine: engine,
         apiKey: '',
         baseURL: current.baseURL || '',
         model: current.model || '',
-        // Empty means "leave the file's value alone", matching the way an
-        // empty API key field does. A prefilled proxy would otherwise rewrite
-        // the file on every save that touched anything else.
+        // 空表示「不改动文件里的值」，与 API 密钥字段空着时的含义一致。
+        // 否则，预填的代理会让每一次哪怕只改了别处的保存都重写文件。
         proxy: '',
         toolName: current.toolName || '',
         exposeState: exposeState(summary, engine),
@@ -291,15 +282,13 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Select a preferred engine, and make that preference usable where the user
-     * can see it happen.
+     * 选择一个首选引擎，并让这项偏好发生在用户看得见的地方。
      *
-     * Only an engine with a checkbox on screen gets switched on here. Ticking a
-     * hidden one would be a change nobody asked for and nobody can see, and the
-     * save that followed would delete an `enabled: false` the user never knew
-     * was there. An engine with no row keeps whatever the file says: the
-     * preference still travels, and the router says plainly when a pinned
-     * engine is switched off.
+     * 只有屏幕上带勾选框的引擎才会在这里被打开。去勾选一个隐藏的引擎，
+     * 等于做了一次没人要求、也没人看得见的改动，随后的保存还会删掉一条
+     * 用户从不知道存在的 `enabled: false`。没有行的引擎保持文件里写好的
+     * 值：偏好照旧传递过去，而路由在被固定的引擎处于关闭状态时会明确
+     * 说明。
      */
     function selectEngine(summary, draft, engine) {
       var next = nextDraft(summary, engine, draft.enabled);
@@ -309,7 +298,7 @@ window.__ModuleLoader__.load({
       return next;
     }
 
-    /** Change automatic participation, clearing an impossible preference. */
+    /** 更改自动参与状态，同时清掉一个不可能成立的偏好。 */
     function toggleEngine(draft, engine, enabled) {
       var next = Object.assign({}, draft, { enabled: Object.assign({}, draft.enabled) });
       next.enabled[engine] = enabled;
@@ -319,17 +308,15 @@ window.__ModuleLoader__.load({
       return next;
     }
 
-    // What one save is actually about. The pin travels only when the select
-    // moved; the engine fields only when they were edited, and only the fields
-    // that engine actually has. A save that always carried everything would
-    // pin an engine nobody chose and write the values the card loaded back
-    // over whatever the file holds now.
+    // 一次保存到底在保存什么。固定偏好只在选择框被移动过时带上；引擎字段
+    // 只在被编辑过时带上，而且只带那个引擎真正拥有的字段。若每次都把全部
+    // 内容一并提交，就会固定一个没人选过的引擎，还会把卡片加载时读到的
+    // 值写回文件，覆盖文件此刻的内容。
     function savePayload(summary, draft) {
       var payload = {};
       var enabled = {};
-      // Only the engines the chain actually rendered. An engine with no
-      // checkbox had no way to change, so naming it here could only carry an
-      // edit the card made to itself.
+      // 只处理链上真正渲染出勾选框的引擎。没有勾选框的引擎本就没有改动的
+      // 途径，把它写在这里，只可能携带一次卡片对自己做的编辑。
       chainEngines(summary).forEach((name) => {
         var before = summary.engines?.[name]?.enabled !== false;
         var after = draft.enabled?.[name] !== false;
@@ -354,8 +341,8 @@ window.__ModuleLoader__.load({
         (canEndpoint && draft.baseURL !== pristine.baseURL) ||
         draft.proxy !== '' ||
         (exposesTool && draft.toolName !== '' && draft.toolName !== pristine.toolName);
-      // The exposure state travels on its own: picking a different form is a
-      // change whether or not any text field moved.
+      // 露出形态单独传递：换一种形态就是一次改动，无论有没有任何文本框
+      // 动过。
       if (draft.engine !== '' && draft.exposeState !== pristine.exposeState) {
         payload.target = draft.engine;
         payload.expose = stateToSetting(draft.exposeState);
@@ -371,10 +358,9 @@ window.__ModuleLoader__.load({
         if (canModel) {
           payload.model = draft.model;
         }
-        // Empty means "leave the file alone", the same contract the API key
-        // field has. A blank field is what the user sees when they never set
-        // one, so treating it as "clear the proxy" would silently rewrite a
-        // value this card cannot show.
+        // 空表示「不改动文件」，与 API 密钥字段遵循同一份契约。用户从未
+        // 设置过代理时，看到的就是一个空字段；若把空当成「清除代理」，就会
+        // 悄悄重写一个这张卡片根本显示不出来的值。
         if (draft.proxy !== '') {
           payload.proxy = draft.proxy;
         }
@@ -386,14 +372,12 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The engines the preference list offers. `local` is not one of them: it
-     * fetches a URL it is handed, so pinning it as the search engine pins
-     * something that searches nothing.
+     * 偏好列表提供的引擎。`local` 不在其中：它只抓取交给它的一个 URL，
+     * 把它固定成搜索引擎，固定的是一个什么也搜不到的东西。
      *
-     * It stays listed while the config file still names it, because the select
-     * has to show what is configured. Dropping the option there would leave
-     * some other engine sitting in the box as if it were the preference, which
-     * is the card lying about the file it edits.
+     * 只要配置文件里还写着它，它就继续留在列表里，因为下拉框必须显示出
+     * 实际配置的内容。把这一项去掉，别的引擎就会看似偏好地停在框里，
+     * 那便是卡片对它正在编辑的文件撒谎。
      */
     function preferable(summary, draft) {
       if (summary.engine === 'local' || draft.engine === 'local') {
@@ -403,17 +387,16 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The engines the chain offers a checkbox for: the ones doctor found ready
-     * on this machine. An engine that cannot run here is not a decision the
-     * user has to make, and a row saying so is a row they cannot act on.
+     * 链上为哪些引擎提供勾选框：doctor 在本机探测到已就绪的那些。在本机
+     * 跑不起来的引擎不是用户必须做的决定，一行写明它跑不了，也是一行用户
+     * 无法据此行动的东西。
      *
-     * `readiness` absent means the probe never answered, which is not a verdict
-     * that nothing works here. Every search engine stays listed then, because
-     * the checkbox is the only way back on and the card must not take it away
-     * over a fact it does not know.
+     * `readiness` 缺席意味着探测从未作答，而不是「这里什么都跑不了」的
+     * 结论。这时所有搜索引擎都留在列表里：勾选框是唯一能重新打开它的
+     * 办法，卡片不能拿一个自己并不知道的事实把它撤走。
      *
-     * This list is also what a save is allowed to say about `enabled`: what was
-     * never on screen was never edited.
+     * 这份列表同时也是保存时允许对 `enabled` 说些什么的范围：从未显示在
+     * 屏幕上的，从未被编辑过。
      */
     function chainEngines(summary) {
       var probes = Array.isArray(summary.readiness) ? summary.readiness : null;
@@ -426,35 +409,30 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * How to render the API key field so the characters are hidden.
+     * 把 API 密钥字段渲染成隐藏字符的方式。
      *
-     * A real password input makes Safari's iCloud Keychain offer to enable
-     * autofill for the site and then pop its bubble on every focus, for a
-     * field that is always empty: the key lives in the config file and the
-     * host never sends it here, only whether one is stored. `autocomplete`
-     * cannot turn that off, because WebKit ignores it on password fields on
-     * purpose. Masking with text-security gets the same hidden characters
-     * without ever being a password field, and it also keeps a key meant for
-     * one machine out of a synced keychain.
+     * 用真正的 password 输入框，会让 Safari 的 iCloud 钥匙串提议为这个
+     * 站点开启自动填充，然后每次聚焦都弹一次气泡，而这个字段永远是空的：
+     * 密钥住在配置文件里，宿主从不把它送到浏览器，只送来「是否已存了
+     * 一个」。`autocomplete` 关不掉它，因为 WebKit 有意在 password 字段上
+     * 忽略该属性。用 text-security 做遮罩能得到同样的隐藏字符，却从来
+     * 不是 password 字段，还能让一个只属于这台机器的密钥不进同步钥匙串。
      *
-     * Feature-detected rather than assumed. Where the property is missing the
-     * field stays a password input: the nuisance is worth more than the
-     * alternative, which is somebody's API key rendered in clear text while
-     * they type it.
+     * 靠特性探测，而不是假定。属性缺失的地方，字段退回 password 输入框：
+     * 一点小烦恼，比替代方案便宜——另一个方案是把某人的 API 密钥在他打字
+     * 时明文呈现。
      *
-     * This is a trade, and the cost falls on people who are not in the room. A
-     * password input carries a protected state into the accessibility tree,
-     * and screen readers stop reading characters back because of it. Masking
-     * is only paint: VoiceOver and NVDA will read this key aloud, and ARIA has
-     * no equivalent to restore. Accepted here because the field is empty in
-     * normal use, so what a screen reader can read back is what the user is
-     * typing at that moment, not a stored secret.
+     * 这是一次权衡，代价落在不在现场的人身上。password 输入框会带着一个
+     * protected 状态进入无障碍树，屏幕阅读器因为它而停止回读字符。遮罩
+     * 只是涂色：VoiceOver 和 NVDA 会把这个密钥读出声来，而 ARIA 没有等价
+     * 手段可以还原。这里接受这个代价，因为正常使用时字段是空的，于是屏幕
+     * 阅读器能读回来的，只是用户此刻正在输入的内容，而不是一个存好的
+     * 机密。
      */
     function supportsTextSecurity() {
-      // A throwing `supports` counts as no support. The spec says the two
-      // argument form returns false for an unknown property rather than
-      // throwing, but this runs inside render, where an exception takes the
-      // whole settings surface down instead of costing one field.
+      // 抛异常的 `supports` 一律按不支持处理。规范说两个参数的形式对未知
+      // 属性返回 false 而不是抛出，但这段代码运行在 render 里，一个异常
+      // 会拖垮整个设置界面，而不只是损失一个字段。
       try {
         return (
           typeof CSS === 'object' &&
@@ -481,9 +459,9 @@ window.__ModuleLoader__.load({
       };
     }
 
-    // Native <select> popups honor color-scheme, not inherit color. WebView2
-    // still paints that popup as light unless a scheme is declared, so the
-    // control must set one and give each option its own background.
+    // 原生 <select> 的弹出层遵循 color-scheme，不继承 color。WebView2 在
+    // 未声明配色方案时仍会把该弹出层画成浅色，所以控件必须设置一个方案，
+    // 并给每个选项单独设置背景。
     function parseCssColor(value) {
       if (typeof value !== 'string') {
         return null;
@@ -526,7 +504,7 @@ window.__ModuleLoader__.load({
             return luminance > 0.5;
           }
         } catch {
-          // Unreadable computed color is not a theme answer.
+          // 读不出的计算色不是主题的答案。
         }
       }
       const media =
@@ -541,22 +519,22 @@ window.__ModuleLoader__.load({
             return true;
           }
         } catch {
-          // A throwing matchMedia is not a theme answer.
+          // 抛异常的 matchMedia 不是主题的答案。
         }
       }
       return false;
     }
 
-    // `localeRef` is a { current } handle on dsh's locale service, not the
-    // service itself: it is optional and may land after the card is built, so
-    // it is read at render time rather than captured here. Absent, both
-    // helpers below hand back nothing and labels() takes its old path.
+    // `localeRef` 是指向 dsh locale 服务的 { current } 句柄，而不是服务
+    // 本身：它是可选的，还可能在卡片构建之后才到位，所以要在渲染时读取，
+    // 而不是在这里捕获。服务缺席时，下面两个辅助函数都返回空，labels()
+    // 走它原有的路径。
     function ConfigCard(react, ui, localeRef) {
       var h = react.createElement;
       var Input = ui.Input;
 
-      // Built once per card so useSyncExternalStore is not handed a new
-      // subscribe on every render, which would resubscribe every render.
+      // 每张卡片只构建一次，免得 useSyncExternalStore 每次渲染都拿到新的
+      // 订阅函数，从而每次都重新订阅。
       var subscribeLocale = (onChange) => {
         var locale = localeRef?.current;
         return locale ? locale.subscribe(onChange) : () => {};
@@ -566,10 +544,9 @@ window.__ModuleLoader__.load({
         return locale ? locale.getSnapshot().active : '';
       };
 
-      // The chrome is the native plugin card's, value for value (border,
-      // layer backgrounds, 12px radius, header row with a rotating chevron,
-      // footer with discard ghost + save primary), so this card reads as a
-      // sibling of the built-in ones rather than a lodger.
+      // 外壳照搬原生插件卡片，逐值对齐（描边、各层背景、12px 圆角、
+      // 带旋转箭头的头部行、含放弃幽灵按钮与保存主按钮的页脚），让这张
+      // 卡片读起来像内置卡片的同类，而不是借住的外来户。
       var chevron = (open) =>
         h(
           'svg',
@@ -594,18 +571,17 @@ window.__ModuleLoader__.load({
           }),
         );
 
-      // `view` is the Plugins page's question (dsh 0.1.6-alpha.2 on): 'page'
-      // for the form on the bundle's page, 'summary' for a one-liner.
-      // Settings on older hosts passes none and gets the collapsible card.
+      // `view` 是插件页提出的问题（dsh 0.1.6-alpha.2 起）：'page' 表示
+      // bundle 页面上的表单，'summary' 表示一句话摘要。更老的宿主不传，
+      // 得到的是可折叠卡片。
       return function ModsearchCard(props) {
         var view = props ? props.view : undefined;
-        // Subscribed, not sampled: the language is a live setting, and a card
-        // sitting open while the user switches has to follow. getSnapshot and
-        // subscribe are the pair dsh documents as useSyncExternalStore-safe.
-        // That hook is React 18 and up; where it is missing the language is
-        // read once per render instead, which still follows a switch as soon
-        // as anything re-renders the card. The branch is on a closure
-        // constant, so hook order never varies within one card.
+        // 订阅而不是采样：语言是活设置，一张开着的卡片必须跟着切换。
+        // getSnapshot 与 subscribe 是 dsh 文档里认定对
+        // useSyncExternalStore 安全的那一对。这个 hook 需要 React 18 及
+        // 以上；缺席的地方改为每次渲染读取一次语言，只要有什么让卡片
+        // 重新渲染就仍然跟随切换。分支依据一个闭包常量，因此钩子的顺序
+        // 在同一张卡片内永远不变。
         var t = labels(
           typeof react.useSyncExternalStore === 'function'
             ? react.useSyncExternalStore(subscribeLocale, readLocale)
@@ -615,17 +591,16 @@ window.__ModuleLoader__.load({
         var summaryState = react.useState(null);
         var draftState = react.useState(null);
         var noteState = react.useState('');
-        // The page already heads the form with the plugin's title, so the form
-        // is open from the start there: a collapsed block under that title
-        // would ask for the same click twice.
+        // 页面上已经有插件标题做表单的标题，所以那里的表单一开始就是展开
+        // 的：标题底下一个折叠块，等于让人把同一次点击做两遍。
         var open = view === 'page' || openState[0];
         var summary = summaryState[0];
         var draft = draftState[0];
         var note = noteState[0];
 
         var load = react.useCallback(() => {
-          // doctor: the offline self-check saying which engines are set up
-          // here. Paid once per expand, cached host-side.
+          // doctor：离线自检，说明本机哪些引擎已经配置好。每次展开付一次
+          // 代价，宿端缓存结果。
           fetch('/modsearch/config?doctor=1')
             .then((r) =>
               r.json().then((body) => {
@@ -651,12 +626,11 @@ window.__ModuleLoader__.load({
           }
         }, [open, summary, load]);
 
-        // Readiness after a save, which is the only moment it can have changed
-        // under this card: the key just written is exactly what makes an engine
-        // ready. Only the readiness list is replaced, so the fields keep their
-        // saved values and nothing on screen blinks back to a loading state.
-        // A probe that fails leaves the previous answer and the saved note
-        // alone: the save landed, and a failed follow-up is not its news.
+        // 保存之后重新读取就绪状态，这是它唯一可能在这张卡片之下发生
+        // 变化的时刻：刚写进去的密钥，正是让一个引擎就绪的东西。只替换
+        // 就绪列表，所以字段保留已保存的值，屏幕上也没有任何东西闪回
+        // 加载状态。探测失败时保留上一个答案与已保存的提示不动：保存
+        // 已经落地，后续失败不是它的消息。
         var refreshReadiness = react.useCallback((saved) => {
           fetch('/modsearch/config?doctor=1')
             .then((r) => (r.ok ? r.json() : null))
@@ -672,10 +646,9 @@ window.__ModuleLoader__.load({
           return t.subtitle;
         }
 
-        // A row wrapping ONE control is a label, which names that control. A
-        // row wrapping a set of them must not be: the label would become the
-        // first control's accessible name and swallow the whole section's
-        // prose. Those rows are a named group instead.
+        // 包住单个控件的一行就是一个 label，由它给那个控件命名。包住一组
+        // 控件的一行则不能这么做：label 会变成第一个控件的无障碍名称，
+        // 并把整段的说明吞掉。那几行改用具名分组。
         var fieldRow = (label, control, key, groupName) =>
           h(
             groupName ? 'div' : 'label',
@@ -718,10 +691,9 @@ window.__ModuleLoader__.load({
         var body = null;
         if (open) {
           if (summary === null || draft === null) {
-            // Before a summary exists, the only thing that writes a note is a
-            // load that failed. The collapsible card retries on its next
-            // expand, but the page never collapses, so a retry is offered
-            // where the failure is shown.
+            // 摘要还不存在时，唯一能写提示的就是一次失败的加载。可折叠
+            // 卡片会在下次展开时重试，但页面从不折叠，所以在出错的地方
+            // 提供一个重试。
             body = h(
               'div',
               {
@@ -766,14 +738,13 @@ window.__ModuleLoader__.load({
             const canModel = modelled(summary, draft.engine);
             const current = summary.engines?.[draft.engine] || { hasKey: false, keySource: null };
             const pristine = nextDraft(summary, draft.engine);
-            // Availability and permission are separate. Doctor says whether an
-            // engine can run here, and only those get a row. The checkbox says
-            // whether automatic routing may use it. An unchecked engine keeps
-            // its row: unticking it is not a reason to take the tickbox away,
-            // and dsh web users have no terminal to undo that with.
+            // 可用性与许可分开。doctor 说一个引擎在本机能否运行，只有那些
+            // 获得一行。勾选框说自动路由是否可以使用它。未勾选的引擎保留
+            // 它的行：取消勾选不该成为撤走勾选框的理由，而 dsh 的 Web 用户
+            // 没有终端可以把它撤销回去。
             const chain = chainEngines(summary);
-            // The same list savePayload measures, so the buttons can never
-            // light up over a change no save would carry.
+            // 与 savePayload 衡量的是同一份列表，所以按钮绝不会在一次
+            // 保存不会携带的改动上亮起来。
             const exposesTool =
               draft.exposeState === 'tool' || draft.exposeState === 'both';
             const dirty =
@@ -811,10 +782,9 @@ window.__ModuleLoader__.load({
                 h(Input, Object.assign(inputProps(key, placeholder), { type: 'text' })),
                 key,
               );
-            // Its own function rather than a `type` string the caller has to
-            // spell right. A sentinel compared with `===` fails open: one
-            // typo, or a later edit passing 'text', and the key renders in
-            // clear text with every test still green.
+            // 用独立的函数，而不是让调用方自己拼对的 `type` 字符串。一个
+            // 用 `===` 比较的哨兵值会失效开放：一次笔误，或后来某次编辑
+            // 传进 'text'，密钥就会明文渲染，而所有测试依旧全绿。
             const secretField = (label, key, placeholder) =>
               fieldRow(
                 label,
@@ -848,10 +818,10 @@ window.__ModuleLoader__.load({
                     fontSize: '13px',
                   },
                 },
-                // No aria-label. This label wraps exactly one control, so its
-                // text is the checkbox's accessible name, and that text is the
-                // whole row: an aria-label of just the engine name would name
-                // the box over the label and leave the aside beside it unread.
+                // 不加 aria-label。这个 label 恰好包住一个控件，它的文本
+                // 就是复选框的无障碍名称，而那段文本正是整行：只写引擎名
+                // 的 aria-label 会用盒子名称盖过 label，并让旁边的附注
+                // 不被读出。
                 h('input', {
                   type: 'checkbox',
                   checked,
@@ -861,9 +831,9 @@ window.__ModuleLoader__.load({
                   },
                 }),
                 h('span', null, name),
-                // grok-cli serves the social role alone: it never joins
-                // web-search failover, and an unmarked tickbox in a row of
-                // search engines would promise that it does.
+                // grok-cli 只承担社交搜索这一个角色：它从不加入网页搜索的
+                // 故障转移，而一排搜索引擎里一个没有任何标记的勾选框，会
+                // 暗示它确实会加入。
                 name === 'grok-cli'
                   ? h(
                       'span',
@@ -934,31 +904,28 @@ window.__ModuleLoader__.load({
                       'keyless',
                     ),
               canKey ? hint(t.apiKeyHint, 'api-key-rotation') : null,
-              // The keyless engines ask for no signup at all. Silence here
-              // reads as a key being required, which is the one thing these
-              // engines do not need.
-              // A keyless engine with no key field (youcom) has its own note above.
+              // 这些免密钥引擎完全不需要注册。这里留白会被读成「需要
+              // 密钥」，而那恰恰是这些引擎唯一不需要的东西。
+              // 没有密钥字段的免密钥引擎（youcom）在上面有自己的说明。
               canKey && KEYLESS_ENGINES.indexOf(draft.engine) >= 0 && !current.hasKey
                 ? hint(t.keylessTier, 'keyless-tier')
                 : null,
               canKey ? textField(t.baseUrl, 'baseURL', t.endpointFallback) : null,
-              // Where the key is coming from, said once: a save cannot beat an
-              // environment variable, and silence here would read as the save
-              // having done nothing.
+              // 密钥来自哪里，只说明一次：保存胜不过环境变量，这里沉默
+              // 会被读成保存什么也没做。
               canKey && current.keySource === 'env' ? hint(t.envNote, 'envnote') : null,
               canModel ? textField(t.model, 'model', t.modelFallback) : null,
-              // The exposure matrix. Two independent checkboxes would read as
-              // two unrelated switches; they are one choice of form, so they
-              // become one selection with the four forms spelled out.
+              // 露出矩阵。两个独立勾选框会被读成两个互不相关的开关；它们
+              // 其实是对形态的一次选择，所以收拢成一次选择，把四种形态
+              // 逐一写明。
               fieldRow(
                 t.exposeTitle,
                 h(
                   'select',
                   {
                     value: draft.exposeState,
-                    // Lets a test tell this dropdown from the engine
-                    // preference one; without it every assertion about
-                    // options would read across both.
+                    // 让测试能把这个下拉框与引擎偏好那个区分开；没有它，
+                    // 任何关于选项的断言都会横跨两者。
                     'data-select': 'expose',
                     onChange: (event) => {
                       set('exposeState', event.target.value);
@@ -983,15 +950,15 @@ window.__ModuleLoader__.load({
                 'expose-state',
               ),
               hint(t.exposeHint, 'expose-hint'),
-              // Only an engine that becomes a standalone tool needs a name,
-              // and only the placeholder shows the derived default: an empty
-              // field is "use that default", not "no name".
+              // 只有成为独立工具的引擎才需要一个名字，也只有 placeholder
+              // 会显示推导出来的默认值：空字段表示「用那个默认值」，不是
+              // 「没有名字」。
               exposesTool
                 ? textField(t.toolNameLabel, 'toolName', toolNameFor(summary, draft.engine))
                 : null,
               exposesTool ? hint(t.toolNameHint, 'toolname-hint') : null,
-              // Proxy applies to any engine that makes an HTTP call, which is
-              // every engine the card lists.
+              // 代理适用于任何发起 HTTP 调用的引擎，也就是卡片列出的
+              // 全部引擎。
               textField(t.proxyLabel, 'proxy', t.proxyFallback),
               hint(t.proxyHint, 'proxy-hint'),
               fieldRow(
@@ -1119,9 +1086,8 @@ window.__ModuleLoader__.load({
                           }),
                         )
                         .then((next) => {
-                          // The save response carries no doctor run, so the
-                          // statuses already on screen stand until the fresh
-                          // probe below answers.
+                          // 保存的响应里没有 doctor 的这次运行，所以屏幕上
+                          // 已有的状态保持不变，直到下面那次新探测作答。
                           next.readiness = summary.readiness;
                           summaryState[1](next);
                           draftState[1](nextDraft(next, next.engine));
@@ -1154,8 +1120,8 @@ window.__ModuleLoader__.load({
         }
 
         if (view === 'page') {
-          // Sized like the page's own section headings, so the form reads as
-          // one more section of the bundle's page.
+          // 尺寸做成页面自带的小节标题那样，让这份表单读起来像 bundle
+          // 页面又多了一节。
           return h(
             'div',
             null,
@@ -1230,20 +1196,17 @@ window.__ModuleLoader__.load({
     }
 
     function registerCard(ctx) {
-      // Reaching for an undeclared service throws in cordis, so each optional
-      // dependency rides a scoped ctx.inject of its own: the closure runs
-      // where the service exists and never runs where it does not, exactly as
-      // the host half takes webServer.
+      // 在 cordis 里伸手去拿一个未声明的服务会抛异常，所以每个可选依赖
+      // 各走一次自己范围的 ctx.inject：闭包在服务存在的地方运行，在不存在
+      // 的地方绝不运行，与宿主半边取 webServer 的做法完全一致。
       if (typeof ctx.inject !== 'function') {
         return;
       }
 
-      // dsh's language service gets an inject of its own, and fills a handle
-      // the card reads later. Listing it beside slots would be worse than
-      // useless: ctx.inject waits for every service named, so on a host that
-      // never provides locale the card would never register at all. Here a
-      // missing service just leaves the handle empty, and the card falls back
-      // to the page language.
+      // dsh 的语言服务占用自己的一次 inject，并填充一个卡片稍后读取的
+      // 句柄。把它与 slots 并列写在一起，比没用更糟：ctx.inject 会等待它
+      // 点名的每一个服务，于是在一个从不提供 locale 的宿主上，卡片根本
+      // 不会注册。放在这里，服务缺失只是让句柄空着，卡片退回页面语言。
       var localeRef = { current: null };
       ctx.inject(['locale'], (scope) => {
         localeRef.current = scope.locale;
@@ -1258,11 +1221,10 @@ window.__ModuleLoader__.load({
       });
 
       ctx.inject(['slots'], (scope) => {
-        // The card and its route live and die together: with the host route
-        // off (settingsCard: false, or no web profile) a card would only
-        // render an error, which is not what turning a feature off means. Any
-        // response at all proves the route exists; only a 404 or a network
-        // failure reads as absent.
+        // 卡片与它的路由同生共死：宿主路由关掉时（settingsCard: false，
+        // 或没有 web profile），卡片只能渲染一个错误，而那不是「关掉一项
+        // 功能」的含义。任何响应都证明路由存在；只有 404 或网络失败才
+        // 算作不存在。
         fetch('/modsearch/config')
           .then((response) => {
             if (response.status === 404) {
@@ -1288,17 +1250,16 @@ window.__ModuleLoader__.load({
       }
       var ui = require('@deepseek-ai/dsh-client-ui-primitives');
       var Card = ConfigCard(react, ui, localeRef);
-      // slots.inject waits until a slot is declared, so each host fills the
-      // one it has and the other wait never fires: from dsh 0.1.6-alpha.2 on
-      // hosts declare only the Plugins page's, older ones only the Settings
-      // one.
+      // slots.inject 会等待 slot 被声明，所以每个宿主只填它自己有的那个，
+      // 另一个的等待永不触发：dsh 0.1.6-alpha.2 起的宿主只声明插件页那个，
+      // 更老的只声明设置页那个。
       ctx.slots.inject('plugins.bundle.config', function* () {
         yield ctx.slots.register({ name: 'plugins.bundle.config', key: PACKAGE_NAME }, Card);
       });
       ctx.slots.inject('settings.plugin.item', function* () {
-        // id for rc.6's list slot, key for rc.7's keyed one: one client serves
-        // both, and the key has to match the settings namespace the host half
-        // registers or the card silently never renders.
+        // rc.6 的列表 slot 用 id，rc.7 的键控 slot 用 key：一个客户端同时
+        // 服务两者，而 key 必须与宿主半边注册的设置命名空间一致，否则卡片
+        // 会静默地永不渲染。
         yield ctx.slots.register(
           { name: 'settings.plugin.item', id: 'modsearch', key: 'modsearch', order: 31 },
           Card,
@@ -1311,7 +1272,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply;
-    // Exposed for the repo's tests only; not part of the plugin contract.
+    // 仅供本仓库的测试使用；不属于插件契约。
     exports.__card = {
       nextDraft: nextDraft,
       selectEngine: selectEngine,
@@ -1320,8 +1281,8 @@ window.__ModuleLoader__.load({
       secretFieldProps: secretFieldProps,
       ConfigCard: ConfigCard,
     };
-    // `slots` and `locale` are both optional, so neither is required here:
-    // registerCard takes each on its own scoped inject.
+    // `slots` 与 `locale` 都是可选的，所以这里不要求任何一个：registerCard
+    // 各自用一次自范围的 inject 取用。
     exports.inject = [];
     return module.exports;
   },

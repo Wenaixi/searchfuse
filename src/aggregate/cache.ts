@@ -1,17 +1,15 @@
-// A disk cache for fused search results.
+// 融合搜索结果的磁盘缓存。
 //
-// On disk rather than in memory because of how the plugin reaches the CLI: each
-// `web_search` call spawns a fresh `dist/main.js` process, so an in-process
-// cache would be born and die inside one call and never serve a second one.
+// 放磁盘而不是内存，是因为插件到达 CLI 的方式：每次 `web_search` 调用都会
+// 新起一个 `dist/main.js` 进程，所以进程内缓存会在一闪调用里生灭，永远伺候
+// 不了第二次调用。
 //
-// The file is separate from state.json on purpose. state.json holds quota
-// cooldowns, which are facts about the outside world; a cache is a convenience
-// that is safe to delete at any time, and mixing the two would make "clear the
-// cache" and "forget which engines are cooling" the same operation.
+// 文件刻意与 state.json 分开。state.json 存的是配额冷却，那是关于外部世界的
+// 事实；缓存则是随时可以删掉的便利，把两者混在一起会让「清缓存」和
+// 「忘记哪些引擎在冷却」变成同一个操作。
 //
-// Every read is failure-tolerant: a missing, half-written or hand-edited file
-// must never break a search, because the cache is an optimization and the
-// network is still there.
+// 每一次读取都容忍失败：缺失、写了一半、或被手改坏的文件绝不能拖垮一次搜索，
+// 因为缓存只是优化，网络还在那里。
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -63,8 +61,8 @@ function loadCacheFile(file: string): CacheFile {
     }
     return parsed as CacheFile;
   } catch {
-    // Missing, unreadable or malformed: all mean "no cache to serve", never
-    // "fail the search".
+    // 缺失、读不出、格式坏：全部都只意味着「没有缓存可给」，
+    // 绝不是「让搜索失败」。
     return {};
   }
 }
@@ -77,7 +75,7 @@ function saveCacheFile(file: string, data: CacheFile): void {
       fs.chmodSync(dir, 0o700);
     }
   } catch {
-    // best effort on platforms without chmod
+    // 在没有 chmod 的平台上尽力而为
   }
   const unique = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   const tmp = path.join(dir, `.cache.${unique}.tmp`);
@@ -86,7 +84,7 @@ function saveCacheFile(file: string, data: CacheFile): void {
   try {
     fs.chmodSync(file, 0o600);
   } catch {
-    // best effort
+    // 尽力而为
   }
 }
 
@@ -128,7 +126,7 @@ export function writeCache(
 ): void {
   const data = loadCacheFile(file);
   data[key] = record;
-  // Pruning on write keeps the file bounded without a background job.
+  // 写入时顺手修剪，文件就能保持有界，不需要后台任务。
   pruneInto(data, now, Number.POSITIVE_INFINITY, cap);
   saveCacheFile(file, data);
 }

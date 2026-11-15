@@ -44,21 +44,20 @@ export async function requestText(
           )}`,
         );
 
-  // An explicit setting decides alone, in both directions: `null` means direct
-  // and must not consult http_proxy, so this is a strict three-way branch
-  // rather than a truthiness check.
+  // 显式设置自己说了算，而且两个方向都算：`null` 意味着直连，
+  // 且绝不能去查 http_proxy，所以这是一个严格的三路分支，而不是真值判断。
   const proxyUrl =
     explicitProxy === undefined ? resolveProxyForUrl(new URL(url), process.env) : explicitProxy;
-  // NO_PROXY was already applied above, so the agent gets an empty one and
-  // always takes the proxy it is handed.
+  // NO_PROXY 上面已经应用过了，所以这里给代理一个空的，让它总是使用
+  // 交给它的那个代理。
   const dispatcher = proxyUrl
     ? new EnvHttpProxyAgent({ httpProxy: proxyUrl, httpsProxy: proxyUrl, noProxy: '' })
     : undefined;
   try {
     let response: Response;
     try {
-      // `dispatcher` is a Node/undici extension to fetch's options, not in the
-      // DOM RequestInit type, so it is attached through a cast.
+      // `dispatcher` 是 Node/undici 对 fetch 选项的扩展，不在 DOM 的
+      // RequestInit 类型里，所以通过类型断言挂上去。
       response = await fetch(url, {
         ...init,
         signal,
