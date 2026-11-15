@@ -144,6 +144,17 @@ export class McpConnection {
   }
 
   /**
+   * 本次调用的取消信号：本次调用的超时，加上调用方传进来的那个。
+   *
+   * 两者用 AbortSignal.any 合并，谁先到都算取消。于是超时保护照旧，而用户
+   * 中途点停止也能真的把在飞的请求掐断，而不是让它跑完再自己超时。
+   */
+  private signalFor(external: AbortSignal | undefined): AbortSignal {
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    return external === undefined ? timeout : AbortSignal.any([timeout, external]);
+  }
+
+  /**
    * 一次 JSON-RPC 请求。返回与之匹配的响应消息。
    *
    * 404 是协议表达「会话已没了」的方式，所以它会触发一次重新握手加一次重试。
@@ -154,12 +165,13 @@ export class McpConnection {
     body: Record<string, unknown>,
     id: number,
     allowReconnect = true,
+    external?: AbortSignal,
   ): Promise<JsonRpcMessage> {
     const response = await fetch(this.config.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: this.signalFor(external),
     });
 
     if (response.status === 202) {
@@ -171,7 +183,8 @@ export class McpConnection {
       this.initialized = false;
       await this.handshake();
       if (Object.hasOwn(body, 'id')) {
-        return this.request(body, id, false);
+        // 重试同样带上调用方的信号，否则取消能力在这一次重试里就断了。
+        return this.request(body, id, false, external);
       }
       return {};
     }
@@ -297,7 +310,14 @@ export class McpConnection {
     return collected;
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new McpProtocolError(`MCP call ${name} was cancelled before it started.`);
+    }
     await this.handshake();
     const response = await this.request(
       {
@@ -307,6 +327,8 @@ export class McpConnection {
         params: { name, arguments: args },
       },
       3,
+      true,
+      signal,
     );
     return response.result;
   }

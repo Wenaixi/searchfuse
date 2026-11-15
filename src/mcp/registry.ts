@@ -179,12 +179,13 @@ export async function registerMcpServers(
           // 会排在其他所有调用后面串行执行。
           isConcurrencySafe: () => true,
           async execute(args: unknown, exec: { signal?: AbortSignal }) {
-            if (exec?.signal?.aborted) {
-              throw new Error(`MCP call ${tool.name} was cancelled before it started.`);
-            }
+            // 信号往下传，而不是在这里只看一眼就算数：只看一眼只能拦住还没
+            // 出发的调用，拦不住已经在飞的请求。传下去之后，用户点停止，
+            // fetch 会自己中止，服务端那边也就不会继续算下去。
             return toolConnection.callTool(
               tool.name,
               (args ?? {}) as Record<string, unknown>,
+              exec?.signal,
             );
           },
         });

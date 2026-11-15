@@ -32,14 +32,18 @@ function listen(server: http.Server, requests: Server['requests']): Promise<Serv
 /**
  * A stand-in MCP server. `respond` decides the HTTP answer for each parsed
  * JSON-RPC body, so a test can model SSE vs JSON, session ids, and 404s.
+ * Returning `undefined` means "never answer": the request hangs on the wire,
+ * which is how a test exercises cancellation and timeouts.
  */
 async function mcpServer(
-  respond: (message: { method?: string; id?: unknown }, round: number) => {
-    status?: number;
-    headers?: Record<string, string>;
-    body: string;
-    contentType?: string;
-  },
+  respond: (message: { method?: string; id?: unknown }, round: number) =>
+    | {
+        status?: number;
+        headers?: Record<string, string>;
+        body: string;
+        contentType?: string;
+      }
+    | undefined,
 ): Promise<Server> {
   let round = 0;
   const requests: Server['requests'] = [];
@@ -57,6 +61,10 @@ async function mcpServer(
       requests.push({ method: req.method, headers: req.headers, body });
       round += 1;
       const answer = respond(message, round);
+      if (answer === undefined) {
+        // 故意不回：请求挂在网线上，直到客户端自己中止。
+        return;
+      }
       res.writeHead(answer.status ?? 200, {
         'content-type': answer.contentType ?? 'application/json',
         ...answer.headers,
@@ -286,6 +294,43 @@ describe('McpConnection', () => {
         /Invalid arguments for tool searchGitHub/,
       );
       await connection.close();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('aborts an in-flight tool call when the caller signal fires', async () => {
+    // 这个服务端对 tools/call 永远不回答：请求已经发出去了，就挂在那里。
+    // 于是唯一的结束方式要么是超时，要么是调用方中止——正好用来区分两者。
+    let toolCalls = 0;
+    const server = await mcpServer((message) => {
+      if (message.method === 'initialize') {
+        return {
+          body: sse({ protocolVersion: '2025-06-18', capabilities: {} }),
+          contentType: 'text/event-stream',
+        };
+      }
+      if (message.method === 'notifications/initialized') return { status: 202, body: '' };
+      if (message.method === 'tools/call') {
+        toolCalls += 1;
+        // 永不回答。真正的服务端在这里拖延，客户端只能靠信号自救。
+        return undefined;
+      }
+      return { status: 400, body: '{}' };
+    });
+    const controller = new AbortController();
+    try {
+      // 超时给到 5 秒，而取消在 50 毫秒后发生。如果实现只会等超时，这次调用
+      // 要 5 秒才结束——所以耗时就是判据，不只是「抛错」。
+      const connection = new McpConnection(config(server.url), { timeoutMs: 5_000 });
+      const started = Date.now();
+      const call = connection.callTool('slowTool', { query: 'x' }, controller.signal);
+      setTimeout(() => controller.abort(), 50);
+      await expect(call).rejects.toThrow(/abort|cancel/i);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      // 请求确实发出去了：这不是「进门就被拦下」，而是飞行途中被掐断的。
+      expect(toolCalls).toBe(1);
+      await connection.close().catch(() => undefined);
     } finally {
       await server.close();
     }
