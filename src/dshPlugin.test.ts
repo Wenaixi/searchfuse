@@ -285,9 +285,12 @@ function flag(argv: string[], name: string): string | undefined {
 }
 
 describe('dsh CLI budgets', () => {
-  it('passes 40s per engine and a 55s run deadline on the provider path', async () => {
+  it('passes the built-in budgets when neither the plugin nor the file sets one', async () => {
     argvEchoCli();
-    const { providers } = await load();
+    // Pinned explicitly so this case does not depend on what the ambient
+    // ~/.modsearch/config.json happens to hold: the point is the built-in
+    // default, not the machine it runs on.
+    const { providers } = await load({ providerTimeoutMs: 40_000, providerDeadlineMs: 55_000 });
     const result = await providers[0].search({ query: 'anything' });
     const argv = JSON.parse(result.content.split('\n')[0]) as string[];
     // One engine may take 40s, the whole chain 55s. Even an engine that
@@ -295,6 +298,21 @@ describe('dsh CLI budgets', () => {
     // fallback 10s, and the run ends before the host's 60s abort.
     expect(flag(argv, '--timeout')).toBe('40000');
     expect(flag(argv, '--deadline')).toBe('55000');
+  });
+
+  it('follows aggregate.deadlineMs from the file when the plugin config is silent', async () => {
+    // One number in the config file sizing both the CLI and the model-facing
+    // tool is the point of this fallback; two numbers that disagree is what
+    // it replaces.
+    argvEchoCli();
+    const { providers } = await load();
+    const result = await providers[0].search({ query: 'anything' });
+    const argv = JSON.parse(result.content.split('\n')[0]) as string[];
+    const deadline = Number(flag(argv, '--deadline'));
+    const timeout = Number(flag(argv, '--timeout'));
+    expect(Number.isFinite(deadline)).toBe(true);
+    // The per-engine budget never exceeds the run budget.
+    expect(timeout).toBeLessThanOrEqual(deadline);
   });
 
   it('lets the plugin config move both provider budgets', async () => {

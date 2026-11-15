@@ -153,6 +153,47 @@ export function apply(ctx, config = {}) {
  * execution: a run with no usable engine fails with the per-engine attempt
  * list, which beats a silent false here.
  */
+/**
+ * The wall-clock budgets for one `web_search` call.
+ *
+ * The plugin config wins, because a deployment may size this differently from
+ * the CLI. Failing that, the config FILE's `aggregate.deadlineMs` is read —
+ * so a user who sets one number there gets it for both the command line and
+ * the model-facing tool, instead of two numbers that disagree. The built-in
+ * default is the widest of the three: under the web seam the caller is a
+ * person waiting on a model answer, which tolerates a longer wait than a
+ * terminal does.
+ */
+function providerBudgets(config) {
+  const fromPlugin = {
+    timeoutMs:
+      typeof config?.providerTimeoutMs === 'number' && config.providerTimeoutMs > 0
+        ? config.providerTimeoutMs
+        : undefined,
+    deadlineMs:
+      typeof config?.providerDeadlineMs === 'number' && config.providerDeadlineMs > 0
+        ? config.providerDeadlineMs
+        : undefined,
+  };
+  let fromFile;
+  try {
+    const parsed = readModsearchConfig();
+    const configured = isPlainObject(parsed.aggregate) ? parsed.aggregate.deadlineMs : undefined;
+    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+      fromFile = configured;
+    }
+  } catch {
+    // An unreadable config file is not a reason to fail a search; the
+    // defaults below still work.
+  }
+  const deadlineMs = fromPlugin.deadlineMs ?? fromFile ?? PROVIDER_DEADLINE_MS;
+  // The per-engine budget has to leave the slowest engine room inside the
+  // run budget, so it follows the deadline rather than being a second number
+  // to keep in sync.
+  const timeoutMs = fromPlugin.timeoutMs ?? Math.min(PROVIDER_TIMEOUT_MS, deadlineMs);
+  return { timeoutMs, deadlineMs };
+}
+
 function registerSearchProvider(ctx, config) {
   if (typeof ctx.web?.registerSearchProvider !== 'function') {
     // A developer-preview surface move: degrade to the tools-only plugin,
@@ -160,8 +201,7 @@ function registerSearchProvider(ctx, config) {
     console.error('[modsearch] web seam has no registerSearchProvider; search provider skipped');
     return;
   }
-  const timeoutMs = config.providerTimeoutMs ?? PROVIDER_TIMEOUT_MS;
-  const deadlineMs = config.providerDeadlineMs ?? PROVIDER_DEADLINE_MS;
+  const { timeoutMs, deadlineMs } = providerBudgets(config);
   ctx.web.registerSearchProvider({
     id: 'modsearch',
     available: () => true,
