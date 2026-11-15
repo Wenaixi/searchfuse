@@ -107,12 +107,18 @@ describe('doctor: search engines', () => {
   });
 
   it('keeps readiness separate from a user-disabled engine', () => {
+    // Every keyless engine is switched off, so no engine can serve a search —
+    // while firecrawl still reports ready, which is the distinction under
+    // test: "can run here" and "may be used" are separate facts.
     const report = runDoctor({
       config: {
         engines: {
           firecrawl: { enabled: false },
           keenable: { enabled: false },
           youcom: { enabled: false },
+          hackernews: { enabled: false },
+          stackexchange: { enabled: false },
+          arxiv: { enabled: false },
         },
       },
       env: BARE_ENV,

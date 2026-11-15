@@ -69,6 +69,9 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
     ]);
@@ -80,6 +83,9 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
       'exa',
@@ -94,6 +100,9 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
       'exa',
@@ -112,13 +121,17 @@ describe('engine chains per role', () => {
   });
 
   it('searches through the keyless engines on a bare machine', () => {
-    // Zero config, nothing installed: search still works, because Firecrawl,
-    // Keenable, and You.com all accept unauthenticated calls against a free
-    // keyless allowance (no signup), and each backs up the one before.
+    // Zero config, nothing installed: search still works, because every engine
+    // here accepts unauthenticated calls — three free-tier web indexes plus
+    // three public API indexes (Hacker News, Stack Overflow, arXiv), each
+    // backing up the one before.
     expect(names(planRole('search', config(), undefined, BARE).chain)).toEqual([
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
     ]);
   });
 
@@ -127,16 +140,24 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', disabled, undefined, WITH_AGY).chain)).toEqual([
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
     ]);
   });
 
   it('does not treat comma-only API key settings as configured keys', () => {
+    // Every engine that has no key to check is switched off here, so an empty
+    // chain means the comma-only keys were correctly read as no keys at all.
     const commaOnly = config({
       engines: {
         firecrawl: { enabled: false },
         keenable: { enabled: false },
         youcom: { enabled: false },
+        hackernews: { enabled: false },
+        stackexchange: { enabled: false },
+        arxiv: { enabled: false },
         tavily: { apiKey: ', ,' },
         exa: { apiKey: ',,' },
       },
@@ -366,6 +387,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'exa',
       'tavily',
@@ -386,6 +410,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
       'exa',
@@ -397,6 +424,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'exa',
       'tavily',
@@ -412,6 +442,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       firecrawl: FUTURE,
       keenable: FUTURE,
       youcom: FUTURE,
+      hackernews: FUTURE,
+      stackexchange: FUTURE,
+      arxiv: FUTURE,
     });
     const { chain } = planRole('search', keyed, undefined, WITH_AGY, cd);
     // All cooling means the base order is unchanged, and nothing is dropped.
@@ -419,6 +452,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
       'exa',
@@ -461,6 +497,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'antigravity-cli',
       'tavily',
       'exa',

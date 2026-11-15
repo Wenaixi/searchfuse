@@ -510,6 +510,9 @@ const CARD_ENGINES = [
   'keenable',
   'youcom',
   'searxng',
+  'hackernews',
+  'stackexchange',
+  'arxiv',
   'grok-cli',
   'local',
 ];

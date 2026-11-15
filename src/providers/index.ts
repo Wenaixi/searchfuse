@@ -8,6 +8,9 @@ import { keenableProvider } from './keenable.ts';
 import { tavilyProvider } from './tavily.ts';
 import { youcomProvider } from './youcom.ts';
 import { searxngProvider } from './searxng.ts';
+import { hackernewsProvider } from './hackernews.ts';
+import { stackexchangeProvider } from './stackexchange.ts';
+import { arxivProvider } from './arxiv.ts';
 
 export type RunMode = 'search' | 'fetch';
 
@@ -91,6 +94,9 @@ const ENGINES: Record<string, SearchEngine> = {
   keenable: keenableProvider,
   youcom: youcomProvider,
   searxng: searxngProvider,
+  hackernews: hackernewsProvider,
+  stackexchange: stackexchangeProvider,
+  arxiv: arxivProvider,
   'grok-cli': grokCliProvider,
   grok: grokCliProvider,
   // The built-in direct fetcher, canonically `local`. `http` and `direct` stay
@@ -120,6 +126,9 @@ export const ROLE_PREFERENCE: Record<Role, string[]> = {
     'keenable',
     'youcom',
     'searxng',
+    'hackernews',
+    'stackexchange',
+    'arxiv',
     'antigravity-cli',
     'tavily',
     'exa',

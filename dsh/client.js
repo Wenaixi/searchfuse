@@ -29,6 +29,9 @@ window.__ModuleLoader__.load({
       'keenable',
       'youcom',
       'searxng',
+      'hackernews',
+      'stackexchange',
+      'arxiv',
       'grok-cli',
       'local',
     ];
