@@ -57,7 +57,9 @@ program
   )
   .option(
     '-e, --engine <name>',
-    'Engine for this run, overriding config (antigravity-cli, tavily, exa, firecrawl, keenable, youcom, searxng, grok-cli, local)',
+    // 从注册表生成而不是手写一份清单：手写的那份在新增 arXiv 引擎时漏了一项，
+    // 于是帮助文本少了一个其实可用的选项，而没有任何东西会发现这件事。
+    `Engine for this run, overriding config (${listEngines().join(', ')})`,
   )
   .option('-m, --model <name>', 'Engine model, where the engine has one')
   .option('--prompt <text>', 'Extra constraints for this run')
