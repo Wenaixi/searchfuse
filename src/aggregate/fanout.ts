@@ -42,7 +42,15 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
   targets: FanoutTarget[],
   request: Omit<EngineRequest, 'settings'>,
   totalDeadlineMs: number,
-  signal: AbortSignal,
+  /**
+   * 调用方自己的取消信号，**不是**预算。
+   *
+   * 这两件事必须分开传入。以前签名要求一个必填的 AbortSignal，而
+   * `runSearch` 手里没有取消信号，只能把自己的超时信号递进来——于是每一次
+   * 预算耗尽都被报成「the run was cancelled」，用户会以为是自己打断了运行。
+   * 信息不存在就没法猜，所以这里把它改成明确的「取消」，并允许缺省。
+   */
+  cancelSignal: AbortSignal | undefined,
   options: FanoutOptions = {},
 ): Promise<FanoutResult<T>> {
   const skipped = options.skipped ?? [];
@@ -51,8 +59,10 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
   }
 
   const deadline = AbortSignal.timeout(totalDeadlineMs);
-  const linked = AbortSignal.any([signal, deadline]);
-  const cancelledByCaller = () => signal.aborted;
+  const linked =
+    cancelSignal === undefined ? deadline : AbortSignal.any([cancelSignal, deadline]);
+  // 归因只看这两份精确信息：预算先到是超时，外部先到是取消。
+  const cancelledByCaller = () => cancelSignal?.aborted === true && !deadline.aborted;
 
   // 每个目标让它自己的执行与共享信号赛跑。只等 allSettled 会把整次运行
   // 拖到最慢的引擎结束为止，而这正是总预算必须阻止的：一个无视自身信号的

@@ -381,11 +381,15 @@ async function runFused(
   }
   let fanoutResult: Awaited<ReturnType<typeof fanout>>;
   try {
+    // 第四个参数是「调用方取消」，而这里没有取消信号可传：`runSearch` 是库
+    // 函数，中止由宿主层表达。所以传 undefined，让 fanout 用自己的预算判超时。
+    // 以前这里传的是 AbortSignal.timeout(budgetMs)，等于拿预算冒充取消，
+    // 把每一次超时都报成「the run was cancelled」。
     fanoutResult = await fanout<{
       title: string;
       url: string;
       snippet: string;
-    }>(targets, request, budgetMs, AbortSignal.timeout(budgetMs), { skipped });
+    }>(targets, request, budgetMs, undefined, { skipped });
   } catch (error) {
     // 所有引擎都失败了。直接抛出去，而不是把运行交回给链式：链式会
     // 为同一个失败把同样的引擎再查一遍，花掉双倍配额，换来的只是

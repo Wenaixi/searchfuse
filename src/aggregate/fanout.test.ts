@@ -89,6 +89,34 @@ describe('fanout', () => {
     expect(failures.join()).toMatch(/slow:.*timed out|slow:.*abort/i);
   });
 
+  it('blames the deadline for a timeout, not the caller', async () => {
+    // 这两种情形在用户眼里完全不同：超时是「等太久了」，取消是「我自己停的」。
+    // 归因错了会让人以为自己打断了运行。实现里靠 `deadline.aborted` 与
+    // `cancelSignal.aborted` 的先后区分，而以前只有后者一份信息可用，
+    // 于是预算耗尽也被报成取消。
+    //
+    // 每场都配一个能立刻成功的引擎：只要有一个成功，失败就进 failures 而不是
+    // 让整轮抛错——抛错时消息格式不同，测不到这里要测的措辞。
+    const quick = () => target('quick', async () => box('quick', ['https://q.example/1']));
+    const stalled = (name: string) =>
+      target(name, async () => box(name, []), { delayMs: 400 });
+
+    const timedOut = await fanout([quick(), stalled('stalled')], request, 50, undefined);
+    expect(timedOut.failures.join()).toMatch(/stalled: timed out after 50 ms/);
+    expect(timedOut.failures.join()).not.toMatch(/cancelled/);
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    const cancelled = await fanout(
+      [quick(), stalled('stalled2')],
+      request,
+      5_000,
+      controller.signal,
+    );
+    expect(cancelled.failures.join()).toMatch(/stalled2:.*cancelled/);
+    expect(cancelled.failures.join()).not.toMatch(/timed out/);
+  });
+
   it('throws only when every source failed, carrying each failure', async () => {
     await expect(
       fanout(
