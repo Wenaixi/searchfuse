@@ -116,11 +116,25 @@ export class McpConnection {
   private protocolVersion = HANDSHAKE_PROTOCOL_VERSION;
   private initialized = false;
   private readonly config: McpServerConfig;
-  private readonly timeoutMs: number;
+  /** 一次工具调用允许的时间。用户配的 `timeoutMs` 管的是这个。 */
+  private readonly toolTimeoutMs: number;
+  /**
+   * 握手允许的时间。
+   *
+   * 与工具调用分开，因为它们是两种完全不同性质的等待：握手只是几次 HTTP
+   * 往返，实测一两秒就够；而一次 `tools/call` 可能真的在服务端算很久。用同一
+   * 个 30 秒的上限管两件事，代价是一个死掉的服务端会把插件启动拖住 30 秒——
+   * 而它其实在第一秒就已经没救了。
+   *
+   * 用户显式配的 `timeoutMs` 仍然压过这里的默认值：有人跑在慢链路上，10 秒
+   * 也许不够。
+   */
+  private readonly handshakeTimeoutMs: number;
 
   constructor(config: McpServerConfig, options: { timeoutMs?: number } = {}) {
     this.config = config;
-    this.timeoutMs = options.timeoutMs ?? config.timeoutMs ?? 30_000;
+    this.toolTimeoutMs = options.timeoutMs ?? config.timeoutMs ?? 30_000;
+    this.handshakeTimeoutMs = config.timeoutMs ?? Math.min(this.toolTimeoutMs, 10_000);
   }
 
   get serverUrl(): string {
@@ -150,7 +164,7 @@ export class McpConnection {
    * 中途点停止也能真的把在飞的请求掐断，而不是让它跑完再自己超时。
    */
   private signalFor(external: AbortSignal | undefined): AbortSignal {
-    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const timeout = AbortSignal.timeout(this.initialized ? this.toolTimeoutMs : this.handshakeTimeoutMs);
     return external === undefined ? timeout : AbortSignal.any([timeout, external]);
   }
 
@@ -222,7 +236,7 @@ export class McpConnection {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ jsonrpc: '2.0', method }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(this.handshakeTimeoutMs),
     });
   }
 
@@ -249,7 +263,7 @@ export class McpConnection {
           clientInfo: { name: 'modsearch', version: '1.0.0' },
         },
       }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(this.handshakeTimeoutMs),
     });
 
     // 会话 id 藏在这个响应的响应头里，要在解析 body 之前就取出来。

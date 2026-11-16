@@ -519,9 +519,15 @@ function house(options: { settings?: Record<string, unknown> | null } = {}) {
         tools.set(definition.name, definition);
         // 真宿主返回一个精确的撤销句柄，工具因此能单独撤掉。这个假宿主也得
         // 这么做：否则「先撤旧的再注册新的」这条路径在测试里根本走不到。
-        return () => {
+        const undo = () => {
           tools.delete(definition.name);
         };
+        // 真宿主的 register 内部是 `this.layers.effect(this.ctx, ...)`，也就是
+        // 把工具的生命周期绑在**调用方的 fiber** 上：插件卸载时工具自动消失，
+        // 插件不需要自己登记。假宿主必须复现这一点，否则「卸载后残留工具」这种
+        // 真实环境里不存在的问题会在验收里冒出来，把注意力引向错误的地方。
+        disposers.push(undo);
+        return undo;
       },
     },
     web: {

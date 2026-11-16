@@ -59,6 +59,15 @@ const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
  */
 const CONFIG_POLL_MS = 5_000;
 
+/**
+ * 有 MCP 服务端没连上时，隔多久再试一次。
+ *
+ * 启动时的网络抖动很常见：一个包丢了、一个服务端恰好在重启。立刻重试只会
+ * 撞上同一个故障，而永远不重试则意味着那个服务端的工具一直缺席，直到用户
+ * 手动改配置。30 秒足够让一次抖动过去，也短到用户不会觉得它坏了。
+ */
+const MCP_RETRY_DELAY_MS = 30_000;
+
 const PROVIDER_TIMEOUT_MS = 40_000;
 const PROVIDER_DEADLINE_MS = 55_000;
 
@@ -1148,6 +1157,8 @@ function registerMcpTools(ctx) {
   let disposed = false;
   let lastSignature = '';
   let inFlight = false;
+  /** 失败后的自动重试定时器；null 表示没有排队的重试。 */
+  let retryTimer = null;
 
   /** 配置里决定「哪些工具存在」的那一部分。 */
   const signatureOf = (servers) => {
@@ -1242,11 +1253,41 @@ function registerMcpTools(ctx) {
         console.error(`[modsearch] mcp ${report.serverKey}: ${report.error}`);
       }
     }
+    // 有服务端没连上：安排一次稍后的重试。
+    //
+    // 启动那一刻的网络抖动不该让一个服务端的工具永久消失。签名机制挡的是
+    // 「配置没变还重连」，但它也意味着失败之后不会自己再试——用户得改点什么
+    // 才会触发下一轮。这里补上自动重试，并给一个足够长的间隔：立刻重试只会
+    // 撞上同一个故障，而太长的等待又让恢复显得像卡住了。
+    const failed = result.reports.filter((r) => r.error !== undefined);
+    if (failed.length > 0 && !disposed && retryTimer === null) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (disposed) {
+          return;
+        }
+        // 清掉签名，让 settle 认为「配置变了」而重新注册：失败的那些服务端
+        // 要借此获得第二次机会，而已经连上的会因为同名冲突预先被 disposeTools
+        // 拆掉再重建——代价是它们也要重新握手一次，但这是唯一能让两者同时
+        // 成立的路径，且只在有失败时才发生。
+        lastSignature = '';
+        settle().catch((error) => {
+          console.error(`[modsearch] mcp retry failed: ${error?.message ?? error}`);
+        });
+      }, MCP_RETRY_DELAY_MS);
+      if (typeof retryTimer?.unref === 'function') {
+        retryTimer.unref();
+      }
+    }
   };
 
   try {
     ctx.effect(() => () => {
       disposed = true;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       result?.closeAll().catch(() => undefined);
     }, 'modsearch: mcp sessions');
   } catch {
