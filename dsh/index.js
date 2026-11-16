@@ -578,6 +578,15 @@ const ENDPOINT_ENGINES = [...KEYED_ENGINES, 'searxng'];
  */
 const MODEL_ENGINES = ['antigravity-cli'];
 /**
+ * 默认不激活的引擎，与 `src/config.ts` 的 `OFF_UNLESS_ENABLED` 是一份跨端
+ * 副本：本文件是手写 JavaScript，不能 import TypeScript 源码。
+ * `dshPlugin.test.ts` 有一条 lockstep 断言两边一致。
+ *
+ * 它们仍然出现在卡片上，用户可以逐个打开；而 `doctor` 照样报告它们是否存在，
+ * 所以「装了吗」和「开着吗」是两个可以分开看的答案。
+ */
+const DEFAULT_OFF_ENGINES = ['antigravity-cli', 'arxiv'];
+/**
  * 所有被接受的拼写，与 src/config.ts 里的 CANONICAL_ENGINE 对应。用别名保存
  * 的设置就是同一个引擎的设置，所以卡片必须在它们本来所在的地方读写。
  */
@@ -634,6 +643,22 @@ function coerceBoolean(value) {
     }
   }
   return undefined;
+}
+
+/**
+ * 这个引擎此刻是开着的吗？
+ *
+ * 与 `src/config.ts` 的 `engineSettings()` 里那段 OFF_UNLESS_ENABLED 判定
+ * 对齐：未设置 `enabled` 时，名单里的引擎算关，其余算开；显式写下的值永远
+ * 压过默认。宿主半边必须自己判一遍，因为它不能 import TypeScript 源码，而
+ * 判错一次就是「卡片上打开的引擎其实从来没被用过」。
+ */
+function engineEnabled(name, settings) {
+  const explicit = coerceBoolean(settings.enabled);
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  return !DEFAULT_OFF_ENGINES.includes(name);
 }
 
 /** 逗号分隔的 API 密钥值里是否至少含一个真实密钥。 */
@@ -732,7 +757,12 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
       baseURL: fromEnv.baseURL ?? (typeof fromFile.baseURL === 'string' ? fromFile.baseURL : ''),
       model: typeof fromFile.model === 'string' ? fromFile.model : '',
       hasKey: envKey || fileKey,
-      enabled: coerceBoolean(fromFile.enabled) !== false,
+      // 生效值：「文件里写没写」与「此刻开没开」是两回事，默认关闭的引擎
+      // 在文件里往往一个字都没有。卡片要的是后者。
+      enabled: engineEnabled(name, fromFile),
+      // 标出「关闭来自默认而不是用户亲手关的」：卡片据此说明打开它需要先存
+      // 一份显式设置。
+      defaultOff: DEFAULT_OFF_ENGINES.includes(name) && coerceBoolean(fromFile.enabled) === undefined,
       // 曝光矩阵以及随之而来的两个字段。只报告引擎自己的值：代理为空意味着
       // 文件里没有，这就是卡片显示的内容。
       expose: isPlainObject(fromFile.expose) ? fromFile.expose : {},
@@ -1281,18 +1311,19 @@ function registerEngineTools(ctx) {
    * 又出现一次，而用户是看着那个列表点下去的。
    */
   const signatureOf = (engines) => {
-    const shape = Object.entries(engines)
-      .filter(([, settings]) => isPlainObject(settings))
-      .map(([rawName, settings]) => {
-        const expose = isPlainObject(settings.expose) ? settings.expose : {};
-        return [
-          rawName,
-          expose.tool === true,
-          coerceBoolean(settings.enabled) !== false,
-          typeof settings.toolName === 'string' ? settings.toolName.trim() : '',
-        ];
-      })
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    // 遍历全部已知引擎而不是只遍历文件里那些条目：被默认关闭的引擎（在
+    // OFF_UNLESS_ENABLED 里的那些）在配置里往往没有条目，只遍历文件会让
+    // 签名看不出用户把它打开了——热重载于是不会重新注册它的工具。
+    const shape = CARD_ENGINES.map((name) => {
+      const settings = isPlainObject(engines[name]) ? engines[name] : {};
+      const expose = isPlainObject(settings.expose) ? settings.expose : {};
+      return [
+        name,
+        expose.tool === true,
+        coerceBoolean(settings.enabled) !== false,
+        typeof settings.toolName === 'string' ? settings.toolName.trim() : '',
+      ];
+    });
     return JSON.stringify(shape);
   };
 
@@ -1327,22 +1358,26 @@ function registerEngineTools(ctx) {
     lastSignature = signature;
 
     const claimed = new Set(BASE_TOOL_NAMES);
-    for (const [rawName, rawSettings] of Object.entries(engines)) {
-      if (!isPlainObject(rawSettings)) {
-        continue;
-      }
+    // 遍历全部已知引擎，而不是只遍历配置文件里那些条目。
+    //
+    // 用户可以在卡片上给一个默认关闭的引擎（arXiv、antigravity-cli）打开
+    // 工具形态；那样一来配置里就有了它的条目。但反过来，一个从没被碰过的
+    // 引擎在文件里没有条目，只遍历文件就永远看不到它——而「它此刻是不是
+    // 开着」正是签名要比对的东西。
+    //
+    // 配置里可能用别名写同一个引擎（`exa` / `Exa`），`fileSettingsFor` 会按
+    // 别名聚合，所以这里按键查也不会漏。
+    for (const engine of CARD_ENGINES) {
+      const rawSettings = fileSettingsFor(engine, config);
       const expose = isPlainObject(rawSettings.expose) ? rawSettings.expose : {};
       if (expose.tool !== true) {
         continue;
       }
       // `enabled: false` 是彻底的总开关，不只是「不参与融合」。用户关掉的引擎
       // 不能再以工具的身份出现：否则这个开关的含义就跟它说的不一样了。
-      if (coerceBoolean(rawSettings.enabled) === false) {
-        continue;
-      }
-      const engine = canonicalEngine(rawName);
-      if (!CARD_ENGINES.includes(engine)) {
-        console.error(`[modsearch] engine tool skipped: unknown engine "${rawName}"`);
+      // 用 engineEnabled 而不是直接查 enabled：默认关闭的引擎从没在文件里
+      // 写过 enabled，只查文件等于让它们绕过了这道闸。
+      if (!engineEnabled(engine, rawSettings)) {
         continue;
       }
       const name =

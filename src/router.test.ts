@@ -69,7 +69,6 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
     ]);
   });
@@ -80,7 +79,6 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
       'exa',
     ]);
@@ -94,7 +92,6 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
       'exa',
     ]);
@@ -119,7 +116,6 @@ describe('engine chains per role', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
     ]);
   });
 
@@ -128,8 +124,19 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', disabled, undefined, WITH_AGY).chain)).toEqual([
       'keenable',
       'youcom',
-      'arxiv',
     ]);
+  });
+
+  it('keeps arXiv out of the chain until the user turns it on', () => {
+    // arXiv 默认不激活，因为它按任意词命中检索，语义太宽：查询
+    // “electron main process” 会让它返回铜氧化物里的激子-极化激元论文。
+    // 关掉的只是默认——用户在卡片上勾一下就该拿回来，所以这条测试同时锁住
+    // 两个方向，只锁「不在链里」会让人以为这个引擎被删掉了。
+    const bare = config({});
+    expect(names(planRole('search', bare, undefined, WITH_AGY).chain)).not.toContain('arxiv');
+
+    const turnedOn = config({ engines: { arxiv: { enabled: true } } });
+    expect(names(planRole('search', turnedOn, undefined, WITH_AGY).chain)).toContain('arxiv');
   });
 
   it('does not treat comma-only API key settings as configured keys', () => {
@@ -369,7 +376,6 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'exa',
       'tavily',
     ]);
@@ -389,7 +395,6 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
       'exa',
     ]);
@@ -400,7 +405,6 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'exa',
       'tavily',
     ]);
@@ -422,7 +426,6 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
       'exa',
     ]);
@@ -464,7 +467,6 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'firecrawl',
       'keenable',
       'youcom',
-      'arxiv',
       'tavily',
       'exa',
     ]);

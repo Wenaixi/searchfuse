@@ -53,6 +53,26 @@ describe('dsh plugin bundle', () => {
     expect(registered.filter((name) => !offered.includes(name))).toEqual([]);
   });
 
+  it('keeps the default-off engine list in lockstep with the host half', () => {
+    // 「默认不激活、但界面上可以打开」这条规则住在 src/config.ts 的
+    // OFF_UNLESS_ENABLED，而宿主那半带着一份副本（它不能 import TypeScript
+    // 源码）。副本漂移时卡片会显示一种状态而宿主执行另一种，用户看不到报错，
+    // 只会发现「我明明打开过它」。
+    const source = fs.readFileSync(new URL('./config.ts', import.meta.url), 'utf-8');
+    const host = fs.readFileSync(new URL('../dsh/index.js', import.meta.url), 'utf-8');
+    const block = source.match(/OFF_UNLESS_ENABLED[^=]*=\s*\{([^}]*)\}/s)?.[1] ?? '';
+    // 键可能带引号（`'antigravity-cli'`）也可能不带（`arxiv`），两种都要抓：
+    // 只抓裸键名会静默漏掉带引号的那部分，于是断言比它看起来的更弱。
+    const fromSource = [...block.matchAll(/['"]?([A-Za-z0-9_-]+)['"]?\s*:/g)].map((m) => m[1]);
+    const listFrom = (text: string, name: string): string[] => {
+      const m = text.match(new RegExp(`(?:const|var) ${name} = \\[([^\\]]+)\\]`));
+      if (!m?.[1]) throw new Error(`${name} not found`);
+      return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+    };
+    expect(fromSource.length).toBeGreaterThan(0);
+    expect(listFrom(host, 'DEFAULT_OFF_ENGINES')).toEqual(fromSource);
+  });
+
   it('wires the bundle manifest to the patch and the patch to the plugin', () => {
     const pkg = JSON.parse(
       fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),

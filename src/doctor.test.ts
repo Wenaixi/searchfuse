@@ -399,9 +399,10 @@ describe('doctor: aggregate and MCP sections', () => {
       report.aggregate.participants.find((p) => p.engine === name)?.reason;
     expect(byEngine('tavily')).toBe('关闭（enabled: false）');
     expect(byEngine('exa')).toBe('不参与融合（expose.aggregate: false）');
-    // arxiv 在这台机器上不需要任何东西，所以它是「参与融合」的那一档。
-    // 用 searxng 代替会在空环境里落到「本机不可用」，那测的是别的东西。
-    expect(byEngine('arxiv')).toBe('参与融合');
+    // 用 keenable 断言「参与融合」这一档：它在空环境里无需密钥即可用，而且
+    // 不在默认关闭名单里。换成 arxiv 会落到「关闭」——那测的是别的规则，
+    // 不是这里要验证的融合参与者分类。
+    expect(byEngine('keenable')).toBe('参与融合');
     expect(report.aggregate.mode).toBe('rrf');
     expect(formatDoctorReport(report)).toContain('Aggregate');
   });
