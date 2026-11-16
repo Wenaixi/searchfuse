@@ -70,6 +70,33 @@ describe('rrfFuse', () => {
     expect(fused.every((f) => f.foundIn.length === 1)).toBe(true);
   });
 
+  it('treats linkless entries as distinct instead of merging them into one', () => {
+    // 五个 provider 都用 `url: r.url ?? ''` 构造条目，所以上游漏一个链接就会
+    // 送来空串。若空串被当成「同一页面」，这批互不相干的结果会被合并成一条，
+    // foundIn 会声称多个引擎都投了它，虚高的分数还会把它顶到第一位。
+    const fused = rrfFuse<Item>([
+      { engine: 'a', items: [item('NoLink-1', '')] },
+      { engine: 'b', items: [item('NoLink-2', '')] },
+      { engine: 'c', items: [item('Linked', 'https://c.example/1')] },
+    ]);
+    // 三条都在，一条不少。
+    expect(fused).toHaveLength(3);
+    // foundIn 各归其主：没有任何一条声称被两个引擎共同命中。
+    expect(fused.every((f) => f.foundIn.length === 1)).toBe(true);
+    expect(fused.map((f) => f.title).sort()).toEqual(['Linked', 'NoLink-1', 'NoLink-2']);
+  });
+
+  it('still merges two copies of the same link when one of them lacks a URL', () => {
+    // 反向约束：凡是真有 URL 的条目，合并行为必须和以前一模一样。修空 URL
+    // 不能顺手把正常的去重也一并关掉。
+    const fused = rrfFuse<Item>([
+      { engine: 'a', items: [item('Page', 'https://x.example/p?utm_source=fb')] },
+      { engine: 'b', items: [item('Page', 'https://x.example/p')] },
+    ]);
+    expect(fused).toHaveLength(1);
+    expect(fused[0]?.foundIn).toEqual(['a', 'b']);
+  });
+
   it('breaks ties deterministically rather than by input order luck', () => {
     const a = rrfFuse<Item>([
       { engine: 'a', items: [item('A1', 'https://a.example/1')] },
