@@ -3,12 +3,18 @@
 // Grok 登录文件是否存在。它报告的一切都是本地事实，所以在任何机器上、
 // 运行任意多次都是安全的。
 import * as fs from 'fs';
+import { currentCachePath } from './aggregate/cache.ts';
 import {
+  aggregateCacheTtlMs,
+  aggregateDeadlineMs,
+  aggregateMode,
   allowsPrivateNetwork,
   chosenEngine,
   cooldownEnabled,
   currentConfigPath,
   engineSettings,
+  exposeOf,
+  isPlainObject,
   loadConfigFile,
   type ModsearchConfig,
   type Role,
@@ -20,8 +26,15 @@ import {
   loadCooldownState,
   parseCooldownStateKey,
 } from './cooldown.ts';
+import { isServerNameValid } from './mcp/protocol.ts';
 import { grokAuthFile } from './providers/grok.ts';
-import { enginesForRole, findEngine, ROLE_PREFERENCE, type SearchEngine } from './providers/index.ts';
+import {
+  allEngines,
+  enginesForRole,
+  findEngine,
+  ROLE_PREFERENCE,
+  type SearchEngine,
+} from './providers/index.ts';
 import { commandOnPath } from './system.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
 
@@ -92,6 +105,38 @@ export interface DoctorReport {
   allowPrivateNetwork: { enabled: boolean; source: 'file' | 'default' };
   /** 配额冷却：开关状态，以及此刻正在冷却的每个引擎。 */
   cooldown: { enabled: boolean; statePath: string; engines: CooldownDiagnosis[] };
+  /**
+   * 融合搜索的静态配置。
+   *
+   * 这里只回答「配置会让它怎么跑」，不回答「它刚才跑成什么样」：后者属于
+   * 那一次运行自己的 `uncertainty`，doctor 是另一个进程，看不到它。
+   */
+  aggregate: {
+    /** 融合是否参与 web 路由。 */
+    mode: 'rrf' | 'chain';
+    /** 整轮运行的墙钟预算。 */
+    deadlineMs: number;
+    /** 结果缓存的 TTL，0 表示关闭。 */
+    cacheTtlMs: number;
+    cachePath: string;
+    /** 会参与融合的引擎，以及为什么某些引擎不会。 */
+    participants: Array<{ engine: string; reason: string }>;
+  };
+  /**
+   * 配置文件里声明的 MCP 服务端。
+   *
+   * 与聚合一样，这一节是静态的：它说「配置声明了什么」，不说「刚才连上没有」。
+   * 真实的连接结果写在插件日志里，因为那需要一个正在运行的宿主。
+   */
+  mcp: {
+    servers: Array<{
+      key: string;
+      url: string | null;
+      enabled: boolean;
+      /** 键名不合契约时设置：这个键会成为工具名的一部分。 */
+      problem?: string;
+    }>;
+  };
   roles: RoleDiagnosis[];
 }
 
@@ -465,8 +510,87 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
       source: allowPrivate ? 'file' : 'default',
     },
     cooldown: diagnoseCooldown(config, statePath, now),
+    aggregate: diagnoseAggregate(config, env),
+    mcp: diagnoseMcp(config),
     roles,
   };
+}
+
+/**
+ * 融合搜索会怎么跑。
+ *
+ * 每个搜索引擎都列出来，并说明它参与还是不参与——以及为什么。用户跑 doctor
+ * 想知道「为什么这个引擎没被用上」，只列参与者回答不了这个问题，而「没被用上」
+ * 在语义上有四种完全不同的成因：被关掉、只做独立工具、本机不可用、正在冷却。
+ * 这里能回答前三种；冷却属于运行时状态，由 cooldown 那一节负责。
+ */
+function diagnoseAggregate(
+  config: ModsearchConfig,
+  env: NodeJS.ProcessEnv,
+): DoctorReport['aggregate'] {
+  const participants: Array<{ engine: string; reason: string }> = [];
+  for (const engine of allEngines()) {
+    if (!engine.roles.includes('search')) {
+      continue;
+    }
+    const settings = engineSettings(engine.name, config, env);
+    if (settings.enabled === false) {
+      participants.push({ engine: engine.name, reason: '关闭（enabled: false）' });
+      continue;
+    }
+    if (!exposeOf(settings).aggregate) {
+      participants.push({ engine: engine.name, reason: '不参与融合（expose.aggregate: false）' });
+      continue;
+    }
+    if (engine.execute === undefined) {
+      // 子进程引擎不从这条路径跑；说清这一点，免得读者以为它坏了。
+      participants.push({ engine: engine.name, reason: '进程内引擎之外（走链式路径）' });
+      continue;
+    }
+    if (!engine.isAvailable(settings, env, 'search')) {
+      participants.push({ engine: engine.name, reason: '本机不可用（缺少密钥或命令）' });
+      continue;
+    }
+    participants.push({ engine: engine.name, reason: '参与融合' });
+  }
+  return {
+    mode: aggregateMode(config),
+    deadlineMs: aggregateDeadlineMs(config),
+    cacheTtlMs: aggregateCacheTtlMs(config),
+    cachePath: currentCachePath(),
+    participants,
+  };
+}
+
+/**
+ * 配置文件里声明了哪些 MCP 服务端。
+ *
+ * 只说配置，不说连接结果：真实连接发生在宿主进程里，而 doctor 是另一个进程，
+ * 看不到那份 session。把两者混在一起会让一节「配置对不对」的诊断看起来像是在
+ * 回答「刚才连上没有」，而它做不到后者。键名契约在配置阶段就能判——它将成为
+ * 工具名的一部分，所以一个不合法的键等于一个永远注册不上的工具。
+ */
+function diagnoseMcp(config: ModsearchConfig): DoctorReport['mcp'] {
+  const servers = isPlainObject(config.mcp) ? (config.mcp as Record<string, unknown>) : {};
+  const out: DoctorReport['mcp']['servers'] = [];
+  for (const [key, raw] of Object.entries(servers)) {
+    if (!isPlainObject(raw)) {
+      out.push({ key, url: null, enabled: false, problem: '条目不是一个对象' });
+      continue;
+    }
+    const entry: DoctorReport['mcp']['servers'][number] = {
+      key,
+      url: typeof raw.url === 'string' ? raw.url : null,
+      enabled: raw.enabled !== false,
+    };
+    if (!isServerNameValid(key)) {
+      entry.problem = '键名必须匹配 [A-Za-z0-9_-]{1,32}（它会成为工具名的一部分）';
+    } else if (entry.url === null) {
+      entry.problem = '缺少 url';
+    }
+    out.push(entry);
+  }
+  return { servers: out };
 }
 
 /** 人类可读的报告。`--json` 则直接打印对象。 */
@@ -522,6 +646,38 @@ export function formatDoctorReport(report: DoctorReport): string {
         lines.push(`      reason: ${c.reason}`);
       }
     }
+  }
+  lines.push('');
+
+  lines.push('Aggregate');
+  const agg = report.aggregate;
+  lines.push(`  mode:     ${agg.mode === 'rrf' ? 'rrf (concurrent fanout, fused)' : 'chain (sequential fallback)'}`);
+  lines.push(`  deadline: ${agg.deadlineMs} ms (whole run)`);
+  lines.push(
+    agg.cacheTtlMs > 0
+      ? `  cache:    ${agg.cacheTtlMs} ms (${agg.cachePath})`
+      : '  cache:    off (ttl 0)',
+  );
+  for (const p of agg.participants) {
+    const mark = p.reason === '参与融合' ? 'FUSED  ' : 'skip   ';
+    lines.push(`  - ${p.engine.padEnd(16)} ${mark}  ${p.reason}`);
+  }
+  lines.push('');
+
+  lines.push('MCP');
+  if (report.mcp.servers.length === 0) {
+    lines.push('  no servers configured');
+  } else {
+    for (const server of report.mcp.servers) {
+      const state = !server.enabled ? 'off    ' : server.problem ? 'INVALID' : 'on     ';
+      lines.push(`  - ${server.key.padEnd(16)} ${state}  ${server.url ?? '(no url)'}`);
+      if (server.problem) {
+        lines.push(`      ! ${server.problem}`);
+      }
+    }
+    // 这一节只读配置。真实连接结果写在插件日志里，说清楚免得读者误以为
+    // 「这里没报警告」等于「刚才连上了」。
+    lines.push('  note: these are config facts only; live connection results appear in the plugin log');
   }
   lines.push('');
 

@@ -196,7 +196,7 @@ export function canonicalEngineName(name: string): string {
 }
 
 /** 只认 JSON 解析出来的对象：null、数组以及原型链上的居民都不算设置。 */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

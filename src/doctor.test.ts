@@ -378,3 +378,61 @@ describe('doctor: cooldown', () => {
     expect(report.cooldown.engines).toEqual([]);
   });
 });
+
+describe('doctor: aggregate and MCP sections', () => {
+  afterEach(() => cleanupTempDirs());
+
+  it('names why each engine does or does not join the fusion', () => {
+    // 四种成因在用户眼里都是「它没被用上」，而修法完全不同：一个要改
+    // enabled，一个要改 expose.aggregate，一个要装东西。只列参与者回答不了
+    // 这个「为什么」。
+    const report = runDoctor({
+      config: {
+        engines: {
+          tavily: { enabled: false },
+          exa: { expose: { aggregate: false } },
+        },
+      },
+      env: BARE_ENV,
+    });
+    const byEngine = (name: string) =>
+      report.aggregate.participants.find((p) => p.engine === name)?.reason;
+    expect(byEngine('tavily')).toBe('关闭（enabled: false）');
+    expect(byEngine('exa')).toBe('不参与融合（expose.aggregate: false）');
+    // arxiv 在这台机器上不需要任何东西，所以它是「参与融合」的那一档。
+    // 用 searxng 代替会在空环境里落到「本机不可用」，那测的是别的东西。
+    expect(byEngine('arxiv')).toBe('参与融合');
+    expect(report.aggregate.mode).toBe('rrf');
+    expect(formatDoctorReport(report)).toContain('Aggregate');
+  });
+
+  it('reports configured MCP servers without claiming a live connection', () => {
+    const report = runDoctor({
+      config: {
+        mcp: {
+          grep: { transport: 'streamable-http', url: 'https://mcp.grep.app' },
+          'bad.key': { url: 'https://x.example' },
+          nokey: { url: 42 },
+        },
+      },
+      env: BARE_ENV,
+    });
+    expect(report.mcp.servers).toHaveLength(3);
+    expect(report.mcp.servers.find((s) => s.key === 'grep')?.url).toBe('https://mcp.grep.app');
+    // 键名会成为工具名的一部分，所以不合法的键等于一个永远注册不上的工具。
+    expect(report.mcp.servers.find((s) => s.key === 'bad.key')?.problem).toContain(
+      'A-Za-z0-9_-',
+    );
+    expect(report.mcp.servers.find((s) => s.key === 'nokey')?.problem).toBe('缺少 url');
+    const text = formatDoctorReport(report);
+    expect(text).toContain('MCP');
+    // 报告是静态的，不能让人误以为它验证过连接。
+    expect(text).toContain('live connection results appear in the plugin log');
+  });
+
+  it('says so plainly when no MCP server is configured', () => {
+    const report = runDoctor({ config: {}, env: BARE_ENV });
+    expect(report.mcp.servers).toEqual([]);
+    expect(formatDoctorReport(report)).toContain('no servers configured');
+  });
+});
