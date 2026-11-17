@@ -9,6 +9,7 @@ import {
   CONFIG_PATH,
   initConfigFile,
   loadConfigFile,
+  migrateLegacyDir,
   renderEffectiveConfig,
   setConfigValue,
 } from './config.ts';
@@ -240,7 +241,7 @@ config
 
 const state = program
   .command('state')
-  .description('Manage the quota cooldown state at ~/.modsearch/state.json');
+  .description('Manage the quota cooldown state at ~/.searchfuse/state.json');
 
 state
   .command('clear')
@@ -255,6 +256,11 @@ state
       process.exit(1);
     }
   });
+
+// 改名后第一次运行时，把旧目录里的配置、冷却状态与缓存搬过来。幂等，
+// 旧目录还在，出问题能回退。放在解析命令之前，于是每条命令都享受它，
+// 而 `doctor` 也会看到搬过来的配置。
+migrateLegacyDir();
 
 // parseAsync：`config set` 里的隐藏提示路径需要等待用户输入。
 await program.parseAsync(process.argv, { from: 'node' });

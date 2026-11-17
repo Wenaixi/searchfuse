@@ -30,7 +30,7 @@ export type CacheFile = Record<string, CacheRecord>;
 
 /** 默认位置，放在工具其余部分所读配置的旁边。 */
 export function currentCachePath(): string {
-  return path.join(os.homedir(), '.modsearch', 'cache.json');
+  return path.join(os.homedir(), '.searchfuse', 'cache.json');
 }
 
 /**

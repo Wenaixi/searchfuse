@@ -1,13 +1,13 @@
-# Installing ModSearch (for an AI agent)
+# Installing SearchFuse (for an AI agent)
 
-You are an AI agent and your user told you to install the `modsearch` skill. This
+You are an AI agent and your user told you to install the `searchfuse` skill. This
 document is the procedure. Follow it in order. Every step is safe to run again,
 and every step names what to do when it fails. Commands are POSIX shell
 (macOS or Linux). A Windows note follows each block that needs one.
 
 **Running in DeepSeek Harness (dsh), or installing for it?** Stop here and follow
 [Step 0](#step-0-deepseek-harness-dsh-install-the-plugin-instead) instead. dsh
-takes modsearch as a plugin, not a skill.
+takes searchfuse as a plugin, not a skill.
 
 The whole install is four steps:
 
@@ -23,7 +23,7 @@ The whole install is four steps:
 dsh already has a native `web_search` tool, wired to its own default search
 provider. A skill cannot replace that tool, so a modsearch skill in dsh mostly
 goes unused. The plugin does replace it: it points `web_search` at the
-modsearch engine chain and adds `x_search` and `read_page`. In dsh, install the
+searchfuse engine chain and adds `x_search` and `read_page`. In dsh, install the
 plugin and skip Steps 1 to 4. Do not also install the skill.
 
 You are in dsh if `echo $DSH_SHELL` prints `1`. dsh sets it in every shell call,
@@ -36,11 +36,11 @@ UI started with `dsh --profile web` runs `web`.
 you.** The dsh CLI refuses to change that profile (`profile "desktop" is managed
 exclusively by the Electron application`), so do not run the commands below.
 Ask the user to open **Plugins** in the dsh sidebar, click **Add plugin**, enter
-`@liustack/modsearch` (the package name, not the GitHub URL), and install. When
+`@wenaixi/searchfuse` (the package name, not the GitHub URL), and install. When
 they say it is done, confirm the profile lists it:
 
 ```bash
-grep '"@liustack/modsearch"' ~/.dsh/profiles/desktop/package.json
+grep '"@wenaixi/searchfuse"' ~/.dsh/profiles/desktop/package.json
 ```
 
 Then skip to the restart step after the commands.
@@ -49,7 +49,7 @@ Then skip to the restart step after the commands.
 
 ```bash
 PROFILE="${DSH_PROFILE:-web}"   # or the profile the user named
-npx -y @deepseek-ai/dsh plugin --profile "$PROFILE" add @liustack/modsearch@0.1.0
+npx -y @deepseek-ai/dsh plugin --profile "$PROFILE" add @wenaixi/searchfuse@0.1.0
 ```
 
 Keep the exact version. With `@latest`, pnpm's release-age filter can resolve
@@ -58,14 +58,14 @@ an older package that has no dsh bundle.
 Then confirm the profile picked it up. Both lines must appear:
 
 ```bash
-npx -y @deepseek-ai/dsh --profile "$PROFILE" --dump-config | grep -E 'searchProvider: modsearch|@liustack/modsearch'
+npx -y @deepseek-ai/dsh --profile "$PROFILE" --dump-config | grep -E 'searchProvider: modsearch|@wenaixi/searchfuse'
 ```
 
 For either path, tell the user to quit and reopen dsh, then start a new
 conversation. The running session keeps its old tools until then. Search works keyless out of
 the box. To add engines or keys later, the user opens **Plugins** in the dsh
-sidebar and picks `@liustack/modsearch`, or you run `config set` as in Step 3
-with `npx -y @liustack/modsearch@0.1.0` in place of the launcher.
+sidebar and picks `@wenaixi/searchfuse`, or you run `config set` as in Step 3
+with `npx -y @wenaixi/searchfuse@0.1.0` in place of the launcher.
 
 **If it fails:**
 - `declares no dsh.bundle` -> an older package was resolved. Re-run the `add`
@@ -133,9 +133,9 @@ equivalent ways. Use path A unless the user asked for the skills CLI.
 
 ```bash
 rm -rf /tmp/modsearch-src
-git clone --depth 1 https://github.com/liustack/modsearch.git /tmp/modsearch-src
+git clone --depth 1 https://github.com/Wenaixi/searchfuse.git /tmp/modsearch-src
 mkdir -p ~/.claude/skills/modsearch          # replace with your TARGET
-cp -R /tmp/modsearch-src/skills/modsearch/. ~/.claude/skills/modsearch/
+cp -R /tmp/modsearch-src/skills/searchfuse/. ~/.claude/skills/searchfuse/
 ```
 
 The copy overwrites any earlier install in place, so running it again just
@@ -146,7 +146,7 @@ refreshes the skill.
 - Clone cannot reach GitHub -> check network access, then retry.
 - After copying, confirm the skill and its launcher landed:
   ```bash
-  ls ~/.claude/skills/modsearch/SKILL.md ~/.claude/skills/modsearch/scripts/run.sh ~/.claude/skills/modsearch/references
+  ls ~/.claude/skills/searchfuse/SKILL.md ~/.claude/skills/searchfuse/scripts/run.sh ~/.claude/skills/searchfuse/references
   ```
   If `SKILL.md` or `scripts/run.sh` is missing, the copy targeted the wrong path.
   Re-run the `cp` line and check `TARGET`.
@@ -156,7 +156,7 @@ refreshes the skill.
 `skills` is a third-party CLI for installing agent skills. It is not required.
 
 ```bash
-npx -y skills add liustack/modsearch
+npx -y skills add Wenaixi/searchfuse
 ```
 
 **If it fails** (the command is unavailable, or it does not place the folder under
@@ -239,16 +239,16 @@ the next key. Network, 5xx, and response parsing failures move directly to the
 next engine instead.
 
 ```bash
-bash ~/.claude/skills/modsearch/scripts/run.sh config set tavily.apiKey <key>       # 1,000 credits/month
-bash ~/.claude/skills/modsearch/scripts/run.sh config set exa.apiKey <key>          # $10/month credit, ~1,400 searches
-bash ~/.claude/skills/modsearch/scripts/run.sh config set firecrawl.apiKey <key>    # personal 1,000 credits/month on top of the keyless quota
-bash ~/.claude/skills/modsearch/scripts/run.sh config set keenable.apiKey <key>     # 100,000 requests/month, no hourly cap
+bash ~/.claude/skills/searchfuse/scripts/run.sh config set tavily.apiKey <key>       # 1,000 credits/month
+bash ~/.claude/skills/searchfuse/scripts/run.sh config set exa.apiKey <key>          # $10/month credit, ~1,400 searches
+bash ~/.claude/skills/searchfuse/scripts/run.sh config set firecrawl.apiKey <key>    # personal 1,000 credits/month on top of the keyless quota
+bash ~/.claude/skills/searchfuse/scripts/run.sh config set keenable.apiKey <key>     # 100,000 requests/month, no hourly cap
 ```
 
 **If it fails:**
 - `agy: command not found` after the installer -> the install did not add `agy` to
   this shell's PATH. Open a new shell, or have the user do so, then re-run `agy`.
-- A keyed `config set` writes `~/.modsearch/config.json`. A permission error there
+- A keyed `config set` writes `~/.searchfuse/config.json`. A permission error there
   means the home directory is not writable by this process.
 - Not sure an engine is set up? Step 4 reports exactly which engines are ready.
 
@@ -266,12 +266,12 @@ machine where the launcher resolves to npx or bunx, the first call may download
 the pinned package; that is how those runners work.)
 
 ```bash
-bash ~/.claude/skills/modsearch/scripts/run.sh doctor   # replace with your TARGET
+bash ~/.claude/skills/searchfuse/scripts/run.sh doctor   # replace with your TARGET
 ```
 
 The launcher prints its runtime selection first (whether it chose a `modsearch`
 on PATH, `npx`, or `bunx`), then chains modsearch's own report below a
-`--- modsearch doctor ---` line. That report, on a healthy bare machine, looks
+`--- searchfuse doctor ---` line. That report, on a healthy bare machine, looks
 like this (trimmed):
 
 ```
@@ -311,7 +311,7 @@ How to read it:
 Then run one real search to confirm the whole path end to end:
 
 ```bash
-bash ~/.claude/skills/modsearch/scripts/run.sh -q "current Node.js LTS version"   # replace with your TARGET
+bash ~/.claude/skills/searchfuse/scripts/run.sh -q "current Node.js LTS version"   # replace with your TARGET
 ```
 
 Expect JSON on stdout: a `results` array whose first entry has an `engine` naming
@@ -340,4 +340,4 @@ who answered and an `items` list with `url`s. That is a working install.
 The skill is installed and search works. From now on you do not type these
 commands by hand: the skill triggers on its own when a task needs current
 information, a page read, or X. To change engines or add a key later, see
-[`skills/modsearch/references/configure.md`](skills/modsearch/references/configure.md).
+[`skills/searchfuse/references/configure.md`](skills/searchfuse/references/configure.md).

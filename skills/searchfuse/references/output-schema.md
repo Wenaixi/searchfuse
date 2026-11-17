@@ -1,4 +1,4 @@
-# ModSearch 输出契约
+# SearchFuse 输出契约
 
 CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样：
 

@@ -8,7 +8,7 @@ assignees: ""
 
 ## The problem
 
-What are you trying to do that modsearch cannot do today? Describe the situation,
+What are you trying to do that searchfuse cannot do today? Describe the situation,
 not just the solution you have in mind.
 
 ## What you would like

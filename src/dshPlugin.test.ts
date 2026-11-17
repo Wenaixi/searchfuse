@@ -94,7 +94,7 @@ describe('dsh plugin bundle', () => {
     expect(pkg.files).toContain('dsh');
     expect(pkg.files).toContain('cordis.patch.yml');
     const patch = fs.readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf-8');
-    expect(patch).toContain("name: '@liustack/modsearch'");
+    expect(patch).toContain("name: '@wenaixi/searchfuse'");
     expect(patch).toContain('searchProvider: modsearch');
   });
 
@@ -283,7 +283,7 @@ describe('dsh web search provider', () => {
     process.env.MODSEARCH_DSH_CLI = path.join(dir, 'dist', 'main.js');
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
-      /build is missing.*GitHub.*@liustack\/modsearch/s,
+      /build is missing.*GitHub.*@wenaixi\/searchfuse/s,
     );
   });
 });
@@ -308,7 +308,7 @@ describe('dsh CLI budgets', () => {
   it('passes the built-in budgets when neither the plugin nor the file sets one', async () => {
     argvEchoCli();
     // Pinned explicitly so this case does not depend on what the ambient
-    // ~/.modsearch/config.json happens to hold: the point is the built-in
+    // ~/.searchfuse/config.json happens to hold: the point is the built-in
     // default, not the machine it runs on.
     const { providers } = await load({ providerTimeoutMs: 40_000, providerDeadlineMs: 55_000 });
     const result = await providers[0].search({ query: 'anything' });
@@ -588,7 +588,7 @@ async function callRoute(
 function postOf(payload: Record<string, unknown>): Record<string, unknown> {
   return {
     method: 'POST',
-    url: '/modsearch/config',
+    url: '/searchfuse/config',
     [Symbol.asyncIterator]: async function* () {
       yield Buffer.from(JSON.stringify(payload));
     },
@@ -639,7 +639,7 @@ describe('dsh settings card route', () => {
       async (handler) => {
         const { status, body } = await callRoute(handler, {
           method: 'GET',
-          url: '/modsearch/config',
+          url: '/searchfuse/config',
         });
         expect(status).toBe(200);
         expect(JSON.stringify(body)).not.toContain('tvly-secret');
@@ -663,7 +663,7 @@ describe('dsh settings card route', () => {
     await withConfig(
       { engine: 'tavily', engines: { tavily: { apiKey: ', ,' } } },
       async (handler) => {
-        const { body } = await callRoute(handler, { method: 'GET', url: '/modsearch/config' });
+        const { body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
         const engines = body.engines as Record<
           string,
           { hasKey: boolean; keySource: string | null }
@@ -903,7 +903,7 @@ describe('dsh settings card route', () => {
       async (handler, file) => {
         const read = await callRoute(handler, {
           method: 'GET',
-          url: '/modsearch/config',
+          url: '/searchfuse/config',
           headers,
         });
         expect(read.status).toBe(200);
@@ -927,7 +927,7 @@ describe('dsh settings card route', () => {
 
   it('reports a broken config instead of treating it as empty', async () => {
     await withConfig('{ this is not json', async (handler, file) => {
-      const read = await callRoute(handler, { method: 'GET', url: '/modsearch/config' });
+      const read = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
       expect(read.status).toBe(409);
       expect(String(read.body.error)).toContain('JSON');
       const write = await callRoute(handler, postOf({ target: 'tavily', apiKey: 'x' }));
@@ -981,7 +981,7 @@ describe('dsh settings card route', () => {
     process.env.TAVILY_API_KEY = 'tvly-from-env';
     try {
       await withConfig({ engine: '', engines: {} }, async (handler) => {
-        const { body } = await callRoute(handler, { method: 'GET', url: '/modsearch/config' });
+        const { body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
         expect(JSON.stringify(body)).not.toContain('tvly-from-env');
         const engines = body.engines as Record<string, { hasKey: boolean; keySource: string }>;
         expect(engines.tavily.hasKey).toBe(true);
@@ -1016,7 +1016,7 @@ describe('dsh settings card route', () => {
     await withConfig({ engine: '' }, async (handler) => {
       const { body } = await callRoute(handler, {
         method: 'GET',
-        url: '/modsearch/config?doctor=1',
+        url: '/searchfuse/config?doctor=1',
       });
       const readiness = body.readiness as Array<Record<string, unknown>>;
       expect(readiness).toContainEqual(
@@ -1034,7 +1034,7 @@ describe('dsh settings card route', () => {
     await withConfig({ engine: '' }, async (handler) => {
       const { status, body } = await callRoute(handler, {
         method: 'GET',
-        url: '/modsearch/config?doctor=1',
+        url: '/searchfuse/config?doctor=1',
       });
       // A failed probe must not fail the card: the readiness section simply
       // has nothing to show.
@@ -1061,7 +1061,7 @@ describe('dsh settings card route', () => {
       }));
     `);
     await withConfig({ engine: '' }, async (handler) => {
-      const probe = { method: 'GET', url: '/modsearch/config?doctor=1' };
+      const probe = { method: 'GET', url: '/searchfuse/config?doctor=1' };
       const first = await callRoute(handler, probe);
       expect(first.body.readiness).toContainEqual(
         expect.objectContaining({ engine: 'tavily', ready: false }),

@@ -10,7 +10,7 @@
 //
 // 通过 cordis.patch.yml 的条目加载（见 package.json 的 `dsh.bundle` manifest）：
 // 一条条目挂载本插件，另一条把 `web` seam 的 `searchProvider` 指向它。引擎、
-// 密钥和路由仍然保存在 ~/.modsearch/config.json，与所有 harness 共用。
+// 密钥和路由仍然保存在 ~/.searchfuse/config.json，与所有 harness 共用。
 import {
   chmodSync,
   existsSync,
@@ -79,10 +79,10 @@ export function apply(ctx, config = {}) {
     registerSearchProvider(ctx, config);
   }
   // 两条热重载入口。它们登记在下面唯一的那套监视器上：插件自己拥有
-  // ~/.modsearch/config.json，宿主的 profile 重载信号永远不会为它触发，所以
+  // ~/.searchfuse/config.json，宿主的 profile 重载信号永远不会为它触发，所以
   // 只能自己定时看一看。
   const reloaders = [];
-  // MCP 服务器，在 ~/.modsearch/config.json 的 `mcp` 下配置。协议实现作为
+  // MCP 服务器，在 ~/.searchfuse/config.json 的 `mcp` 下配置。协议实现作为
   // 独立的构建模块发布，因为本文件是手写的 JavaScript，无法导入 TypeScript
   // 源码。
   //
@@ -118,7 +118,7 @@ export function apply(ctx, config = {}) {
         try {
           reload();
         } catch (error) {
-          console.error(`[modsearch] config reload failed: ${error?.message ?? error}`);
+          console.error(`[searchfuse] config reload failed: ${error?.message ?? error}`);
         }
       }
     });
@@ -126,7 +126,7 @@ export function apply(ctx, config = {}) {
   // 设置卡片。dsh web 用户没有终端，所以 `modsearch config set` 在那里够不着，
   // 引擎密钥也就没有入口。浏览器那一半（dsh/client.js）贡献的卡片连的是下面
   // 这条设置路由，而不是某个 settings schema，因为这些值住在
-  // ~/.modsearch/config.json，与 CLI 和其他所有 harness 共用。
+  // ~/.searchfuse/config.json，与 CLI 和其他所有 harness 共用。
   //
   // webServer 只在 web profile 下存在，而这个 cordis 没有「可选注入」的写法，
   // 所以两半都搭在带作用域的 ctx.inject 调用上：闭包只在服务存在的地方运行，
@@ -137,7 +137,7 @@ export function apply(ctx, config = {}) {
       try {
         registerConfigRoute(scope);
       } catch (error) {
-        console.error(`[modsearch] settings card route skipped: ${error}`);
+        console.error(`[searchfuse] settings card route skipped: ${error}`);
       }
     });    // 从 rc.7 到 0.1.6-alpha.1，设置页是按已服务的 settings 命名空间来分发插件
     // 卡片的：只有当卡片的槽位键匹配上宿主应答过的命名空间，卡片才会被渲染。
@@ -162,7 +162,7 @@ export function apply(ctx, config = {}) {
         });
         scope.settings.register('modsearch', passThrough, { base: {} });
       } catch (error) {
-        console.error(`[modsearch] settings namespace skipped: ${error}`);
+        console.error(`[searchfuse] settings namespace skipped: ${error}`);
       }
     });
   }
@@ -215,7 +215,7 @@ function registerSearchProvider(ctx, config) {
   if (typeof ctx.web?.registerSearchProvider !== 'function') {
     // developer-preview 阶段的一次接口迁移：降级成「只有工具」的插件，但要在
     // harness 日志里说出来，而不是无声消失。
-    console.error('[modsearch] web seam has no registerSearchProvider; search provider skipped');
+    console.error('[searchfuse] web seam has no registerSearchProvider; search provider skipped');
     return;
   }
   const { timeoutMs, deadlineMs } = providerBudgets(config);
@@ -261,7 +261,7 @@ function registerXSearchTool(ctx) {
   ctx.tools.register({
     name: 'x_search',
     description:
-      'Search X (Twitter) posts through the modsearch bridge. Use for questions about posts, threads, accounts, or discussions on X: what someone posted, reactions to an event, sentiment in a community. Returns structured evidence with a summary, per-post items with URLs, and an uncertainty list. A degraded status means X itself was unreachable and a keyless web search answered second-hand. Run `npx @liustack/modsearch doctor` to inspect the resolved engines.',
+      'Search X (Twitter) posts through the searchfuse bridge. Use for questions about posts, threads, accounts, or discussions on X: what someone posted, reactions to an event, sentiment in a community. Returns structured evidence with a summary, per-post items with URLs, and an uncertainty list. A degraded status means X itself was unreachable and a keyless web search answered second-hand. Run `npx @wenaixi/searchfuse doctor` to inspect the resolved engines.',
     parameters: {
       type: 'object',
       properties: {
@@ -332,7 +332,7 @@ function registerReadPageTool(ctx) {
   ctx.tools.register({
     name: 'read_page',
     description:
-      'Read one web page through the modsearch bridge and return digested evidence: a summary, the extracted content, outgoing links, uncertainty, and operational warnings such as cloud fetching. Use it over web_fetch when you want the page digested or focused on one question (pass "query"), or when the page is rendered by JavaScript and a plain fetch returns an empty shell. Use web_fetch, where available, when you need the raw page text or the HTTP status code. Private-network URLs are blocked. Page reading needs no engine setup. Run `npx @liustack/modsearch doctor` to inspect the resolved route.',
+      'Read one web page through the searchfuse bridge and return digested evidence: a summary, the extracted content, outgoing links, uncertainty, and operational warnings such as cloud fetching. Use it over web_fetch when you want the page digested or focused on one question (pass "query"), or when the page is rendered by JavaScript and a plain fetch returns an empty shell. Use web_fetch, where available, when you need the raw page text or the HTTP status code. Private-network URLs are blocked. Page reading needs no engine setup. Run `npx @wenaixi/searchfuse doctor` to inspect the resolved route.',
     parameters: {
       type: 'object',
       properties: {
@@ -412,9 +412,9 @@ function cliPath() {
   const cli = process.env.MODSEARCH_DSH_CLI || CLI_PATH;
   if (!existsSync(cli)) {
     throw new Error(
-      `modsearch's CLI build is missing (${cli}). This happens when the plugin was ` +
+      `searchfuse's CLI build is missing (${cli}). This happens when the plugin was ` +
         'installed from its GitHub repository, which ships source only. Remove the ' +
-        'plugin and add it again by package name: @liustack/modsearch',
+        'plugin and add it again by package name: @wenaixi/searchfuse',
     );
   }
   return cli;
@@ -424,7 +424,7 @@ async function runCli(args, signal) {
   const cli = cliPath();
   const { stdout, stderr, code } = await run(process.execPath, [cli, ...args], signal, childEnv());
   if (code !== 0) {
-    throw new Error(`modsearch failed (exit ${code}): ${(stderr || stdout).trim().slice(0, 500)}`);
+    throw new Error(`searchfuse failed (exit ${code}): ${(stderr || stdout).trim().slice(0, 500)}`);
   }
   let parsed;
   try {
@@ -442,7 +442,7 @@ async function runCli(args, signal) {
       .join('; ');
     throw new Error(
       `modsearch could not reach the requested source${attempts ? ` (${attempts})` : ''}. ` +
-        'Run `npx @liustack/modsearch doctor` in a terminal to check the engine setup.',
+        'Run `npx @wenaixi/searchfuse doctor` in a terminal to check the engine setup.',
     );
   }
   return entry;
@@ -523,7 +523,7 @@ function renderFetchEvidence(value) {
 }
 
 // ---------------------------------------------------------------------------
-// 设置卡片，宿主这一半：它读写 ~/.modsearch/config.json，也就是 CLI 编辑的
+// 设置卡片，宿主这一半：它读写 ~/.searchfuse/config.json，也就是 CLI 编辑的
 // 同一个文件，所以在浏览器里设的密钥，就是其他每个 harness 用的密钥。浏览器
 // 永远收不到密钥本身，只会收到「有没有存过」。
 // ---------------------------------------------------------------------------
@@ -681,7 +681,7 @@ function hasApiKeys(value) {
   );
 }
 
-/** ~/.modsearch/config.json，每个 harness 共用的那一个文件。 */
+/** ~/.searchfuse/config.json，每个 harness 共用的那一个文件。 */
 function modsearchConfigPath() {
   return join(homedir(), '.modsearch', 'config.json');
 }
@@ -1060,7 +1060,7 @@ async function engineReadiness() {
 }
 
 /**
- * GET /modsearch/config：上面那份摘要。POST：一次卡片提交。部署层的鉴权必须
+ * GET /searchfuse/config：上面那份摘要。POST：一次卡片提交。部署层的鉴权必须
  * 覆盖这条路由。裸的 webServer 注册表不继承 dsh 的 Connection 鉴权，而本插件
  * 自己也不施加任何 Host、Origin 或 Fetch Metadata 策略。
  *
@@ -1184,7 +1184,7 @@ function registerMcpTools(ctx) {
     try {
       config = readModsearchConfig();
     } catch (error) {
-      console.error(`[modsearch] mcp skipped: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp skipped: ${error?.message ?? error}`);
       inFlight = false;
       return;
     }
@@ -1219,7 +1219,7 @@ function registerMcpTools(ctx) {
     try {
       mod = await import('../dist/mcp-registry.js');
     } catch (error) {
-      console.error(`[modsearch] mcp client unavailable: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp client unavailable: ${error?.message ?? error}`);
       inFlight = false;
       return;
     }
@@ -1237,7 +1237,7 @@ function registerMcpTools(ctx) {
         reservedNames: [...BASE_TOOL_NAMES, ...engineToolNames()],
       });
     } catch (error) {
-      console.error(`[modsearch] mcp registration failed: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp registration failed: ${error?.message ?? error}`);
       inFlight = false;
       return;
     }
@@ -1250,7 +1250,7 @@ function registerMcpTools(ctx) {
     }
     for (const report of result.reports) {
       if (report.error) {
-        console.error(`[modsearch] mcp ${report.serverKey}: ${report.error}`);
+        console.error(`[searchfuse] mcp ${report.serverKey}: ${report.error}`);
       }
     }
     // 有服务端没连上：安排一次稍后的重试。
@@ -1272,7 +1272,7 @@ function registerMcpTools(ctx) {
         // 成立的路径，且只在有失败时才发生。
         lastSignature = '';
         settle().catch((error) => {
-          console.error(`[modsearch] mcp retry failed: ${error?.message ?? error}`);
+          console.error(`[searchfuse] mcp retry failed: ${error?.message ?? error}`);
         });
       }, MCP_RETRY_DELAY_MS);
       if (typeof retryTimer?.unref === 'function') {
@@ -1299,7 +1299,7 @@ function registerMcpTools(ctx) {
   // 由 apply 统一建一套，这里只把重载入口交出去：MCP 与独立引擎工具读的是同一
   // 份文件，各起一套定时器只会让两边在改动后短暂地看法不一致。
   settle().catch((error) => {
-    console.error(`[modsearch] mcp setup failed: ${error?.message ?? error}`);
+    console.error(`[searchfuse] mcp setup failed: ${error?.message ?? error}`);
   });
   return settle;
 }
@@ -1386,7 +1386,7 @@ function registerEngineTools(ctx) {
     } catch (error) {
       // 配置文件坏了：保留现有工具，而不是先把它们撤掉再发现没东西可注册。
       // 一份写着半截 JSON 的文件不该让模型手里的工具突然消失。
-      console.error(`[modsearch] engine tools reload skipped: ${error?.message ?? error}`);
+      console.error(`[searchfuse] engine tools reload skipped: ${error?.message ?? error}`);
       return;
     }
     const engines = isPlainObject(config.engines) ? config.engines : {};
@@ -1426,7 +1426,7 @@ function registerEngineTools(ctx) {
           ? rawSettings.toolName.trim()
           : `${engine}_search`;
       if (claimed.has(name)) {
-        console.error(`[modsearch] engine tool skipped: "${name}" is already taken`);
+        console.error(`[searchfuse] engine tool skipped: "${name}" is already taken`);
         continue;
       }
       claimed.add(name);
@@ -1518,7 +1518,7 @@ function registerConfigRoute(ctx) {
   const route = {
     name: 'modsearch-config',
     kind: 'exact',
-    path: '/modsearch/config',
+    path: '/searchfuse/config',
     handler: async (req, res) => {
       const send = (status, body) => {
         res.writeHead(status, { 'content-type': 'application/json' });

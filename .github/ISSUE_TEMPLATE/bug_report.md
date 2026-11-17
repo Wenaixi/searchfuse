@@ -20,7 +20,7 @@ A clear description of the problem.
 Paste the command you ran, verbatim (redact any API keys):
 
 ```bash
-modsearch ...
+searchfuse ...
 ```
 
 ## The complete error or output
@@ -35,14 +35,14 @@ but answered wrong.
 
 ## Environment
 
-- `modsearch --version`:
+- `searchfuse --version`:
 - Node version (`node --version`):
 - OS (macOS / Linux + version):
 - Which engine you expected (agy / firecrawl / keenable / youcom / tavily / exa / grok-cli / local):
 
 ## Anything else
 
-Config (with keys masked, from `modsearch config show`), whether a VPN or proxy
+Config (with keys masked, from `searchfuse config show`), whether a VPN or proxy
 is active, or anything else that might matter.
 
 ---

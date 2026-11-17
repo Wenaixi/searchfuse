@@ -8,7 +8,7 @@ import { splitApiKeys } from './util/apiKeys.ts';
 import { resolveExplicitProxy } from './util/explicitProxy.ts';
 import { maskUrlCredentials, redactSecrets } from './util/redact.ts';
 
-// 分层配置：命令行参数 > 环境变量 > ~/.modsearch/config.json > 内置默认。
+// 分层配置：命令行参数 > 环境变量 > ~/.searchfuse/config.json > 内置默认。
 //
 // `engine` 是软偏好。`engines.<name>.enabled` 决定自动路由可以使用哪些引擎，
 // 缺省即视为启用。其余一切由引擎自身能力决定。凭据与可执行文件路径也放在
@@ -143,12 +143,63 @@ interface LegacyRoleConfig {
   engine?: string;
 }
 
-export const CONFIG_DIR = path.join(os.homedir(), '.modsearch');
+/** 改名前的目录名。迁移用，不再作为正常读取路径。 */
+const LEGACY_DIR_NAME = '.modsearch';
+/** 当前目录名。 */
+const DIR_NAME = '.searchfuse';
+
+export const CONFIG_DIR = path.join(os.homedir(), DIR_NAME);
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 /** 在调用时才解析，这样伪造的 HOME（测试用）也会把配置重定向过去。 */
 export function currentConfigPath(): string {
-  return path.join(os.homedir(), '.modsearch', 'config.json');
+  return path.join(os.homedir(), DIR_NAME, 'config.json');
+}
+
+/**
+ * 把旧目录里的文件搬到新目录，只搬一次。
+ *
+ * 改名不能让用户已经存好的密钥凭空消失，所以旧目录里的每一样东西都要跟过来：
+ * 配置文件、冷却状态、融合缓存。三条规则：
+ *
+ * - 新目录已有同名文件就跳过：那是用户在新名下自己的东西，覆盖它等于丢数据。
+ * - 旧文件复制而不是移动：万一新路径出问题，旧目录还在，回退只是改一行代码。
+ * - 任何一步失败都静默跳过：一次迁移出问题不该让 CLI 起不来，用户还能手动搬。
+ *
+ * 这个函数是幂等的，重复调用没有额外影响。
+ */
+export function migrateLegacyDir(): void {
+  const legacy = path.join(os.homedir(), LEGACY_DIR_NAME);
+  const current = path.join(os.homedir(), DIR_NAME);
+  if (legacy === current) {
+    return;
+  }
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(legacy);
+  } catch {
+    // 旧目录不存在，或者读不了：没有东西要搬。
+    return;
+  }
+  try {
+    fs.mkdirSync(current, { recursive: true, mode: 0o700 });
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const from = path.join(legacy, name);
+    const to = path.join(current, name);
+    try {
+      if (fs.existsSync(to)) {
+        continue;
+      }
+      fs.copyFileSync(from, to);
+      // 权限跟着一起搬：密钥文件不该因为改名而变松。
+      fs.chmodSync(to, 0o600);
+    } catch {
+      // 单个文件搬不动就跳过它，其余照常。
+    }
+  }
 }
 
 type StringEngineSetting = 'apiKey' | 'model' | 'bin' | 'baseURL';
@@ -768,7 +819,7 @@ function redactValues<T>(value: T, keys: string[]): T {
 }
 
 /**
- * 渲染生效配置：modsearch 实际会用什么，而不只是文件里写了什么。环境变量按
+ * 渲染生效配置：searchfuse 实际会用什么，而不只是文件里写了什么。环境变量按
  * `engineSettings` 合并它们的方式合并进来，每个值都标注来源（`file` 或 `env`），
  * 别名的引擎键（agy、antigravity、grok、direct）显示在各自的规范名下，
  * API key 则始终保持遮掩。

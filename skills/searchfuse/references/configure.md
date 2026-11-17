@@ -1,4 +1,4 @@
-# 配置 ModSearch
+# 配置 SearchFuse
 
 用户问怎么装 modsearch、要加 key、要换引擎，或者遇到配置类的失败时，读这份文档。直接替用户把命令跑了，不要把说明贴给对方。
 
@@ -36,7 +36,7 @@ agy    # 用户在浏览器完成登录后退出
 
 ## 配置文件
 
-`~/.modsearch/config.json`，写入时权限 0600，展示时 key 打码。优先级：CLI 参数 > 环境变量 > 这个文件 > 内置默认值。
+`~/.searchfuse/config.json`，写入时权限 0600，展示时 key 打码。优先级：CLI 参数 > 环境变量 > 这个文件 > 内置默认值。
 
 ```bash
 modsearch config init     # 生成起步文件，每个字段都可省略
@@ -94,21 +94,21 @@ JSON 不支持注释，所以每个字段的说明在这里：
 `local`（内置抓取器）和 `grok-cli` 不需要凭据，但都接受通用的 `enabled` 开关。老文件把 `allowPrivateNetwork` 存在 `engines.http.allowPrivateNetwork` 下，或存成字符串 `"true"`/`"false"` 的，读取时会自动提升为顶层布尔值。
 
 ```bash
-modsearch config set engine tavily            # 选定搜索引擎
-modsearch config set engine ""                # 回到自动
-modsearch config set tavily.apiKey <key>      # 引擎凭据
-modsearch config set tavily.apiKey <key1,key2> # 按此顺序轮换 key
-modsearch config set tavily.apiKey            # 不带值：隐藏输入提示（见下）
-modsearch config set tavily.baseURL <url>     # 兼容的第三方端点
-modsearch config set tavily.enabled false     # 不让 Tavily 参与自动故障转移
-modsearch config set tavily.enabled true      # 删除禁用覆盖
-modsearch config set cooldown off             # 关闭额度冷却故障转移
-modsearch config set allowPrivateNetwork true # 允许访问保留/私有地址段
+searchfuse config set engine tavily            # 选定搜索引擎
+searchfuse config set engine ""                # 回到自动
+searchfuse config set tavily.apiKey <key>      # 引擎凭据
+searchfuse config set tavily.apiKey <key1,key2> # 按此顺序轮换 key
+searchfuse config set tavily.apiKey            # 不带值：隐藏输入提示（见下）
+searchfuse config set tavily.baseURL <url>     # 兼容的第三方端点
+searchfuse config set tavily.enabled false     # 不让 Tavily 参与自动故障转移
+searchfuse config set tavily.enabled true      # 删除禁用覆盖
+searchfuse config set cooldown off             # 关闭额度冷却故障转移
+searchfuse config set allowPrivateNetwork true # 允许访问保留/私有地址段
 ```
 
 用户要往对话里贴 key 时，先给更干净的路径：让用户在自己的终端跑不带值的
-`modsearch config set <engine>.apiKey`，CLI 会弹出不回显的输入提示，key 不进这
-个对话、不进 argv、不进 shell 历史（`pbpaste | modsearch config set
+`searchfuse config set <engine>.apiKey`，CLI 会弹出不回显的输入提示，key 不进这
+个对话、不进 argv、不进 shell 历史（`pbpaste | searchfuse config set
 tavily.apiKey` 管道喂入也行）。用户还是直接贴进对话的话，照常替他保存：这个选
 项是给在意的人的，不是一道门。
 
@@ -123,8 +123,8 @@ tavily.apiKey` 管道喂入也行）。用户还是直接贴进对话的话，�
 按上文安装并登录。它的免费额度是与 Antigravity 桌面应用和 SDK 共享的每周配额，重度使用的一天可能把它耗尽。耗尽时报错会明说。
 
 ```bash
-modsearch config set antigravity-cli.model gemini-3.1-pro-high   # 更难的研究型问题
-modsearch config set antigravity-cli.bin /custom/path/to/agy
+searchfuse config set antigravity-cli.model gemini-3.1-pro-high   # 更难的研究型问题
+searchfuse config set antigravity-cli.bin /custom/path/to/agy
 ```
 
 ### tavily（搜索，免费额度）
@@ -132,7 +132,7 @@ modsearch config set antigravity-cli.bin /custom/path/to/agy
 每月 1,000 credits，不绑卡，基础搜索一次一个 credit。key 在 https://app.tavily.com 领。
 
 ```bash
-modsearch config set tavily.apiKey <key>
+searchfuse config set tavily.apiKey <key>
 # 或环境变量：export TAVILY_API_KEY=<key>
 ```
 
@@ -143,7 +143,7 @@ modsearch config set tavily.apiKey <key>
 每月循环 $10 额度，约 1,400 次搜索，不绑卡。key 在 https://exa.ai 领。
 
 ```bash
-modsearch config set exa.apiKey <key>
+searchfuse config set exa.apiKey <key>
 # 或环境变量：export EXA_API_KEY=<key>
 ```
 
@@ -154,9 +154,9 @@ Exa 返回排好序的链接和高亮片段，但不写综述，所以它的 sum
 默认引擎，也是裸安装能直接干活的原因：Firecrawl 的免注册通道[每月送 1,000 免费 credits，无需注册](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)。免注册请求不发送 Authorization header，按 IP 计量，受每日请求数和 credits 两项上限约束（[限流文档](https://docs.firecrawl.dev/rate-limits#keyless-no-api-key)没有公开每日上限的具体数字）。在 https://firecrawl.dev 领一个免费 key，可以再得独享的每月 1,000 credits 和更高限额：
 
 ```bash
-modsearch config set firecrawl.apiKey <key>
+searchfuse config set firecrawl.apiKey <key>
 # 或环境变量：export FIRECRAWL_API_KEY=<key>
-modsearch config set firecrawl.keylessFetch false   # 让自动抓取不走云端
+searchfuse config set firecrawl.keylessFetch false   # 让自动抓取不走云端
 ```
 
 两个角色开箱都免 key 运行。抓取正是 Firecrawl 领跑的原因：它在云端跑真实浏览器，JavaScript 渲染的页面能带着本地引擎看不到的内容回来。这也意味着公网 URL 会被交给第三方，每次云端抓取的结果 warning 都会标明这条边界。想让自动抓取只走本地，设 `firecrawl.keylessFetch false`：搜索照常免 key，抓取则跳过 Firecrawl，除非配置了 key 或用 `-e firecrawl` 显式选它。URL 中直写的私有和保留地址目标始终跳过 Firecrawl，即使开着 `--allow-private-network` 也不例外。主机名的 DNS 结果采用更窄的云端披露规则。Clash、Surge 和 mihomo 使用的标准 fake-ip 池 `198.18.0.0/15` 会被视为占位值，只有所有解析地址都是真私网或保留地址时才会拦下。只要有一个公网地址就会放行。这个例外只作用于 DNS 结果。本地 SSRF 守卫仍把 `198.18.0.0/15` 判为私网，这个开关也只让本地引擎访问它。
@@ -168,7 +168,7 @@ modsearch config set firecrawl.keylessFetch false   # 让自动抓取不走云�
 不要 key 也不用注册，在搜索顺序里排第二，紧跟 Firecrawl。免注册请求走 Keenable 的公共端点，每个 IP 每小时 1,000 次（同一 IP 上所有人共用），每秒最多 10 次。在 https://app.keenable.ai 领一个免费 key，请求就改走带 key 的端点：没有每小时上限，每个组织每月 100,000 次。
 
 ```bash
-modsearch config set keenable.apiKey <key>
+searchfuse config set keenable.apiKey <key>
 # 或环境变量：export KEENABLE_API_KEY=<key>
 ```
 
@@ -187,8 +187,8 @@ You.com 只搜索，所以 `-u` 配 `-e youcom` 会报错。它和 Keenable 一�
 官方基地址内置在 provider 代码里，分别是 `https://api.tavily.com`、`https://api.exa.ai`、`https://api.firecrawl.dev`、`https://api.keenable.ai`。它们不会被复制进 `config.json`。`baseURL` 缺失或被清空都表示使用内置官方地址，这样后续版本修正默认值时不会被旧配置文件压住。dsh 设置卡片也遵守同一规则。
 
 ```bash
-modsearch config set tavily.baseURL https://gw.example.com/tavily
-modsearch config set tavily.baseURL ""        # 回到官方端点
+searchfuse config set tavily.baseURL https://gw.example.com/tavily
+searchfuse config set tavily.baseURL ""        # 回到官方端点
 # 或按次生效：export TAVILY_BASE_URL=... / EXA_BASE_URL=... / FIRECRAWL_BASE_URL=... / KEENABLE_BASE_URL=...
 ```
 
@@ -216,12 +216,12 @@ grok    # 用户用 SuperGrok 或 X Premium 登录
 
 ```bash
 modsearch -u <url> --allow-private-network
-modsearch config set allowPrivateNetwork true   # 永久生效（顶层，全局）
+searchfuse config set allowPrivateNetwork true   # 永久生效（顶层，全局）
 ```
 
 ## 额度冷却故障转移
 
-某个 API key 因额度类错误失败时，modsearch 把这个 key 记在 `~/.modsearch/state.json`（与 `config.json` 分开）。下一次运行会先试同一引擎里的健康 key。只有所有已配置 key 都在冷却时，整个引擎才会移到后备链末尾。没有 API key 的引擎仍按引擎粒度冷却。这是软化的熔断器，不是负载均衡：健康 key 和健康引擎拿全部工作，冷却项仍保留为最后尝试。
+某个 API key 因额度类错误失败时，modsearch 把这个 key 记在 `~/.searchfuse/state.json`（与 `config.json` 分开）。下一次运行会先试同一引擎里的健康 key。只有所有已配置 key 都在冷却时，整个引擎才会移到后备链末尾。没有 API key 的引擎仍按引擎粒度冷却。这是软化的熔断器，不是负载均衡：健康 key 和健康引擎拿全部工作，冷却项仍保留为最后尝试。
 
 - 冷却中的 key 不会被移除。某个 key 成功后只清除它自己的冷却。旧格式的引擎级状态仍可读取，并在任一 key 成功前作用于该引擎的所有 key。
 - 引擎报错里的精确重置时间（agy 的 `Resets in 94h19m9s`）会被采用。没写时间的额度错误冷却 45 分钟。按秒的速率限制是瞬时的，从不记录。
@@ -231,12 +231,12 @@ modsearch config set allowPrivateNetwork true   # 永久生效（顶层，全局
 开关默认开：
 
 ```bash
-modsearch config set cooldown off   # 关闭：不读不写状态，路由与从前完全一致
-modsearch config set cooldown on    # 重新打开
-modsearch state clear               # 立即忘掉所有冷却
+searchfuse config set cooldown off   # 关闭：不读不写状态，路由与从前完全一致
+searchfuse config set cooldown on    # 重新打开
+searchfuse state clear               # 立即忘掉所有冷却
 ```
 
-`modsearch doctor` 会显示开关状态和当前在冷却的每个引擎或 key，以及剩余时间。
+`searchfuse doctor` 会显示开关状态和当前在冷却的每个引擎或 key，以及剩余时间。
 
 ## 融合搜索
 
@@ -265,7 +265,7 @@ modsearch state clear               # 立即忘掉所有冷却
 
 **缓存。** 一份融合答案在 `aggregate.cacheTtlMs`（默认五分钟）内可复用，键由查询、结果上限、以及产出它的引擎集合组成——是集合而不是顺序，因为顺序属于路由而非问题本身。重放会在摘要里说明。模型收窄问题时重复提问很常见，而免注册额度是按 IP 计量的，所以这能把第二次提问变成一次磁盘读取。`aggregate.cacheTtlMs: 0` 是强制重新跑一遍的官方办法。
 
-**关掉它。** `modsearch config set aggregate.mode chain` 精确恢复旧的串行行为。
+**关掉它。** `searchfuse config set aggregate.mode chain` 精确恢复旧的串行行为。
 
 ## 能力矩阵
 
@@ -277,28 +277,28 @@ modsearch state clear               # 立即忘掉所有冷却
 | **`expose.tool: false`** | 只做融合：默认形态 | 关闭：既不融合也不做工具 |
 
 ```bash
-modsearch config set engines.tavily.expose.aggregate false
-modsearch config set engines.tavily.expose.tool true
-modsearch config set engines.tavily.toolName tavily_web
+searchfuse config set engines.tavily.expose.aggregate false
+searchfuse config set engines.tavily.expose.tool true
+searchfuse config set engines.tavily.toolName tavily_web
 ```
 
 独立工具钉在它自己的引擎上、没有回退，供只想用那一个索引、不要融合答案的调用方使用。两个开关同时打开是最好用的形态：引擎既贡献 `web_search`，模型也能单独点名要它。
 
 **需要你打开才生效。** 有两个引擎默认关闭，两者都仍然出现在设置卡片上，一键即可打开：
 
-- `antigravity-cli` 靠模型合成答案，可能要一分钟以上，超过任何有用的融合预算。打开它：`modsearch config set engines.antigravity-cli.enabled true`。
-- `arxiv` 按任意词命中检索，语义太宽：查询 `electron main process` 会返回铜氧化物里的激子-极化激元论文，`react hooks tutorial` 会返回关于 cure model 的论文（命中 `tutorial`）与关于 hook length 的论文（命中 `hook`）。融合按名次排序而不看语义，于是一条无关的 arXiv 头名可能压过两个其他引擎都认可的页面。确实要做文献检索时再打开它：`modsearch config set engines.arxiv.enabled true`。
+- `antigravity-cli` 靠模型合成答案，可能要一分钟以上，超过任何有用的融合预算。打开它：`searchfuse config set engines.antigravity-cli.enabled true`。
+- `arxiv` 按任意词命中检索，语义太宽：查询 `electron main process` 会返回铜氧化物里的激子-极化激元论文，`react hooks tutorial` 会返回关于 cure model 的论文（命中 `tutorial`）与关于 hook length 的论文（命中 `hook`）。融合按名次排序而不看语义，于是一条无关的 arXiv 头名可能压过两个其他引擎都认可的页面。确实要做文献检索时再打开它：`searchfuse config set engines.arxiv.enabled true`。
 
-两者都仍然会被 `modsearch doctor` 报告，所以"装了吗"和"开着吗"始终是两个分开的答案。
+两者都仍然会被 `searchfuse doctor` 报告，所以"装了吗"和"开着吗"始终是两个分开的答案。
 
 ## 每引擎代理
 
 可以让一个引擎离开本机代理、其余照旧，也可以让它走一个别人都不用的代理：
 
 ```bash
-modsearch config set engines.searxng.proxy direct        # 仅此引擎：不走代理
-modsearch config set engines.tavily.proxy http://127.0.0.1:7890
-modsearch config set engines.tavily.proxy                # 回到本机设置
+searchfuse config set engines.searxng.proxy direct        # 仅此引擎：不走代理
+searchfuse config set engines.tavily.proxy http://127.0.0.1:7890
+searchfuse config set engines.tavily.proxy                # 回到本机设置
 ```
 
 三种状态，而前两种之间的区分正是这个功能的要点：
@@ -336,7 +336,7 @@ modsearch config set engines.tavily.proxy                # 回到本机设置
 
 **重载。** 插件盯着配置文件，当服务端集合、它们的 URL、允许的工具清单、或工具名覆盖发生变化时重新注册。改别的东西（例如某个引擎的 key）不会让它们重新握手。
 
-**诊断。** `modsearch doctor` 会列出每个已配置的服务端、它的 URL、是否启用、以及键名是否合法——不合法的键会成为工具名的一部分。那一节只报告配置事实；真实连接结果出现在插件日志里，因为一次 doctor 运行是另一个进程，看不到宿主那份 session。
+**诊断。** `searchfuse doctor` 会列出每个已配置的服务端、它的 URL、是否启用、以及键名是否合法——不合法的键会成为工具名的一部分。那一节只报告配置事实；真实连接结果出现在插件日志里，因为一次 doctor 运行是另一个进程，看不到宿主那份 session。
 
 ## 故障排查
 

@@ -25,7 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [22, 24]
+        # 22 是 package.json 声明的下限，24 是当前 LTS，26 是本机运行的版本：
+        # 本机能跑不代表矩阵覆盖到了它，而引擎代码里用到的 API（AbortSignal.any、
+        # 结构化收紧）正是随 Node 版本演进的。
+        node: [22, 24, 26]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,3 +43,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  audit:
+    # 依赖审计单独一个 job：它只需要一个 runner，而且失败信息与测试失败是
+    # 两类完全不同的修法，混在矩阵里会让人以为六个平台都红了。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 只审生产依赖：开发工具链里的告警不随包发布，把它们算进来只会
+      # 制造与用户无关的噪音。
+      - run: pnpm audit --prod

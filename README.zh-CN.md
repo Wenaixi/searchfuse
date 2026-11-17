@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liustack/modsearch/main/assets/banner.jpg" width="100%" alt="ModSearch" />
+  <img src="https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/banner.jpg" width="100%" alt="SearchFuse" />
 </p>
 
-<h1 align="center">ModSearch</h1>
+<h1 align="center">SearchFuse</h1>
 
-<p align="center"><b>在官方 App 里模型能联网，切到 API 就不能了。ModSearch 把联网补回来：网页搜索、X 搜索、单页抓取。免费，免注册，免 API key。</b></p>
+<p align="center"><b>在官方 App 里模型能联网，切到 API 就不能了。SearchFuse 把联网补回来：网页搜索、X 搜索、单页抓取。免费，免注册，免 API key。</b></p>
 
 <p align="center">🥇 <b>全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件</b> 🥇</p>
 
@@ -13,30 +13,30 @@
 <p align="center">
   <a href="./README.md">English</a> ·
   <a href="docs/troubleshooting.md">故障排查</a> ·
-  <a href="skills/modsearch/references/configure.md">配置</a> ·
-  <a href="skills/modsearch/references/output-schema.md">输出契约</a> ·
+  <a href="skills/searchfuse/references/configure.md">配置</a> ·
+  <a href="skills/searchfuse/references/output-schema.md">输出契约</a> ·
   <a href="docs/security.md">安全</a> ·
   <a href="https://github.com/liustack/modlens">ModLens（视觉）</a>
 </p>
 
 <p align="center">
   <a href="https://x.com/liustack"><img src="https://img.shields.io/badge/follow-%40liustack-black?style=flat-square&logo=x&logoColor=white" alt="Follow @liustack on X"></a>
-  <a href="https://www.npmjs.com/package/@liustack/modsearch"><img src="https://img.shields.io/npm/v/@liustack/modsearch?style=flat-square&label=npm&color=cb3837" alt="npm"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/@liustack/modsearch?style=flat-square" alt="Node.js"></a>
+  <a href="https://www.npmjs.com/package/@wenaixi/searchfuse"><img src="https://img.shields.io/npm/v/@wenaixi/searchfuse?style=flat-square&label=npm&color=cb3837" alt="npm"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/@wenaixi/searchfuse?style=flat-square" alt="Node.js"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Not%20backed%20by-Y%20Combinator-FF6600?style=flat-square&logo=ycombinator&logoColor=white" alt="Not backed by Y Combinator">
   <img src="https://img.shields.io/badge/users-unknown-lightgrey?style=flat-square" alt="Users unknown">
 </p>
 
-DeepSeek 和 GLM 等模型没有联网能力或联网能力羸弱。ModSearch 通过外挂方式大幅增强模型联网搜索、X 搜索、单页抓取能力。装完即用：默认引擎是 Firecrawl 的免注册通道，[每月 1,000 免费 credits](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)，不用注册账号，不用 API key，不用绑卡。
+DeepSeek 和 GLM 等模型没有联网能力或联网能力羸弱。SearchFuse 通过外挂方式大幅增强模型联网搜索、X 搜索、单页抓取能力。装完即用：默认引擎是 Firecrawl 的免注册通道，[每月 1,000 免费 credits](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)，不用注册账号，不用 API key，不用绑卡。
 
 ## 交流
 
-用出问题了就[提个 issue](https://github.com/liustack/modsearch/issues/new/choose)。其他的都欢迎来 X 上聊：**[@liustack](https://x.com/liustack)**，你用它做了什么、在哪个 harness 上跑、接下来该做什么，新版本也是那边先发。社群正在筹备中。
+用出问题了就[提个 issue](https://github.com/Wenaixi/searchfuse/issues/new/choose)。其他的都欢迎来 X 上聊：**[@liustack](https://x.com/liustack)**，你用它做了什么、在哪个 harness 上跑、接下来该做什么，新版本也是那边先发。社群正在筹备中。
 
 ## 特性
 
-- **🥇 全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件：** 一条命令即刻安装 `npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@0.1.0`。桌面版「添加插件」里填 `@liustack/modsearch`，不要填 GitHub 地址。细节见[接入指南](docs/harness-setup.md#deepseek-harness-dsh)。
+- **🥇 全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件：** 一条命令即刻安装 `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.0`。桌面版「添加插件」里填 `@wenaixi/searchfuse`，不要填 GitHub 地址。细节见[接入指南](docs/harness-setup.md#deepseek-harness-dsh)。
 - **开箱免费，免注册。** 搜索和单页抓取默认跑在 Firecrawl 免注册通道上：[每月 1,000 免费 credits](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)，没有账号、没有 API key、没有绑卡。后备通道也全部免费：Antigravity CLI 只需浏览器登录，Tavily、Exa 和免费的 Firecrawl key 各带独立的月度额度，均不要求绑卡。
 - **融合搜索，不是故障转移。** 默认情况下 `web_search` 同时询问每个可达引擎，用倒数排名融合合并它们的排序列表，于是答案反映多个索引；两个引擎都认可的页面，排在只有一个引擎喜欢的页面之前。想要旧的串行行为就设 `aggregate.mode chain`。
 - **自动故障转移。** 一个通道失败或额度耗尽时自动切换下一个。融合模式下，一个引擎报错只损失它自己那份贡献，答案其余部分照常成立，失败原因写进 `uncertainty`。
@@ -52,51 +52,51 @@ DeepSeek 和 GLM 等模型没有联网能力或联网能力羸弱。ModSearch �
 
 给出一个博客链接，询问文章内容。25 秒后返回全文的结构化摘要，全程未打开浏览器。
 
-![不能联网的 DeepSeek 通过 ModSearch 总结博客链接](https://raw.githubusercontent.com/liustack/modsearch/main/assets/demo-codex-fetch.png)
+![不能联网的 DeepSeek 通过 SearchFuse 总结博客链接](https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/demo-codex-fetch.png)
 
 不指定目标，只问「今天有什么有趣的 AI 新闻」。36 秒后返回六条带来源的结果，并在结尾说明哪些信息来自检索聚合、细节可能有出入。该提醒来自 `uncertainty` 字段。
 
-![开放问题返回六条带来源的结果，并附可信度说明](https://raw.githubusercontent.com/liustack/modsearch/main/assets/demo-codex-search.png)
+![开放问题返回六条带来源的结果，并附可信度说明](https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/demo-codex-search.png)
 
-在 dsh web 里问今天有哪些重要的 AI 新闻。dsh 原生的搜索工具行直接跑在 modsearch 引擎链上，18 秒返回三条当日消息，每条带来源链接。
+在 dsh web 里问今天有哪些重要的 AI 新闻。dsh 原生的搜索工具行直接跑在 searchfuse 引擎链上，18 秒返回三条当日消息，每条带来源链接。
 
-![dsh web 的原生搜索跑在 modsearch 引擎链上，返回三条带来源的当日新闻](https://raw.githubusercontent.com/liustack/modsearch/main/assets/demo-dsh-web-search.zh-CN.png)
+![dsh web 的原生搜索跑在 searchfuse 引擎链上，返回三条带来源的当日新闻](https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/demo-dsh-web-search.zh-CN.png)
 
 问 Node.js 现在哪条版本线还在维护。`read_page` 先后读官网版本页和发布计划表，59 秒给出结论和版本状态表，来源附在结尾。
 
-![read_page 读取两个页面后给出 Node.js 维护线结论](https://raw.githubusercontent.com/liustack/modsearch/main/assets/demo-dsh-web-fetch.zh-CN.png)
+![read_page 读取两个页面后给出 Node.js 维护线结论](https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/demo-dsh-web-fetch.zh-CN.png)
 
 ## 支持的引擎
 
-Firecrawl、Keenable 和 You.com 零配置直接可用，其余引擎各一条命令。key 存在 `~/.modsearch/config.json`（0600 权限，展示时打码）：
+Firecrawl、Keenable 和 You.com 零配置直接可用，其余引擎各一条命令。key 存在 `~/.searchfuse/config.json`（0600 权限，展示时打码）：
 
 | 引擎 | 能做什么 | 免费额度 | 怎么开 |
 | :-- | :-- | :-- | :-- |
 | Firecrawl（默认） | 网页搜索 + 单页抓取 | 免注册每月 1,000 免费 credits。注册免费 key 再得独享的每月 1,000 | 无需任何操作，装完即用 |
 | Keenable | 网页搜索 | 免注册每小时 1,000 次（按 IP 计，同一 IP 上所有人共用）。注册免费 key 得独享的每月 100,000 次 | 无需任何操作，装完即用 |
 | You.com | 网页搜索 | 免注册每天 100 次（按 IP 计，同一 IP 上所有人共用） | 无需任何操作，装完即用 |
-| SearXNG | 网页搜索（它自己那 70+ 上游引擎，全部经一个适配器） | 免费，自建 | 先跑起实例，再 `modsearch config set searxng.baseURL <url>` |
-| Tavily | 网页搜索 | 每月 1,000 credits，不绑卡 | `modsearch config set tavily.apiKey <key>` |
-| Exa | 网页搜索 | 每月 $10 循环额度（约 1,400 次），不绑卡 | `modsearch config set exa.apiKey <key>` |
-| arXiv | 网页搜索（文献） | 免费，无需 key | 默认关闭：`modsearch config set engines.arxiv.enabled true` |
-| Antigravity CLI | 网页搜索 + 单页抓取 | 免费，浏览器登录 | 默认关闭：安装 `agy` 并登录，再 `modsearch config set engines.antigravity-cli.enabled true` |
+| SearXNG | 网页搜索（它自己那 70+ 上游引擎，全部经一个适配器） | 免费，自建 | 先跑起实例，再 `searchfuse config set searxng.baseURL <url>` |
+| Tavily | 网页搜索 | 每月 1,000 credits，不绑卡 | `searchfuse config set tavily.apiKey <key>` |
+| Exa | 网页搜索 | 每月 $10 循环额度（约 1,400 次），不绑卡 | `searchfuse config set exa.apiKey <key>` |
+| arXiv | 网页搜索（文献） | 免费，无需 key | 默认关闭：`searchfuse config set engines.arxiv.enabled true` |
+| Antigravity CLI | 网页搜索 + 单页抓取 | 免费，浏览器登录 | 默认关闭：安装 `agy` 并登录，再 `searchfuse config set engines.antigravity-cli.enabled true` |
 | Grok Build | X（推特）搜索 | 随 SuperGrok 或 X Premium 订阅 | 安装 `grok` 并登录 |
 | local | 单页抓取 | 内置，零安装 | 无需任何操作 |
 
-key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎时它们会一起跑并融合结果。每个引擎默认都参与，但 `antigravity-cli` 与 `arxiv` 例外——它们要你用 `modsearch config set engines.<name>.enabled true` 打开才生效，前者慢到超出融合预算，后者按任意词命中检索。任何引擎都可以用 `modsearch config set <engine>.enabled false` 排除。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`modsearch config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/modsearch/references/configure.md)。
+key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎时它们会一起跑并融合结果。每个引擎默认都参与，但 `antigravity-cli` 与 `arxiv` 例外——它们要你用 `searchfuse config set engines.<name>.enabled true` 打开才生效，前者慢到超出融合预算，后者按任意词命中检索。任何引擎都可以用 `searchfuse config set <engine>.enabled false` 排除。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`searchfuse config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/searchfuse/references/configure.md)。
 
 ## 安装
 
 **第一步，交给你的 AI。** skill 一装好，搜索和单页抓取就跑在 Firecrawl 的免注册免费额度上，所以安装只是一句话：
 
-> 按 https://github.com/liustack/modsearch 的 INSTALL.md 安装并配置 modsearch skill，完成后运行体检并把结果告诉我。
+> 按 https://github.com/Wenaixi/searchfuse 的 INSTALL.md 安装并配置 searchfuse skill，完成后运行体检并把结果告诉我。
 
-DeepSeek Harness (dsh) 里发同一句话即可。INSTALL.md 会认出 dsh，改走原生插件而不是 skill，让 dsh 自带的 `web_search` 直接跑在 modsearch 上。浏览器版由 AI 直接装好。桌面版只接受从自己窗口里装插件，AI 会请你打开「插件」，点「添加插件」，填 `@liustack/modsearch`。
+DeepSeek Harness (dsh) 里发同一句话即可。INSTALL.md 会认出 dsh，改走原生插件而不是 skill，让 dsh 自带的 `web_search` 直接跑在 searchfuse 上。浏览器版由 AI 直接装好。桌面版只接受从自己窗口里装插件，AI 会请你打开「插件」，点「添加插件」，填 `@wenaixi/searchfuse`。
 
 也可以直接通过 [skills.sh](https://skills.sh/) 安装同一个 skill：
 
 ```bash
-npx skills add liustack/modsearch
+npx skills add Wenaixi/searchfuse
 ```
 
 **第二步（可选），再加免费引擎。** Antigravity CLI 的综述质量更高，Tavily、Exa 或免费 Firecrawl key 能在免注册额度之上再加一份个人额度，都不要求绑卡。只有 agy 的浏览器登录需要你亲手完成：
@@ -108,9 +108,9 @@ agy                                                           # 浏览器完成�
 
 选了 key 的话，发一句话给 AI 即可：「把我的 tavily key 设成 tvly-...」。
 
-dsh 用户还有一条不碰命令行的路。在 dsh 侧栏点开「插件」，进入 `@liustack/modsearch`：选首选引擎、填 API 密钥和自建接口地址、勾选哪些引擎参与故障转移，点保存就生效。0.1.6-alpha.2 之前的 dsh 版本里，同一张卡片在设置页的「插件 → 插件配置」里。
+dsh 用户还有一条不碰命令行的路。在 dsh 侧栏点开「插件」，进入 `@wenaixi/searchfuse`：选首选引擎、填 API 密钥和自建接口地址、勾选哪些引擎参与故障转移，点保存就生效。0.1.6-alpha.2 之前的 dsh 版本里，同一张卡片在设置页的「插件 → 插件配置」里。
 
-![dsh「插件」面板里的 ModSearch 页面：选首选引擎、填 API 密钥与接口地址、勾选参与故障转移的引擎](https://raw.githubusercontent.com/liustack/modsearch/main/assets/demo-dsh-settings-card.jpg)
+![dsh「插件」面板里的 SearchFuse 页面：选首选引擎、填 API 密钥与接口地址、勾选参与故障转移的引擎](https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/demo-dsh-settings-card.jpg)
 
 ## 用法
 
@@ -121,10 +121,10 @@ dsh 用户还有一条不碰命令行的路。在 dsh 侧栏点开「插件」�
 | 文档                                                     | 适用场景                                    |
 | :------------------------------------------------------- | :------------------------------------------ |
 | [INSTALL.md](INSTALL.md)                                 | 一步步安装 skill（为 agent 编写）           |
-| [CLI 手册](skills/modsearch/references/cli.md)           | skill 所驱动的 CLI：参数、配置与体检        |
+| [CLI 手册](skills/searchfuse/references/cli.md)           | skill 所驱动的 CLI：参数、配置与体检        |
 | [故障排查](docs/troubleshooting.md)                      | 命令报错，查成因和解法                      |
-| [配置手册](skills/modsearch/references/configure.md)     | 配置 key、切换引擎、排查配置                |
-| [输出契约](skills/modsearch/references/output-schema.md) | 解析 JSON 或构建下游工具                    |
+| [配置手册](skills/searchfuse/references/configure.md)     | 配置 key、切换引擎、排查配置                |
+| [输出契约](skills/searchfuse/references/output-schema.md) | 解析 JSON 或构建下游工具                    |
 | [SearXNG 搭建](docs/searxng-setup.md)                    | 自建实例，用它够到 Google 的索引            |
 | [dsh 插件](docs/dsh.md)                                | 安装、配置、验证与更新原生 dsh bundle       |
 | [宿主接入](docs/harness-setup.md)                        | 在 Codex、Claude Code、OpenCode、Pi 中配置  |
@@ -138,7 +138,7 @@ Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：
 
 本仓库不接受 PR。项目由作者独立维护，所有代码经作者本人审阅，这是它可靠性的前提。两种有效的参与方式：
 
-- **[提交 issue](https://github.com/liustack/modsearch/issues)。** bug、建议、难以理解的报错或文档都欢迎。issue 会被认真阅读，并影响后续开发方向。
+- **[提交 issue](https://github.com/Wenaixi/searchfuse/issues)。** bug、建议、难以理解的报错或文档都欢迎。issue 会被认真阅读，并影响后续开发方向。
 - **Fork。** MIT 协议下你的副本完全归你，修改和发布不受限制。
 
 ## 插入硬广一条
@@ -146,24 +146,24 @@ Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：
 关注微信公众号「liustack」：AI 工具、实践与想法，第一时间推送。微信扫码，或搜一搜「liustack」：
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liustack/modsearch/main/assets/wechat-qrcode.png" width="420" alt="微信公众号 liustack" />
+  <img src="https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/wechat-qrcode.png" width="420" alt="微信公众号 liustack" />
 </p>
 
-⭐ 如果它对你有用，请给 [ModSearch](https://github.com/liustack/modsearch) 一个 star，这是其他开发者找到它的方式。
+⭐ 如果它对你有用，请给 [SearchFuse](https://github.com/Wenaixi/searchfuse) 一个 star，这是其他开发者找到它的方式。
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=liustack%2Fmodsearch&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Wenaixi%2Fsearchfuse&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=liustack/modsearch&type=date&theme=dark&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=liustack/modsearch&type=date&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=liustack/modsearch&type=date&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Wenaixi/searchfuse&type=date&theme=dark&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Wenaixi/searchfuse&type=date&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Wenaixi/searchfuse&type=date&legend=top-left&sealed_token=ymc92zQxHuDgpexZjaqDbEhMCuCjGHskpQGkzkwwrU0FksWoq5MasrMA64y9G2CxNV9O3EFeRjKneWSDYmHH4HWjpUiaAme0haCp-1Y72cRmHDv8coW35A" />
  </picture>
 </a>
 
 ## 免责声明
 
-ModSearch 以 MIT 许可发布，使用不受限制。作者不对任何用途（含商业使用）提供保证与背书。上游引擎（Antigravity CLI、Tavily、Exa、Firecrawl、Keenable、You.com、Grok Build）各有自己的条款与额度，遵守这些约束由使用者负责。
+SearchFuse 以 MIT 许可发布，使用不受限制。作者不对任何用途（含商业使用）提供保证与背书。上游引擎（Antigravity CLI、Tavily、Exa、Firecrawl、Keenable、You.com、Grok Build）各有自己的条款与额度，遵守这些约束由使用者负责。
 
 ## License
 

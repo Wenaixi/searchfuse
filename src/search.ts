@@ -52,7 +52,7 @@ export interface RunSearchOptions {
   workdir?: string;
   /** 针对本次运行、一次性覆盖本地引擎私网防护的开关。 */
   allowPrivateNetwork?: boolean;
-  /** 注入的配置，测试用。否则从 ~/.modsearch/config.json 加载。 */
+  /** 注入的配置，测试用。否则从 ~/.searchfuse/config.json 加载。 */
   config?: ModsearchConfig;
   env?: NodeJS.ProcessEnv;
   /**

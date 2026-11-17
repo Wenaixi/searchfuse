@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// modsearch eval runner (v1). Runs the seed cases against the real CLI, writes
+// searchfuse eval runner (v1). Runs the seed cases against the real CLI, writes
 // one evidence artifact per case under evals/results/<date>/, and prints a
 // pass-rate and latency summary. Meant to be run locally, on demand, not in CI:
 // most cases spend real engine quota. The SSRF case spends nothing and always
@@ -221,7 +221,7 @@ async function main() {
     : 0;
   const max = latencies.length ? Math.max(...latencies) : 0;
 
-  process.stdout.write('\nmodsearch evals\n');
+  process.stdout.write('\nsearchfuse evals\n');
   for (const s of summary) {
     const lat = s.latencyMs == null ? '     -' : `${s.latencyMs}`.padStart(6);
     process.stdout.write(`  ${s.status.padEnd(4)} ${s.id.padEnd(16)} ${lat}ms  ${s.detail}\n`);

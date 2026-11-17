@@ -131,7 +131,7 @@ describe('the settings card mounts only where its route answers', () => {
       fetch: (url: string) =>
         Promise.resolve({
           ok: configStatus >= 200 && configStatus < 300,
-          status: url.startsWith('/modsearch/config') ? configStatus : 200,
+          status: url.startsWith('/searchfuse/config') ? configStatus : 200,
           json: () => Promise.resolve({}),
         }),
     });
@@ -268,7 +268,7 @@ describe('on the Plugins page the card is a section of the page, not a block of 
 
   it('loads as soon as the page shows it, without waiting for a click', () => {
     const { urls } = renderAs({ view: 'page' }, [false, null, null, '']);
-    expect(urls).toEqual(['/modsearch/config?doctor=1']);
+    expect(urls).toEqual(['/searchfuse/config?doctor=1']);
   });
 
   it('answers a summary view with its one-liner and loads nothing', () => {
@@ -289,7 +289,7 @@ describe('on the Plugins page the card is a section of the page, not a block of 
       throw new Error('no retry button');
     }
     (retry.props.onClick as () => void)();
-    expect(failed.urls).toEqual(['/modsearch/config?doctor=1']);
+    expect(failed.urls).toEqual(['/searchfuse/config?doctor=1']);
   });
 
   it('shows no retry while the first load is still on its way', () => {

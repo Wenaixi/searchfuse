@@ -10,9 +10,9 @@ read_when:
 
 下面每条信息都是 modsearch 真实会打印的。用你看到的字样在本页搜索。
 
-## 第一步：先跑 `modsearch doctor`
+## 第一步：先跑 `searchfuse doctor`
 
-解读报错之前先跑 `modsearch doctor`。它报告 Node 版本、每个角色下各引擎的就绪状态和原因（二进制在不在 PATH、key 来自环境还是文件、Grok 登录文件在不在）、配置来自哪里、文件权限、私有网络状态，全程不花额度、不发请求。缺什么会附一条可直接复制的修复命令。大多数配置问题在这里一眼可见。加 `--json` 可把报告喂给工具。
+解读报错之前先跑 `searchfuse doctor`。它报告 Node 版本、每个角色下各引擎的就绪状态和原因（二进制在不在 PATH、key 来自环境还是文件、Grok 登录文件在不在）、配置来自哪里、文件权限、私有网络状态，全程不花额度、不发请求。缺什么会附一条可直接复制的修复命令。大多数配置问题在这里一眼可见。加 `--json` 可把报告喂给工具。
 
 ## 所有搜索引擎都失败
 
@@ -26,10 +26,10 @@ Firecrawl、Keenable 和 You.com 都能走免注册端点搜索，所以裸安�
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash && agy   # 然后登录
 # 或增加一份个人 API 额度：
-modsearch config set tavily.apiKey <key>
-modsearch config set exa.apiKey <key>
-modsearch config set firecrawl.apiKey <key>
-modsearch config set keenable.apiKey <key>
+searchfuse config set tavily.apiKey <key>
+searchfuse config set exa.apiKey <key>
+searchfuse config set firecrawl.apiKey <key>
+searchfuse config set keenable.apiKey <key>
 ```
 
 云端引擎失败时，单页抓取（`-u`）仍会落到内置本地引擎。
@@ -38,7 +38,7 @@ modsearch config set keenable.apiKey <key>
 
 ```
 firecrawl request failed: fetch failed; cause: getaddrinfo EAI_AGAIN api.firecrawl.dev
-firecrawl does not allow keyless use from a proxy or VPN exit IP. Set a free key: modsearch config set firecrawl.apiKey <key>, or use keenable or youcom.
+firecrawl does not allow keyless use from a proxy or VPN exit IP. Set a free key: searchfuse config set firecrawl.apiKey <key>, or use keenable or youcom.
 ```
 
 modsearch 的每个引擎 API 调用和单页抓取都会读 `http_proxy` / `https_proxy` / `no_proxy`（大小写都认），不需要额外的 Node 参数。前提是代理变量在拉起 modsearch 的那个进程的环境里。由服务管理器（而不是登录 shell）启动的宿主常常缺这几个变量，这时尝试列表里会出现 `EAI_AGAIN`、`ENOTFOUND`、`ECONNREFUSED` 这类 DNS 或连接错误。把变量导出到宿主启动的地方，或写进它的服务配置。
@@ -66,7 +66,7 @@ Eligibility check failed: Your current account is not eligible for Antigravity, 
 Antigravity 没有在你所在的地区开放，所以不管登没登录，agy 每次调用都会拒绝。其他搜索引擎会自动接手。冷却开着时（默认），agy 会被按在链末尾一整天，后续运行不再先启动它。如果这台机器上 agy 永远用不了，就把它彻底移出自动链：
 
 ```bash
-modsearch config set antigravity-cli.enabled false
+searchfuse config set antigravity-cli.enabled false
 ```
 
 ## Windows 上闪出控制台窗口
@@ -78,9 +78,9 @@ modsearch config set antigravity-cli.enabled false
 ## Exa、Firecrawl 或 Keenable 鉴权被拒
 
 ```
-exa rejected the API key (401). Fix it: modsearch config set exa.apiKey <key>
-firecrawl rejected the API key (401). Fix it: modsearch config set firecrawl.apiKey <key>
-keenable rejected the API key (401). Fix it: modsearch config set keenable.apiKey <key>
+exa rejected the API key (401). Fix it: searchfuse config set exa.apiKey <key>
+firecrawl rejected the API key (401). Fix it: searchfuse config set firecrawl.apiKey <key>
+keenable rejected the API key (401). Fix it: searchfuse config set keenable.apiKey <key>
 firecrawl rejected the keyless request (401). Anonymous access may be unavailable or rate-limited.
 ```
 
@@ -99,13 +99,13 @@ keenable is out of credits (HTTP 402). ...
 ## Keenable 免注册额度本小时用完
 
 ```
-keenable's keyless pool for this IP is used up for the hour (1,000 requests). Set a free key for your own quota: modsearch config set keenable.apiKey <key> ...
+keenable's keyless pool for this IP is used up for the hour (1,000 requests). Set a free key for your own quota: searchfuse config set keenable.apiKey <key> ...
 ```
 
 不带 key 时，Keenable 每个 IP 每小时给 1,000 次，同一 IP 上的所有人共用这份额度（办公室、VPN 出口、云主机都算），每秒最多 10 次。链上的下一个搜索引擎会自动接手。想要一份独享额度，到 https://app.keenable.ai 领个免费 key：带 key 的 Keenable 没有每小时上限，每月 100,000 次。
 
 ```bash
-modsearch config set keenable.apiKey <key>
+searchfuse config set keenable.apiKey <key>
 # 或环境变量：export KEENABLE_API_KEY=<key>
 ```
 
@@ -127,13 +127,13 @@ tavily is out of monthly quota (HTTP 432). ...
 
 ## 某个引擎总被跳过
 
-modsearch 在绕开一个冷却。引擎撞过额度墙或地区限制后会被记在 `~/.modsearch/state.json` 里，恢复前总是最后一试，结果的 `warnings` 会写明是哪个引擎、冷却到什么时候。跑 `modsearch doctor` 看谁在冷却、还剩多久。手动清除：
+modsearch 在绕开一个冷却。引擎撞过额度墙或地区限制后会被记在 `~/.searchfuse/state.json` 里，恢复前总是最后一试，结果的 `warnings` 会写明是哪个引擎、冷却到什么时候。跑 `searchfuse doctor` 看谁在冷却、还剩多久。手动清除：
 
 ```bash
-modsearch state clear
+searchfuse state clear
 ```
 
-想彻底关掉这个行为、让路由和从前完全一样：`modsearch config set cooldown off`。冷却中的引擎从不被移除，只是排序靠后，其他全挂时仍会试它。
+想彻底关掉这个行为、让路由和从前完全一样：`searchfuse config set cooldown off`。冷却中的引擎从不被移除，只是排序靠后，其他全挂时仍会试它。
 
 ## 答题的引擎不对
 
@@ -151,7 +151,7 @@ modsearch state clear
 Blocked private network target: example.com -> 10.0.0.5. If a VPN or proxy on
 this machine maps public hosts into reserved ranges outside the 198.18.0.0/15
 fake-IP pool, allow it with
---allow-private-network, or: modsearch config set allowPrivateNetwork true
+--allow-private-network, or: searchfuse config set allowPrivateNetwork true
 ```
 
 ```
@@ -159,7 +159,7 @@ Blocked private network target: github.com -> 127.0.0.1. If a VPN or proxy on
 this machine maps public hosts into reserved ranges outside the 198.18.0.0/15
 fake-IP pool, or a hosts-file accelerator (such as Watt Toolkit / Steam++) points
 public domains at 127.0.0.1, allow it with
---allow-private-network, or: modsearch config set allowPrivateNetwork true
+--allow-private-network, or: searchfuse config set allowPrivateNetwork true
 ```
 
 Clash、Clash Verge Rev、mihomo 和 Surge 的代理 fake-ip 模式开箱即用。DNS 返回的 `198.18.0.0/15` 地址会被视为 fake-ip 占位值，无需开启 `allowPrivateNetwork`。例外仅限 DNS 结果。在 URL 中直接写 `http://198.18.0.5/`，开关关闭时仍会被拦截。
@@ -167,7 +167,7 @@ Clash、Clash Verge Rev、mihomo 和 Surge 的代理 fake-ip 模式开箱即用�
 SSRF 防护拒绝了一个私有或保留地址。可能有三种成因：
 
 - **VPN 或代理**把公网主机名映射进其他保留地址段，例如 `10.0.0.0/8`。分流隧道客户端可能出现这种情况，用上面的参数或配置放行。
-- **hosts 文件加速器**，例如 Watt Toolkit / Steam++。它把公网域名写进 hosts，指向 `127.0.0.1`，本机进程在 443 上监听并转发。用 `modsearch config set allowPrivateNetwork true` 放行。放行后，Node 22.15+ 上 modsearch 会自动信任操作系统证书库，由代理的本地已安装 CA 签发的证书就能通过校验。Node 22.13 和 22.14 没有通过这个 API 读取系统证书库的能力，请升级到 22.15+。如果要给整个 Node 进程启用系统 CA，Node 22.15+ 可设 `NODE_OPTIONS=--use-system-ca`，`NODE_USE_SYSTEM_CA=1` 则需要 Node 22.19+ 或 24.6+。firecrawl 是云端引擎，够不到本机回环地址，此场景只能走 local 引擎。
+- **hosts 文件加速器**，例如 Watt Toolkit / Steam++。它把公网域名写进 hosts，指向 `127.0.0.1`，本机进程在 443 上监听并转发。用 `searchfuse config set allowPrivateNetwork true` 放行。放行后，Node 22.15+ 上 modsearch 会自动信任操作系统证书库，由代理的本地已安装 CA 签发的证书就能通过校验。Node 22.13 和 22.14 没有通过这个 API 读取系统证书库的能力，请升级到 22.15+。如果要给整个 Node 进程启用系统 CA，Node 22.15+ 可设 `NODE_OPTIONS=--use-system-ca`，`NODE_USE_SYSTEM_CA=1` 则需要 Node 22.19+ 或 24.6+。firecrawl 是云端引擎，够不到本机回环地址，此场景只能走 local 引擎。
 - **真正的内网地址**，这正是防护存在的意义。不要为了够它而关掉防护。
 
 ## 页面抓回来几乎是空的
@@ -202,7 +202,7 @@ Cannot read /Users/you/.modsearch/config.json: EACCES ... Fix the file or its pe
 Failed to parse ... Fix or delete the file.
 ```
 
-JSON 无效。`modsearch config init --force` 重写一个干净的，原内容丢弃。
+JSON 无效。`searchfuse config init --force` 重写一个干净的，原内容丢弃。
 
 ## 超时
 
@@ -240,4 +240,4 @@ modsearch 拉起了一个引擎，那个引擎又想再跑一次 modsearch。CLI
 
 ## 还是没辙
 
-用 modsearch 打印的失败命令原样重跑一遍，把那份输出附在 issue 里：https://github.com/liustack/modsearch/issues
+用 modsearch 打印的失败命令原样重跑一遍，把那份输出附在 issue 里：https://github.com/Wenaixi/searchfuse/issues

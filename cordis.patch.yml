@@ -1,4 +1,4 @@
-# dsh bundle layer: mount the modsearch web plugin (dsh/index.js via the
+# dsh bundle layer: mount the searchfuse web plugin (dsh/index.js via the
 # package root export; bin stays the CLI, nothing imports the root otherwise)
 # and route the web seam's search capability to it. A patch row replaces the
 # targeted row's whole config, so this row restates every base key: the base
@@ -13,4 +13,4 @@
 
 - insert:
     - id: modsearch
-      name: '@liustack/modsearch'
+      name: '@wenaixi/searchfuse'

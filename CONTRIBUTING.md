@@ -1,12 +1,12 @@
-# Contributing to ModSearch
+# Contributing to SearchFuse
 
-First, the policy: **ModSearch does not accept pull requests.** It is a
+First, the policy: **SearchFuse does not accept pull requests.** It is a
 deliberately small tool with a single maintainer who reviews and owns every
 line, and keeping that loop tight is what keeps it dependable.
 
 Two contributions that genuinely help:
 
-- **[Open an issue](https://github.com/liustack/modsearch/issues).** Bugs,
+- **[Open an issue](https://github.com/Wenaixi/searchfuse/issues).** Bugs,
   ideas, a confusing error message, docs that read wrong. Issues get read and
   drive what gets built. The templates tell you what to include.
 - **Fork it.** The MIT license means your copy is fully yours: rename it,

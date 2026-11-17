@@ -5,14 +5,14 @@
 // 通过 slot 贡献出去，而不是声明成一份 schema：dsh 0.1.6-alpha.2 起是
 // 插件页上的 `plugins.bundle.config`，之前是设置页里的
 // `settings.plugin.item`。它读写插件自己的路由，那条路由掌管
-// ~/.modsearch/config.json：浏览器永远看不到 API 密钥，也永远不会拿空值
+// ~/.searchfuse/config.json：浏览器永远看不到 API 密钥，也永远不会拿空值
 // 覆盖已保存的密钥。
 //
 // 按 lazy-CJS 包协议手写（window.__ModuleLoader__.load，工厂函数返回
 // cordis-plugin 的导出），所以没有构建步骤，也不从 dsh 客户端包里 import：
 // 与宿主半边同样的零依赖立场。
 window.__ModuleLoader__.load({
-  id: '@liustack/modsearch',
+  id: '@wenaixi/searchfuse',
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
@@ -41,7 +41,7 @@ window.__ModuleLoader__.load({
     var CHAIN_ENGINES = ENGINES.filter((name) => name !== 'local');
 
     // 插件页按 npm 包名把配置分派给对应的 bundle。
-    var PACKAGE_NAME = '@liustack/modsearch';
+    var PACKAGE_NAME = '@wenaixi/searchfuse';
 
     // 用两套短标签，而不是一个 locale 包：这张卡片总共几十个字符串，
     // 为它配一个包，机械开销比被标注的东西本身还大。
@@ -601,7 +601,7 @@ window.__ModuleLoader__.load({
         var load = react.useCallback(() => {
           // doctor：离线自检，说明本机哪些引擎已经配置好。每次展开付一次
           // 代价，宿端缓存结果。
-          fetch('/modsearch/config?doctor=1')
+          fetch('/searchfuse/config?doctor=1')
             .then((r) =>
               r.json().then((body) => {
                 if (!r.ok) {
@@ -632,7 +632,7 @@ window.__ModuleLoader__.load({
         // 加载状态。探测失败时保留上一个答案与已保存的提示不动：保存
         // 已经落地，后续失败不是它的消息。
         var refreshReadiness = react.useCallback((saved) => {
-          fetch('/modsearch/config?doctor=1')
+          fetch('/searchfuse/config?doctor=1')
             .then((r) => (r.ok ? r.json() : null))
             .then((fresh) => {
               if (fresh && Array.isArray(fresh.readiness)) {
@@ -1072,7 +1072,7 @@ window.__ModuleLoader__.load({
                     disabled: !dirty || note === t.saving,
                     onClick: () => {
                       noteState[1](t.saving);
-                      fetch('/modsearch/config', {
+                      fetch('/searchfuse/config', {
                         method: 'POST',
                         headers: { 'content-type': 'application/json' },
                         body: JSON.stringify(savePayload(summary, draft)),
@@ -1225,7 +1225,7 @@ window.__ModuleLoader__.load({
         // 或没有 web profile），卡片只能渲染一个错误，而那不是「关掉一项
         // 功能」的含义。任何响应都证明路由存在；只有 404 或网络失败才
         // 算作不存在。
-        fetch('/modsearch/config')
+        fetch('/searchfuse/config')
           .then((response) => {
             if (response.status === 404) {
               return;
@@ -1233,7 +1233,7 @@ window.__ModuleLoader__.load({
             try {
               mountCard(scope, localeRef);
             } catch (error) {
-              console.error(`[modsearch] settings card skipped: ${error}`);
+              console.error(`[searchfuse] settings card skipped: ${error}`);
             }
           })
           .catch(() => {});
@@ -1245,7 +1245,7 @@ window.__ModuleLoader__.load({
       try {
         react = require('react');
       } catch (error) {
-        console.error(`[modsearch] settings card skipped: ${error}`);
+        console.error(`[searchfuse] settings card skipped: ${error}`);
         return;
       }
       var ui = require('@deepseek-ai/dsh-client-ui-primitives');

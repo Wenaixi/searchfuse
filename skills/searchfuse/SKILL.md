@@ -5,7 +5,7 @@ compatibility: Requires network access and one of node 22+/npx, bun/bunx, or a p
 allowed-tools: Bash
 ---
 
-# ModSearch — Search & Fetch Bridge Skill
+# SearchFuse — Search & Fetch Bridge Skill
 
 Use this skill when:
 
@@ -41,9 +41,9 @@ Nothing else needs setting up first: modsearch works with no config file. Web se
 
 Some harnesses forbid running scripts. Reason through the same order by hand and run the first line that works (the pinned version is 0.1.0):
 
-1. A `modsearch` on `PATH` whose major version is 0 and is at least 0.1.0: `modsearch <args>`.
-2. Otherwise, if `npx` exists: `npx --yes --package @liustack/modsearch@0.1.0 modsearch <args>`.
-3. Otherwise, if `bunx` exists: `bunx --bun @liustack/modsearch@0.1.0 <args>`.
+1. A `modsearch` on `PATH` whose major version is 0 and is at least 0.1.0: `searchfuse <args>`.
+2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.0 modsearch <args>`.
+3. Otherwise, if `bunx` exists: `bunx --bun @wenaixi/searchfuse@0.1.0 <args>`.
 4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim modsearch itself failed.
 
 `references/runtime.md` documents the version pin, the compatibility rule, and the diagnostic fields.
@@ -80,7 +80,7 @@ modsearch picks per role from what is installed and falls through on failure, so
 
 - Page fetch has the built-in `local` engine as its zero-setup floor unless the user explicitly disabled it with `local.enabled false`, or forced a different engine with `-e`. It returns the page as served, with no summary and no focus narrowing, so pick out the relevant parts yourself. Very little text back means the page is JavaScript-rendered, which that engine does not run: it says so in `uncertainty`, so say the same rather than claiming the page is empty.
 - An X question answered by a web engine means Grok Build is not set up. That entry reads `status: "degraded"`, `requestedSource: "x"`, `source: "web"`, with the reason in `warnings`. Relay that caveat instead of presenting it as X coverage. On a `--source web,x` run where X is unreachable, the X slot comes back as a separate entry with `status: "unavailable"` and empty `items`, so the gap is explicit: report that X could not be reached rather than treating the web entry as if it covered X.
-- Quota cooldown failover is on by default. When an engine hits its quota, modsearch moves it to the back of the chain until it recovers and fails over to a healthy engine, noting who is cooling and until when in `warnings`. A cooling engine is never dropped, only tried last, so it still answers when everything else fails. `modsearch state clear` forgets the cooldowns, `modsearch config set cooldown off` disables the behavior, and `modsearch doctor` shows what is cooling.
+- Quota cooldown failover is on by default. When an engine hits its quota, modsearch moves it to the back of the chain until it recovers and fails over to a healthy engine, noting who is cooling and until when in `warnings`. A cooling engine is never dropped, only tried last, so it still answers when everything else fails. `searchfuse state clear` forgets the cooldowns, `searchfuse config set cooldown off` disables the behavior, and `searchfuse doctor` shows what is cooling.
 - Setup and key questions: follow `references/configure.md` and run the commands for the user.
 
 ## Workflow
@@ -122,7 +122,7 @@ Fetch mode replaces `items` with `content` (the page as text or markdown) and `l
 
 ## Failure Handling
 
-Every error this CLI prints names its cause, and most already name the fix, so read the message first. When setup is the suspect, run `modsearch doctor` (spends no quota): it reports each engine's readiness per role and the config in effect, with a fix command for anything missing. `--json` gives a machine-readable report.
+Every error this CLI prints names its cause, and most already name the fix, so read the message first. When setup is the suspect, run `searchfuse doctor` (spends no quota): it reports each engine's readiness per role and the config in effect, with a fix command for anything missing. `--json` gives a machine-readable report.
 
 - `Every engine for the web source failed`: read the attempt list. A bare install includes keyless Firecrawl, Keenable, and You.com, so this means runtime failures such as no network, timeout, or exhausted limits rather than missing setup.
 - `Every engine for the <source> source failed`: each engine's failure is listed, and `attempts` in a returned entry carries the same per-engine errors. Act on the first fixable one.

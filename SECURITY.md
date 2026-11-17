@@ -8,7 +8,7 @@ Report it privately through GitHub Security Advisories: go to the repository's
 **Security** tab and choose **Report a vulnerability**. That opens a private
 channel with the maintainers. We aim to acknowledge a report within a few days.
 
-Helpful things to include: the affected version (`modsearch --version`), the URL
+Helpful things to include: the affected version (`searchfuse --version`), the URL
 or input that triggers it, and the smallest reproduction you can manage.
 
 ## Scope

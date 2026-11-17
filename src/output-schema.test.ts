@@ -11,7 +11,7 @@ import { cleanupTempDirs, fakeEngine, SPAWNS_FAKE_CLI } from './testing/helpers.
 // and runs everywhere.
 const itSpawn = it.runIf(SPAWNS_FAKE_CLI);
 
-const DOC_URL = new URL('../skills/modsearch/references/output-schema.md', import.meta.url);
+const DOC_URL = new URL('../skills/searchfuse/references/output-schema.md', import.meta.url);
 
 /** Every ```json fenced block in the document, parsed. */
 function jsonBlocks(markdown: string): unknown[] {

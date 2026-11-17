@@ -4,7 +4,7 @@
 // softened circuit breaker, not load sharing: healthy engines keep the whole
 // job, a spent one is only moved to the back of the line and tried last.
 //
-// State lives in ~/.modsearch/state.json, apart from config.json, and is a pure
+// State lives in ~/.searchfuse/state.json, apart from config.json, and is a pure
 // cache: a read that fails or a file that is corrupt is treated as no state,
 // silently, because nagging the user about a lost cache helps nobody. Writes go
 // through a temp file and an atomic rename so a crash mid-write cannot leave a
@@ -51,7 +51,7 @@ export function parseCooldownStateKey(stateKey: string): {
 
 /** Resolved at call time so a faked HOME (tests) redirects the state too. */
 export function currentStatePath(): string {
-  return path.join(os.homedir(), '.modsearch', 'state.json');
+  return path.join(os.homedir(), '.searchfuse', 'state.json');
 }
 
 /** A quota error with no reset time cools for this long before a retry. */
@@ -359,7 +359,7 @@ export function clearEngineCooldown(
 }
 
 /**
- * Wipe all cooldown state by deleting the file. Used by `modsearch state clear`.
+ * Wipe all cooldown state by deleting the file. Used by `searchfuse state clear`.
  * Unlike the in-run cache writes, this is an explicit user command, so a delete
  * that fails must surface as an error, not print success over a file still there.
  */

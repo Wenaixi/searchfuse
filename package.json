@@ -1,10 +1,10 @@
 {
-  "name": "@liustack/modsearch",
+  "name": "@wenaixi/searchfuse",
   "version": "0.1.0",
   "description": "融合搜索插件：并发询问多个搜索引擎并用倒数排名融合结果，为原生无联网能力的模型补上网搜、X 搜索与单页抓取。开箱免费，免注册免密钥（Firecrawl 免注册通道每月 1,000 免费额度）。",
   "type": "module",
   "bin": {
-    "modsearch": "./dist/main.js"
+    "searchfuse": "./dist/main.js"
   },
   "scripts": {
     "dev": "vite build --watch",
@@ -22,9 +22,9 @@
   "files": [
     "dist",
     "docs",
-    "skills/modsearch/SKILL.md",
-    "skills/modsearch/scripts",
-    "skills/modsearch/references",
+    "skills/searchfuse/SKILL.md",
+    "skills/searchfuse/scripts",
+    "skills/searchfuse/references",
     "CHANGELOG.md",
     "SECURITY.md",
     "dsh",
@@ -38,7 +38,7 @@
     "agent",
     "agent-skill",
     "antigravity",
-    "modsearch",
+    "searchfuse",
     "dsh-plugin",
     "deepseek-harness"
   ],
