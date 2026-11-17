@@ -1186,6 +1186,12 @@ describe('engine tool hot reload', () => {
             file,
             JSON.stringify({ engine: 'exa', engines: { exa: { expose: { tool: true } } } }),
           );
+          // 轮询靠 mtime 判断改动。Windows 的文件时间戳粒度比 POSIX 粗，
+          // 写完立刻读可能拿到与上一份相同的时间，于是这次重载被跳过——
+          // 测试就会在本该通过的地方失败。显式把 mtime 往前推一秒，让
+          // 「文件变了」这件事不再取决于文件系统的精度的。
+          const bumped = new Date(Date.now() + 2_000);
+          fs.utimesSync(file, bumped, bumped);
           await vi.advanceTimersByTimeAsync(6_000);
 
           expect([...stage.tools.keys()].sort()).toEqual(['exa_search', 'read_page']);
@@ -1219,6 +1225,10 @@ describe('engine tool hot reload', () => {
               engines: { tavily: { apiKey: 'second', expose: { tool: true } } },
             }),
           );
+          // 与上一条同理：mtime 要显式往前推，否则 Windows 上可能读到同一个
+          // 时间戳，轮询什么都不做，而这条测试要验的正是「被通知了但没重建」。
+          const bumped = new Date(Date.now() + 2_000);
+          fs.utimesSync(file, bumped, bumped);
           await vi.advanceTimersByTimeAsync(6_000);
 
           expect(reRegistered).toBe(0);
