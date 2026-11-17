@@ -78,7 +78,15 @@ describe('output-schema reference stays in step with RunSearchResult', () => {
     });
     const real = await runSearch({
       query: 'anything',
-      config: { engine: 'antigravity-cli', engines: { 'antigravity-cli': { bin } } },
+      // 文档里的示例信封是链式的：它展示 attempts 里有一条记录、engine 是
+      // 单个引擎名。融合会把这两样都换成另一种形状（attempts 为空、engine
+      // 是逗号拼接的列表），所以这条测试必须钉住链式，否则它比对的是两种
+      // 不同形态，而报出来的差异看起来像文档腐化。
+      config: {
+        engine: 'antigravity-cli',
+        aggregate: { mode: 'chain' },
+        engines: { 'antigravity-cli': { bin } },
+      },
       env: BARE,
       timeoutMs: 20_000,
     });
