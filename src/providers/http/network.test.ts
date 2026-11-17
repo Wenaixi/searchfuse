@@ -207,7 +207,7 @@ describe('isReservedTarget: advisory skip for cloud-fetch engines', () => {
 
 describe('hostname-resolution block messages', () => {
   const allowHint =
-    'allow it with --allow-private-network, or: modsearch config set allowPrivateNetwork true';
+    'allow it with --allow-private-network, or: searchfuse config set allowPrivateNetwork true';
 
   async function blockedMessage(address: string, family: number): Promise<string> {
     lookupMock.mockResolvedValue([{ address, family }]);
@@ -248,7 +248,7 @@ describe('hostname-resolution block messages', () => {
 
 describe('literal loopback block messages', () => {
   const allowHint =
-    'allow it with --allow-private-network, or: modsearch config set allowPrivateNetwork true';
+    'allow it with --allow-private-network, or: searchfuse config set allowPrivateNetwork true';
 
   it.each(['http://127.23.45.67/', 'http://[::1]/', 'http://[::ffff:127.1.2.3]/'])(
     'names a hosts-file accelerator for %s',

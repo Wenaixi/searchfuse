@@ -1,6 +1,6 @@
 # 配置 SearchFuse
 
-用户问怎么装 modsearch、要加 key、要换引擎，或者遇到配置类的失败时，读这份文档。直接替用户把命令跑了，不要把说明贴给对方。
+用户问怎么装 searchfuse、要加 key、要换引擎，或者遇到配置类的失败时，读这份文档。直接替用户把命令跑了，不要把说明贴给对方。
 
 ## 心智模型
 
@@ -23,7 +23,7 @@ X 是独立语料，不是竞争的搜索引擎，所以它永远不会顶替网
 
 ## 零配置
 
-modsearch 没有配置文件也能跑：抓取有 `local` 兜底，搜索先走 Firecrawl 的免注册免费额度，再走 Keenable 的，再走 You.com 的。搜索没有 local 后备（`local` 不能搜索），所以三个免注册引擎都被限流时需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
+searchfuse 没有配置文件也能跑：抓取有 `local` 兜底，搜索先走 Firecrawl 的免注册免费额度，再走 Keenable 的，再走 You.com 的。搜索没有 local 后备（`local` 不能搜索），所以三个免注册引擎都被限流时需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
 
 首选的免费升级是 Antigravity CLI，它写带引用的综述，一个工具同时覆盖搜索和抓取，还不要 key：
 
@@ -39,8 +39,8 @@ agy    # 用户在浏览器完成登录后退出
 `~/.searchfuse/config.json`，写入时权限 0600，展示时 key 打码。优先级：CLI 参数 > 环境变量 > 这个文件 > 内置默认值。
 
 ```bash
-modsearch config init     # 生成起步文件，每个字段都可省略
-modsearch config show     # 生效配置：文件与环境变量合并，每个值标注来源 (file)/(env)，key 打码，别名归一显示
+searchfuse config init     # 生成起步文件，每个字段都可省略
+searchfuse config show     # 生效配置：文件与环境变量合并，每个值标注来源 (file)/(env)，key 打码，别名归一显示
 ```
 
 完整结构。每个字段都可省略，文件本身也可省略：
@@ -161,7 +161,7 @@ searchfuse config set firecrawl.keylessFetch false   # 让自动抓取不走云�
 
 两个角色开箱都免 key 运行。抓取正是 Firecrawl 领跑的原因：它在云端跑真实浏览器，JavaScript 渲染的页面能带着本地引擎看不到的内容回来。这也意味着公网 URL 会被交给第三方，每次云端抓取的结果 warning 都会标明这条边界。想让自动抓取只走本地，设 `firecrawl.keylessFetch false`：搜索照常免 key，抓取则跳过 Firecrawl，除非配置了 key 或用 `-e firecrawl` 显式选它。URL 中直写的私有和保留地址目标始终跳过 Firecrawl，即使开着 `--allow-private-network` 也不例外。主机名的 DNS 结果采用更窄的云端披露规则。Clash、Surge 和 mihomo 使用的标准 fake-ip 池 `198.18.0.0/15` 会被视为占位值，只有所有解析地址都是真私网或保留地址时才会拦下。只要有一个公网地址就会放行。这个例外只作用于 DNS 结果。本地 SSRF 守卫仍把 `198.18.0.0/15` 判为私网，这个开关也只让本地引擎访问它。
 
-每次 Firecrawl 抓取花一个 credit 并强制重新爬。modsearch 发送 `maxAge: 0`，关掉 Firecrawl 默认的多天缓存，所以抓取永远不会拿到过期内容。这个取舍是故意的：一次抓取一个 credit，换来内容是新的，这正是工具的意义。想省 credits 不要新鲜度的话，Firecrawl 不是该选的引擎。
+每次 Firecrawl 抓取花一个 credit 并强制重新爬。searchfuse 发送 `maxAge: 0`，关掉 Firecrawl 默认的多天缓存，所以抓取永远不会拿到过期内容。这个取舍是故意的：一次抓取一个 credit，换来内容是新的，这正是工具的意义。想省 credits 不要新鲜度的话，Firecrawl 不是该选的引擎。
 
 ### keenable（搜索，默认免注册）
 
@@ -215,13 +215,13 @@ grok    # 用户用 SuperGrok 或 X Premium 登录
 如果分流 VPN 把公网主机名映射进其他保留地址段，或 Watt Toolkit / Steam++ 等 hosts 文件加速器将其指向回环地址，仍需用仅对本地抓取生效的开关放行：
 
 ```bash
-modsearch -u <url> --allow-private-network
+searchfuse -u <url> --allow-private-network
 searchfuse config set allowPrivateNetwork true   # 永久生效（顶层，全局）
 ```
 
 ## 额度冷却故障转移
 
-某个 API key 因额度类错误失败时，modsearch 把这个 key 记在 `~/.searchfuse/state.json`（与 `config.json` 分开）。下一次运行会先试同一引擎里的健康 key。只有所有已配置 key 都在冷却时，整个引擎才会移到后备链末尾。没有 API key 的引擎仍按引擎粒度冷却。这是软化的熔断器，不是负载均衡：健康 key 和健康引擎拿全部工作，冷却项仍保留为最后尝试。
+某个 API key 因额度类错误失败时，searchfuse 把这个 key 记在 `~/.searchfuse/state.json`（与 `config.json` 分开）。下一次运行会先试同一引擎里的健康 key。只有所有已配置 key 都在冷却时，整个引擎才会移到后备链末尾。没有 API key 的引擎仍按引擎粒度冷却。这是软化的熔断器，不是负载均衡：健康 key 和健康引擎拿全部工作，冷却项仍保留为最后尝试。
 
 - 冷却中的 key 不会被移除。某个 key 成功后只清除它自己的冷却。旧格式的引擎级状态仍可读取，并在任一 key 成功前作用于该引擎的所有 key。
 - 引擎报错里的精确重置时间（agy 的 `Resets in 94h19m9s`）会被采用。没写时间的额度错误冷却 45 分钟。按秒的速率限制是瞬时的，从不记录。
@@ -346,5 +346,5 @@ searchfuse config set engines.tavily.proxy                # 回到本机设置
 - `youcom's keyless allowance for this IP is used up for the day (100 searches)`：本 IP 共用的免注册额度（每天 100 次）用完了。下一个搜索引擎会接手，You.com 不会进入冷却。它没有可加的 key，所以等到第二天或换其他引擎。其他失败的信息形如 `youcom returned <status> <statusText>. <body>`。
 - `exa is out of credits` / `firecrawl is out of credits` / `keenable is out of credits`：当前额度用完了。其他搜索引擎会自动接手，冷却把耗尽的挪到最后直到恢复。
 - `Blocked private network target`：SSRF 防护。用户在 VPN 后面的话，用 `--allow-private-network` 重试。
-- 配置里引擎名写错：modsearch 在 `warnings` 里说明，并照常用一个能干活的引擎。用户想要回那个引擎时把名字改对。
+- 配置里引擎名写错：searchfuse 在 `warnings` 里说明，并照常用一个能干活的引擎。用户想要回那个引擎时把名字改对。
 - 超时：先用 `--timeout 300000` 重试一次再上报失败。

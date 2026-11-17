@@ -260,7 +260,7 @@ export class McpConnection {
         params: {
           protocolVersion: HANDSHAKE_PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: 'modsearch', version: '1.0.0' },
+          clientInfo: { name: 'searchfuse', version: '1.0.0' },
         },
       }),
       signal: AbortSignal.timeout(this.handshakeTimeoutMs),

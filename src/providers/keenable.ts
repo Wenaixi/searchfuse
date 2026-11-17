@@ -80,7 +80,7 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
       // 免密钥池由该 IP 上的所有人共用，所以这里的 429 与用户自己的配置无关。
       throw new Error(
         response.status === 429
-          ? `keenable's keyless pool for this IP is used up for the hour (1,000 requests). Set a free key for your own quota: modsearch config set keenable.apiKey <key> (100,000 requests/month, https://app.keenable.ai)`
+          ? `keenable's keyless pool for this IP is used up for the hour (1,000 requests). Set a free key for your own quota: searchfuse config set keenable.apiKey <key> (100,000 requests/month, https://app.keenable.ai)`
           : message,
       );
     }
@@ -94,7 +94,7 @@ export async function executeKeenableSearch(options: EngineRequest): Promise<Eng
       throw new ApiKeyFailureError(
         response.status === 429
           ? message
-          : `keenable rejected the API key (${response.status}). Fix it: modsearch config set keenable.apiKey <key>${detail ? ` (${detail})` : ''}`,
+          : `keenable rejected the API key (${response.status}). Fix it: searchfuse config set keenable.apiKey <key>${detail ? ` (${detail})` : ''}`,
       );
     }
     throw new Error(message);

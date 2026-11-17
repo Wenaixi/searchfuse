@@ -658,7 +658,7 @@ describe('firecrawl error classification', () => {
       settings: {},
     });
     await expect(request).rejects.toThrow(
-      /firecrawl does not allow keyless use from a proxy or VPN exit IP\. Set a free key: modsearch config set firecrawl\.apiKey <key>, or use keenable or youcom\./,
+      /firecrawl does not allow keyless use from a proxy or VPN exit IP\. Set a free key: searchfuse config set firecrawl\.apiKey <key>, or use keenable or youcom\./,
     );
   });
 });

@@ -43,7 +43,7 @@ CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样�
 
 - `results` 永远是数组，每个语料一条，所以哪怕单语料运行，结构也不变。
 - `meta` 只记录整次运行何时完成、总共多久。每个语料的耗时、引擎、模型在各自的 `results` 条目里，因为一次运行可能跨多个引擎。
-- 路由事实（`source`、`engine`、`model`、`durationSeconds`）由 modsearch 在引擎作答后盖章写入，引擎伪造不了是谁答的。
+- 路由事实（`source`、`engine`、`model`、`durationSeconds`）由 searchfuse 在引擎作答后盖章写入，引擎伪造不了是谁答的。
 
 ## `results` 条目
 

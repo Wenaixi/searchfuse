@@ -1,7 +1,7 @@
 ---
-name: modsearch
-description: "Plug-in web search, X (Twitter) search, and page fetch for models without native web access. Use whenever the task needs current information, external facts, source links, posts from X, or the content of a specific URL, and the active model/harness has no native search or fetch tool. Runs the modsearch CLI to return structured JSON evidence. Also use when the user asks how to install or configure modsearch, or wants to switch engines or add a key."
-compatibility: Requires network access and one of node 22+/npx, bun/bunx, or a preinstalled modsearch binary on PATH.
+name: searchfuse
+description: "Plug-in web search, X (Twitter) search, and page fetch for models without native web access. Use whenever the task needs current information, external facts, source links, posts from X, or the content of a specific URL, and the active model/harness has no native search or fetch tool. Runs the searchfuse CLI to return structured JSON evidence. Also use when the user asks how to install or configure searchfuse, or wants to switch engines or add a key."
+compatibility: Requires network access and one of node 22+/npx, bun/bunx, or a preinstalled searchfuse binary on PATH.
 allowed-tools: Bash
 ---
 
@@ -13,19 +13,19 @@ Use this skill when:
 - The answer needs source links or verifiable external facts
 - The user asks what people are saying on X or Twitter (推特, 推文, tweets, threads)
 - The user gives a URL to read and the harness has no fetch tool
-- The user asks how to configure modsearch, add a key, or change engines
+- The user asks how to configure searchfuse, add a key, or change engines
 
 Do not use this skill for:
 
 - Analyzing images (that is `modlens`)
 - Questions your own knowledge answers reliably and time does not affect
-- Searching inside DeepSeek Harness (dsh, `DSH_SHELL=1`): there modsearch runs as
+- Searching inside DeepSeek Harness (dsh, `DSH_SHELL=1`): there searchfuse runs as
   a plugin behind the native `web_search`. If dsh still answers from its default
   provider, the plugin is missing: point the user to Step 0 of INSTALL.md
 
 ## Prerequisites
 
-Run every modsearch command through the launcher bundled with this skill.
+Run every searchfuse command through the launcher bundled with this skill.
 Replace `<skill-dir>` with the directory this SKILL.md lives in:
 
 ```bash
@@ -33,31 +33,31 @@ bash <skill-dir>/scripts/run.sh -q "test"                                       
 powershell -ExecutionPolicy Bypass -File <skill-dir>\scripts\run.ps1 -q "test"  # Windows
 ```
 
-The launcher finds a working way to run modsearch and forwards your arguments to it unchanged. It tries, in order: a compatible `modsearch` already on `PATH`, then `npx`, then `bunx`. If none of those exists it prints a JSON diagnosis to stderr and exits 78, with a `nextSteps` list for the user. Relay those steps instead of retrying. To see the full diagnosis, run `bash <skill-dir>/scripts/run.sh doctor --json` (on a machine that can launch the CLI it also chains modsearch's own engine/config `doctor`).
+The launcher finds a working way to run searchfuse and forwards your arguments to it unchanged. It tries, in order: a compatible `searchfuse` already on `PATH`, then `npx`, then `bunx`. If none of those exists it prints a JSON diagnosis to stderr and exits 78, with a `nextSteps` list for the user. Relay those steps instead of retrying. To see the full diagnosis, run `bash <skill-dir>/scripts/run.sh doctor --json` (on a machine that can launch the CLI it also chains searchfuse's own engine/config `doctor`).
 
-Nothing else needs setting up first: modsearch works with no config file. Web search and page fetch run out of the box on Firecrawl's keyless free quota (no signup, no key), and a configured engine or API key takes precedence when present.
+Nothing else needs setting up first: searchfuse works with no config file. Web search and page fetch run out of the box on Firecrawl's keyless free quota (no signup, no key), and a configured engine or API key takes precedence when present.
 
 ### If you cannot run the launcher script
 
 Some harnesses forbid running scripts. Reason through the same order by hand and run the first line that works (the pinned version is 0.1.0):
 
-1. A `modsearch` on `PATH` whose major version is 0 and is at least 0.1.0: `searchfuse <args>`.
-2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.0 modsearch <args>`.
+1. A `searchfuse` on `PATH` whose major version is 0 and is at least 0.1.0: `searchfuse <args>`.
+2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.0 searchfuse <args>`.
 3. Otherwise, if `bunx` exists: `bunx --bun @wenaixi/searchfuse@0.1.0 <args>`.
-4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim modsearch itself failed.
+4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim searchfuse itself failed.
 
 `references/runtime.md` documents the version pin, the compatibility rule, and the diagnostic fields.
 
 ## Commands
 
-In the examples below, `modsearch` means the command run through the launcher above (`bash <skill-dir>/scripts/run.sh ...`, or the PowerShell form on Windows).
+In the examples below, `searchfuse` means the command run through the launcher above (`bash <skill-dir>/scripts/run.sh ...`, or the PowerShell form on Windows).
 
 ```bash
-modsearch -q "<query>"                 # search the web
-modsearch -q "<query>" --source x      # search X instead
-modsearch -q "<query>" --source web,x  # both, kept separate in the output
-modsearch -u "<url>"                   # fetch one page
-modsearch -u "<url>" -q "<focus>"      # fetch with an extraction focus
+searchfuse -q "<query>"                 # search the web
+searchfuse -q "<query>" --source x      # search X instead
+searchfuse -q "<query>" --source web,x  # both, kept separate in the output
+searchfuse -u "<url>"                   # fetch one page
+searchfuse -u "<url>" -q "<focus>"      # fetch with an extraction focus
 ```
 
 Optional flags: `-o <file>` also writes the JSON, `--timeout <ms>` raises the time budget, and `-e <engine>` forces exactly one engine with no fallback, so leave it off unless the user wants one specific engine. The full flag table, with defaults and the config commands, is in `references/cli.md`.
@@ -76,11 +76,11 @@ Three jobs, each with its own engines:
 | fetch a page | `firecrawl`, `antigravity-cli`, `local` | Firecrawl runs a cloud browser, keyless by default (`firecrawl.keylessFetch false` opts out). `local` needs nothing and is the default floor. |
 | search X | `grok-cli` | Needs Grok Build with SuperGrok or X Premium. |
 
-modsearch picks per role from what is installed and falls through on failure, so do not probe first: run the command and read `results[].engine` to see who answered.
+searchfuse picks per role from what is installed and falls through on failure, so do not probe first: run the command and read `results[].engine` to see who answered.
 
 - Page fetch has the built-in `local` engine as its zero-setup floor unless the user explicitly disabled it with `local.enabled false`, or forced a different engine with `-e`. It returns the page as served, with no summary and no focus narrowing, so pick out the relevant parts yourself. Very little text back means the page is JavaScript-rendered, which that engine does not run: it says so in `uncertainty`, so say the same rather than claiming the page is empty.
 - An X question answered by a web engine means Grok Build is not set up. That entry reads `status: "degraded"`, `requestedSource: "x"`, `source: "web"`, with the reason in `warnings`. Relay that caveat instead of presenting it as X coverage. On a `--source web,x` run where X is unreachable, the X slot comes back as a separate entry with `status: "unavailable"` and empty `items`, so the gap is explicit: report that X could not be reached rather than treating the web entry as if it covered X.
-- Quota cooldown failover is on by default. When an engine hits its quota, modsearch moves it to the back of the chain until it recovers and fails over to a healthy engine, noting who is cooling and until when in `warnings`. A cooling engine is never dropped, only tried last, so it still answers when everything else fails. `searchfuse state clear` forgets the cooldowns, `searchfuse config set cooldown off` disables the behavior, and `searchfuse doctor` shows what is cooling.
+- Quota cooldown failover is on by default. When an engine hits its quota, searchfuse moves it to the back of the chain until it recovers and fails over to a healthy engine, noting who is cooling and until when in `warnings`. A cooling engine is never dropped, only tried last, so it still answers when everything else fails. `searchfuse state clear` forgets the cooldowns, `searchfuse config set cooldown off` disables the behavior, and `searchfuse doctor` shows what is cooling.
 - Setup and key questions: follow `references/configure.md` and run the commands for the user.
 
 ## Workflow

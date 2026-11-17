@@ -12,7 +12,7 @@ takes searchfuse as a plugin, not a skill.
 The whole install is four steps:
 
 1. Find the skill directory for your harness.
-2. Put the `skills/modsearch` folder into it.
+2. Put the `skills/searchfuse` folder into it.
 3. Optionally add engines (search and fetch already work keyless out of the box).
 4. Verify with `doctor` and one real search.
 
@@ -21,7 +21,7 @@ The whole install is four steps:
 ## Step 0: DeepSeek Harness (dsh): install the plugin instead
 
 dsh already has a native `web_search` tool, wired to its own default search
-provider. A skill cannot replace that tool, so a modsearch skill in dsh mostly
+provider. A skill cannot replace that tool, so a searchfuse skill in dsh mostly
 goes unused. The plugin does replace it: it points `web_search` at the
 searchfuse engine chain and adds `x_search` and `read_page`. In dsh, install the
 plugin and skip Steps 1 to 4. Do not also install the skill.
@@ -123,19 +123,19 @@ not a system path.
 
 ---
 
-## Step 2: Put `skills/modsearch` into the skill directory
+## Step 2: Put `skills/searchfuse` into the skill directory
 
-The skill is the `skills/modsearch` folder in this repository: a `SKILL.md` and a
+The skill is the `skills/searchfuse` folder in this repository: a `SKILL.md` and a
 `references/` directory. Copy the whole folder into `TARGET`. There are two
 equivalent ways. Use path A unless the user asked for the skills CLI.
 
 ### Path A: clone and copy (no extra tooling)
 
 ```bash
-rm -rf /tmp/modsearch-src
-git clone --depth 1 https://github.com/Wenaixi/searchfuse.git /tmp/modsearch-src
-mkdir -p ~/.claude/skills/modsearch          # replace with your TARGET
-cp -R /tmp/modsearch-src/skills/searchfuse/. ~/.claude/skills/searchfuse/
+rm -rf /tmp/searchfuse-src
+git clone --depth 1 https://github.com/Wenaixi/searchfuse.git /tmp/searchfuse-src
+mkdir -p ~/.claude/skills/searchfuse          # replace with your TARGET
+cp -R /tmp/searchfuse-src/skills/searchfuse/. ~/.claude/skills/searchfuse/
 ```
 
 The copy overwrites any earlier install in place, so running it again just
@@ -163,14 +163,14 @@ npx -y skills add Wenaixi/searchfuse
 your harness's skill directory): fall back to Path A, which needs only git.
 
 > **Windows:** in PowerShell, replace the `cp -R` line with
-> `Copy-Item -Recurse -Force "$env:TEMP\modsearch-src\skills\modsearch\*" "$env:USERPROFILE\.claude\skills\modsearch\"`
-> and clone into `"$env:TEMP\modsearch-src"`.
+> `Copy-Item -Recurse -Force "$env:TEMP\searchfuse-src\skills\searchfuse\*" "$env:USERPROFILE\.claude\skills\searchfuse\"`
+> and clone into `"$env:TEMP\searchfuse-src"`.
 
 ---
 
 ## Step 3 (optional): Add more engines
 
-modsearch does three jobs, and none of them blocks on setup:
+searchfuse does three jobs, and none of them blocks on setup:
 
 - **Web search and page fetch (`-q`, `-u`) work as installed.** The default
   engine is Firecrawl's keyless tier: 1,000 free credits/month, no account, no
@@ -269,8 +269,8 @@ the pinned package; that is how those runners work.)
 bash ~/.claude/skills/searchfuse/scripts/run.sh doctor   # replace with your TARGET
 ```
 
-The launcher prints its runtime selection first (whether it chose a `modsearch`
-on PATH, `npx`, or `bunx`), then chains modsearch's own report below a
+The launcher prints its runtime selection first (whether it chose a `searchfuse`
+on PATH, `npx`, or `bunx`), then chains searchfuse's own report below a
 `--- searchfuse doctor ---` line. That report, on a healthy bare machine, looks
 like this (trimmed):
 
@@ -319,10 +319,10 @@ who answered and an `items` list with `url`s. That is a working install.
 
 **If it fails:**
 - The launcher printed a JSON diagnosis and exited 78 -> no runtime could run
-  modsearch: no compatible `modsearch` on PATH, no `npx`, and no `bunx`. Read the
+  searchfuse: no compatible `searchfuse` on PATH, no `npx`, and no `bunx`. Read the
   `nextSteps` field in that JSON and relay it. The manual path in phase A is to
   install Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh), then re-run
-  this step, since no native artifact is published yet. Do not report modsearch
+  this step, since no native artifact is published yet. Do not report searchfuse
   as broken.
 - `Every engine for the web source failed` -> the engines themselves errored at
   runtime (no network, a timeout, or spent quotas), not a setup gap: keyless

@@ -40,7 +40,7 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
   const apiKeySecrets = [...new Set([...apiKeys, ...(options.apiKeySecrets ?? [])])];
   if (!apiKey) {
     throw new Error(
-      'The exa provider needs an API key. Set EXA_API_KEY, or run: modsearch config set exa.apiKey <key> ($10/month recurring free credit, ~1,400 searches, no card at https://exa.ai)',
+      'The exa provider needs an API key. Set EXA_API_KEY, or run: searchfuse config set exa.apiKey <key> ($10/month recurring free credit, ~1,400 searches, no card at https://exa.ai)',
     );
   }
 
@@ -89,7 +89,7 @@ export async function executeExaSearch(options: EngineRequest): Promise<EngineOu
     }
     if (response.status === 401 || response.status === 403 || response.status === 429) {
       throw new ApiKeyFailureError(
-        `exa rejected the API key (${response.status}). Fix it: modsearch config set exa.apiKey <key>${detail ? ` (${detail})` : ''}`,
+        `exa rejected the API key (${response.status}). Fix it: searchfuse config set exa.apiKey <key>${detail ? ` (${detail})` : ''}`,
       );
     }
     throw new Error(

@@ -268,7 +268,7 @@ function isPrivateForCloudDisclosure(ipAddress: string): boolean {
 }
 
 const ALLOW_PRIVATE_NETWORK_HINT =
-  'allow it with --allow-private-network, or: modsearch config set allowPrivateNetwork true';
+  'allow it with --allow-private-network, or: searchfuse config set allowPrivateNetwork true';
 
 function privateNetworkBlockMessage(hostname: string, resolvedAddress?: string): string {
   const target = resolvedAddress ? `${hostname} -> ${resolvedAddress}` : hostname;

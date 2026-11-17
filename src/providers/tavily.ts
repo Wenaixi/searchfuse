@@ -40,7 +40,7 @@ export async function executeTavilySearch(options: EngineRequest): Promise<Engin
   const apiKeySecrets = [...new Set([...apiKeys, ...(options.apiKeySecrets ?? [])])];
   if (!apiKey) {
     throw new Error(
-      'The tavily provider needs an API key. Set TAVILY_API_KEY, or run: modsearch config set tavily.apiKey <key> (free tier: 1,000 credits/month at https://app.tavily.com)',
+      'The tavily provider needs an API key. Set TAVILY_API_KEY, or run: searchfuse config set tavily.apiKey <key> (free tier: 1,000 credits/month at https://app.tavily.com)',
     );
   }
 

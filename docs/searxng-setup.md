@@ -1,6 +1,6 @@
 # SearXNG 搭建
 
-SearXNG 是"我还想要 Google 的索引"这个需求的答案。modsearch 自己不去抓 Google、Bing 或百度：那些需要 TLS 指纹伪装和挑战求解器，而 SearXNG 维护的正是这一套。把 modsearch 指向一个实例，那个实例启用的每个引擎就都通过一个适配器进来。
+SearXNG 是"我还想要 Google 的索引"这个需求的答案。searchfuse 自己不去抓 Google、Bing 或百度：那些需要 TLS 指纹伪装和挑战求解器，而 SearXNG 维护的正是这一套。把 searchfuse 指向一个实例，那个实例启用的每个引擎就都通过一个适配器进来。
 
 ## 为什么需要一个实例
 
@@ -62,9 +62,9 @@ engines:
 | `duckduckgo` | `CAPTCHA` | |
 | `brave` | `too many requests` | |
 
-所以有产出的配置是 `google cse` 加上那些垂类引擎，而不是旗舰引擎。这是 SearXNG 自己的维护状况，不是 modsearch 能修好的。
+所以有产出的配置是 `google cse` 加上那些垂类引擎，而不是旗舰引擎。这是 SearXNG 自己的维护状况，不是 searchfuse 能修好的。
 
-## 接进 modsearch
+## 接进 searchfuse
 
 ```jsonc
 {
@@ -75,7 +75,7 @@ engines:
 }
 ```
 
-这里 `proxy: "direct"` 是对的：容器自己通过 `outgoing.proxies` 做代理，所以从 modsearch 到 `127.0.0.1:8888` 的这一跳不能走系统代理。
+这里 `proxy: "direct"` 是对的：容器自己通过 `outgoing.proxies` 做代理，所以从 searchfuse 到 `127.0.0.1:8888` 的这一跳不能走系统代理。
 
 `aggregate.deadlineMs` 需要从 8 秒的默认值往上调：一个 SearXNG 实例会向它自己那批引擎扇出，慢的那些要十秒以上。
 

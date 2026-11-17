@@ -1,12 +1,12 @@
-# modsearch 运行时参考
+# searchfuse 运行时参考
 
-skill 如何启动 `modsearch` CLI、钉在哪个版本、在什么都跑不了的机器上如何给出诊断。启动器 `scripts/run.sh`（macOS / Linux）和 `scripts/run.ps1`（Windows）实现下面的全部内容，除版本常量和各自的 shell 语法外必须逐字一致。
+skill 如何启动 `searchfuse` CLI、钉在哪个版本、在什么都跑不了的机器上如何给出诊断。启动器 `scripts/run.sh`（macOS / Linux）和 `scripts/run.ps1`（Windows）实现下面的全部内容，除版本常量和各自的 shell 语法外必须逐字一致。
 
 ## 钉住的版本
 
 - Pinned CLI version: 0.1.0
 - npm 包：`@wenaixi/searchfuse`
-- CLI 命令名：`modsearch`
+- CLI 命令名：`searchfuse`
 
 上面那行版本号和两个启动器内部的常量由 `scripts/release.mjs` 在发布时从 `package.json` 盖章写入，不要手改。三份副本与 `package.json` 一旦不一致，`scripts/stamp.test.mjs` 会让构建失败。那一行刻意保留英文写法：它是版本戳记脚本的锚点，不是给人读的散文。
 
@@ -14,8 +14,8 @@ skill 如何启动 `modsearch` CLI、钉在哪个版本、在什么都跑不了�
 
 每次调用按这个顺序找一条能跑 CLI 的路：
 
-1. **`PATH` 上已有兼容的 `modsearch`**，按名字直接跑。
-2. **有 `npx`，且 `node` 满足 CLI 的 22.13 下限**，跑 `npx --yes --package @wenaixi/searchfuse@<钉住版本> modsearch <args>`。骑在老 node 上的 npx 会被跳过：那条路已知会在运行时失败。
+1. **`PATH` 上已有兼容的 `searchfuse`**，按名字直接跑。
+2. **有 `npx`，且 `node` 满足 CLI 的 22.13 下限**，跑 `npx --yes --package @wenaixi/searchfuse@<钉住版本> searchfuse <args>`。骑在老 node 上的 npx 会被跳过：那条路已知会在运行时失败。
 3. **有 `bunx`**，跑 `bunx --bun @wenaixi/searchfuse@<钉住版本> <args>`。
 4. **原生产物**，留给 B 阶段。目前没有发布任何产物，这个分支报告 `nativeArtifact.available: false` 后继续往下走。
 5. **什么都没有**，打印结构化诊断并以 `78`（`EX_CONFIG`）退出。
@@ -24,7 +24,7 @@ skill 如何启动 `modsearch` CLI、钉在哪个版本、在什么都跑不了�
 
 ## 兼容规则
 
-`PATH` 上找到的 `modsearch` 只有在**与钉住版本同一主版本号，且不老于它**时才算兼容。同主版本让已装了匹配 CLI 的用户不被强制走一遍 `npx` 重新下载（设计里的「不回退」要求）。不老于则拒绝比这份 skill 编写时还旧的全局构建，那种情况下启动器跳过 `PATH`，改用钉住版本的 `npx` / `bunx`。
+`PATH` 上找到的 `searchfuse` 只有在**与钉住版本同一主版本号，且不老于它**时才算兼容。同主版本让已装了匹配 CLI 的用户不被强制走一遍 `npx` 重新下载（设计里的「不回退」要求）。不老于则拒绝比这份 skill 编写时还旧的全局构建，那种情况下启动器跳过 `PATH`，改用钉住版本的 `npx` / `bunx`。
 
 ## 缓存与权限（B 阶段，尚未启用）
 
@@ -32,7 +32,7 @@ A 阶段不发原生产物。`npx` 和 `bunx` 路径首次使用时拉取钉住�
 
 - macOS：`~/Library/Caches/Wenaixi/searchfuse/<version>/`
 - Linux：`${XDG_CACHE_HOME:-$HOME/.cache}/Wenaixi/searchfuse/<version>/`
-- Windows：`%LOCALAPPDATA%\liustack\modsearch\<version>\`
+- Windows：`%LOCALAPPDATA%\liustack\searchfuse\<version>\`
 
 约束是：不用 `sudo` 或管理员权限，不碰系统目录，不改 `PATH`，先下载到临时文件、校验 SHA-256 后原子移动，失败时不留任何未校验的可执行文件。下载一律用 `curl`（Windows 上写全 `curl.exe`），它不会打隔离标记（Mark-of-the-Web），启动器也从不摘除浏览器本会设置的安全标记。
 
@@ -42,7 +42,7 @@ A 阶段不发原生产物。`npx` 和 `bunx` 路径首次使用时拉取钉住�
 
 - `tool`、`package`、`pinnedVersion`：这份 skill 的目标。
 - `os`、`arch`：归一化的主机标识（`darwin` / `linux` / `windows`，`arm64` / `x64`）。
-- `checked.pathCli`：`PATH` 上 `modsearch` 的 `{ present, path, version, compatible }`，`compatible` 按上面的规则判定。
+- `checked.pathCli`：`PATH` 上 `searchfuse` 的 `{ present, path, version, compatible }`，`compatible` 按上面的规则判定。
 - `checked.npx`：`{ present, path, nodeMeetsFloor }`，`nodeMeetsFloor` 是本机 node 是否满足 CLI 的 22.13 下限，npx 路径的前提。
 - `checked.bunx`：`{ present, path }`。
 - `checked.node`：`{ present, version }`。
@@ -55,4 +55,4 @@ A 阶段不发原生产物。`npx` 和 `bunx` 路径首次使用时拉取钉住�
 
 ## 交付形态：长期保持本地 CLI
 
-modsearch 有意保持本地 CLI 形态，分发设计第 10 节（不需要本地执行的能力迁去远程 MCP）对它**不适用**。原因就是产品本身：搜索引擎的 key 握在用户机器上，消耗的额度是用户自己的，中间没有中心化服务。托管 MCP 会把这三样都从用户机器上挪走，与这个工具的初衷相反。D 阶段可能为将来某个工具退役原生产物，但只要这三条性质还成立，modsearch 就保持本地 CLI。
+searchfuse 有意保持本地 CLI 形态，分发设计第 10 节（不需要本地执行的能力迁去远程 MCP）对它**不适用**。原因就是产品本身：搜索引擎的 key 握在用户机器上，消耗的额度是用户自己的，中间没有中心化服务。托管 MCP 会把这三样都从用户机器上挪走，与这个工具的初衷相反。D 阶段可能为将来某个工具退役原生产物，但只要这三条性质还成立，searchfuse 就保持本地 CLI。

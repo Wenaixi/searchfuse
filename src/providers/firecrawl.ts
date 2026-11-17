@@ -128,15 +128,15 @@ function ensureOk(
       // 没用，所以告诉用户什么有用。
       if (/VPN or proxy/i.test(detail)) {
         throw new Error(
-          `firecrawl does not allow keyless use from a proxy or VPN exit IP. Set a free key: modsearch config set firecrawl.apiKey <key>, or use keenable or youcom. (${detail})`,
+          `firecrawl does not allow keyless use from a proxy or VPN exit IP. Set a free key: searchfuse config set firecrawl.apiKey <key>, or use keenable or youcom. (${detail})`,
         );
       }
       throw new Error(
-        `firecrawl rejected the keyless request (${response.status}). Anonymous access may be unavailable or rate-limited. Set your own key: modsearch config set firecrawl.apiKey <key>${detail ? ` (${detail})` : ''}`,
+        `firecrawl rejected the keyless request (${response.status}). Anonymous access may be unavailable or rate-limited. Set your own key: searchfuse config set firecrawl.apiKey <key>${detail ? ` (${detail})` : ''}`,
       );
     }
     throw new ApiKeyFailureError(
-      `firecrawl rejected the API key (${response.status}). Fix it: modsearch config set firecrawl.apiKey <key>${detail ? ` (${detail})` : ''}`,
+      `firecrawl rejected the API key (${response.status}). Fix it: searchfuse config set firecrawl.apiKey <key>${detail ? ` (${detail})` : ''}`,
     );
   }
   if (apiKey && response.status === 429) {

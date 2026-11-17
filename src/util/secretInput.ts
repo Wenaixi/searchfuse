@@ -1,9 +1,9 @@
 import * as readline from 'readline';
 
 /**
- * Read a secret without it touching argv. `modsearch config set x.apiKey`
+ * Read a secret without it touching argv. `searchfuse config set x.apiKey`
  * with no value lands here: on a terminal it prompts with the echo muted, and
- * on a pipe it reads the first line, so `pbpaste | modsearch config set
+ * on a pipe it reads the first line, so `pbpaste | searchfuse config set
  * x.apiKey` works too. Either way the key stays out of shell history and out
  * of the conversation with whatever agent is driving the terminal.
  *
