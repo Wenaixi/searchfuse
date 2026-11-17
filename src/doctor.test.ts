@@ -95,8 +95,8 @@ describe('doctor: search engines', () => {
     const fc = engine(report, 'search', 'firecrawl');
     expect(fc?.ready).toBe(true);
     expect(fc?.reason).toMatch(/keyless/i);
-    expect(engine(report, 'search', 'tavily')?.fix).toContain('modsearch config set tavily.apiKey');
-    expect(engine(report, 'search', 'exa')?.fix).toContain('modsearch config set exa.apiKey');
+    expect(engine(report, 'search', 'tavily')?.fix).toContain('searchfuse config set tavily.apiKey');
+    expect(engine(report, 'search', 'exa')?.fix).toContain('searchfuse config set exa.apiKey');
     expect(engine(report, 'search', 'antigravity-cli')?.fix).toContain('antigravity.google');
   });
 

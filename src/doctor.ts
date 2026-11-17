@@ -1,4 +1,4 @@
-// `modsearch doctor`：在本机诊断配置与路由，不消耗配额、不发起网络请求。
+// `searchfuse doctor`：在本机诊断配置与路由，不消耗配额、不发起网络请求。
 // 它只看 Node 版本、配置文件、环境变量、引擎二进制是否在 PATH 上、以及
 // Grok 登录文件是否存在。它报告的一切都是本地事实，所以在任何机器上、
 // 运行任意多次都是安全的。
@@ -234,7 +234,7 @@ function diagnoseEngine(
       reason: keySource
         ? apiKeyPresentReason(count, keySource)
         : 'no API key (not in TAVILY_API_KEY or the config file)',
-      ...(ready ? {} : { fix: 'modsearch config set tavily.apiKey <key>' }),
+      ...(ready ? {} : { fix: 'searchfuse config set tavily.apiKey <key>' }),
     };
   }
 
@@ -252,7 +252,7 @@ function diagnoseEngine(
       reason: keySource
         ? apiKeyPresentReason(count, keySource)
         : 'no API key (not in EXA_API_KEY or the config file)',
-      ...(ready ? {} : { fix: 'modsearch config set exa.apiKey <key>' }),
+      ...(ready ? {} : { fix: 'searchfuse config set exa.apiKey <key>' }),
     };
   }
 
@@ -315,9 +315,9 @@ function diagnoseEngine(
       reason: keySource
         ? apiKeyPresentReason(count, keySource)
         : keylessFetch
-          ? 'keyless fetch (default): public pages are read by a cloud browser, no key or signup needed. Opt out with: modsearch config set firecrawl.keylessFetch false'
+          ? 'keyless fetch (default): public pages are read by a cloud browser, no key or signup needed. Opt out with: searchfuse config set firecrawl.keylessFetch false'
           : 'keyless fetch is switched off (firecrawl.keylessFetch false), so Firecrawl is excluded from automatic page fetch.',
-      ...(ready ? {} : { fix: 'modsearch config set firecrawl.keylessFetch true' }),
+      ...(ready ? {} : { fix: 'searchfuse config set firecrawl.keylessFetch true' }),
     };
   }
 
@@ -595,7 +595,7 @@ function diagnoseMcp(config: ModsearchConfig): DoctorReport['mcp'] {
 
 /** 人类可读的报告。`--json` 则直接打印对象。 */
 export function formatDoctorReport(report: DoctorReport): string {
-  const lines: string[] = ['modsearch doctor', ''];
+  const lines: string[] = ['searchfuse doctor', ''];
 
   lines.push('Node');
   lines.push(`  version: ${report.node.version}`);

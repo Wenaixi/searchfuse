@@ -72,7 +72,7 @@ describe('CLI entry point', () => {
     await expect(import('./main.ts')).rejects.toThrow(/process\.exit\(1\)/);
     expect(exit).toHaveBeenCalledWith(1);
     expect(String(stderr.mock.calls.map((call) => call[0]).join(''))).toContain(
-      'modsearch refused to run: it was started from inside an engine that modsearch itself spawned (recursion guard).',
+      'searchfuse refused to run: it was started from inside an engine that searchfuse itself spawned (recursion guard).',
     );
   });
 });

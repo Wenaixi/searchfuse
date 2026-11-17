@@ -22,7 +22,7 @@ import { readSecret } from './util/secretInput.ts';
 
 if (process.env.MODSEARCH_NESTED) {
   process.stderr.write(
-    'modsearch refused to run: it was started from inside an engine that modsearch itself spawned (recursion guard). An engine such as Grok Build tried to call modsearch instead of using its own search tools.\n',
+    'searchfuse refused to run: it was started from inside an engine that searchfuse itself spawned (recursion guard). An engine such as Grok Build tried to call searchfuse instead of using its own search tools.\n',
   );
   process.exit(1);
 }
@@ -40,7 +40,7 @@ function writeFully(stream: NodeJS.WriteStream, text: string): Promise<void> {
 const program = new Command();
 
 program
-  .name('modsearch')
+  .name('searchfuse')
   .description(
     'Plug-in web search and page fetch for models without native web access: query or URL in, structured JSON evidence out',
   )
@@ -167,7 +167,7 @@ program
 
 const config = program
   .command('config')
-  .description(`Manage ${CONFIG_PATH}. Optional: modsearch runs without it.`);
+  .description(`Manage ${CONFIG_PATH}. Optional: searchfuse runs without it.`);
 
 config
   .command('init')
@@ -180,10 +180,10 @@ config
         [
           `Created ${CONFIG_PATH}`,
           'Everything is optional. Things you can set:',
-          '  modsearch config set engine <antigravity-cli|tavily|exa|firecrawl|keenable|youcom>   which engine searches',
-          '  modsearch config set <engine>.<apiKey|bin|model|baseURL|keylessFetch> <value>   engine settings',
-          '  modsearch config set cooldown <on|off>   quota cooldown failover (default on)',
-          '  modsearch config set allowPrivateNetwork <true|false>   reach reserved/private ranges (default false)',
+          '  searchfuse config set engine <antigravity-cli|tavily|exa|firecrawl|keenable|youcom>   which engine searches',
+          '  searchfuse config set <engine>.<apiKey|bin|model|baseURL|keylessFetch> <value>   engine settings',
+          '  searchfuse config set cooldown <on|off>   quota cooldown failover (default on)',
+          '  searchfuse config set allowPrivateNetwork <true|false>   reach reserved/private ranges (default false)',
           'Search, page fetch, and X need no settings at all: keyless Firecrawl works out of the box.',
           '',
         ].join('\n'),
@@ -197,7 +197,7 @@ config
 config
   .command('set <key> [value]')
   .description(
-    'Set a value, e.g. tavily.apiKey <key>, or search.engine tavily. Omit the value for an .apiKey to be prompted with the echo muted, so the key stays out of argv and shell history (a pipe works too: pbpaste | modsearch config set tavily.apiKey)',
+    'Set a value, e.g. tavily.apiKey <key>, or search.engine tavily. Omit the value for an .apiKey to be prompted with the echo muted, so the key stays out of argv and shell history (a pipe works too: pbpaste | searchfuse config set tavily.apiKey)',
   )
   .action(async (key: string, value: string | undefined) => {
     try {
@@ -205,7 +205,7 @@ config
         // 只有密钥可以交互式询问：其余字段都是普通配置，
         // 省略它的值属于值得点名的错误。
         if (!key.endsWith('.apiKey')) {
-          throw new Error(`${key} needs a value: modsearch config set ${key} <value>`);
+          throw new Error(`${key} needs a value: searchfuse config set ${key} <value>`);
         }
         // 在提示之前先校验引擎名：拼写错误必须在这里就失败，
         // 而不是等用户把密钥敲完以后（或者在管道上，等某人的标准输入
