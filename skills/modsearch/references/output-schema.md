@@ -1,9 +1,6 @@
-# ModSearch Output Schema
+# ModSearch 输出契约
 
-English | [简体中文](output-schema.zh-CN.md)
-
-The CLI prints one JSON object to stdout. The top-level envelope is the same for
-every run:
+CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样：
 
 ```json
 {
@@ -42,68 +39,45 @@ every run:
 }
 ```
 
-Key points:
+要点：
 
-- `results` is always an array, one entry per source, so the shape never changes
-  even for a single-source run.
-- `meta` carries only when the run finished and how long the whole run took.
-  Per-source timing, the engine, and the model live inside each `results` entry,
-  because a run can span more than one engine.
-- Routing facts (`source`, `engine`, `model`, `durationSeconds`) are stamped by
-  modsearch after the engine answers, so an engine cannot fake who served a
-  result.
+- `results` 永远是数组，每个语料一条，所以哪怕单语料运行，结构也不变。
+- `meta` 只记录整次运行何时完成、总共多久。每个语料的耗时、引擎、模型在各自的 `results` 条目里，因为一次运行可能跨多个引擎。
+- 路由事实（`source`、`engine`、`model`、`durationSeconds`）由 modsearch 在引擎作答后盖章写入，引擎伪造不了是谁答的。
 
-## The `results` entry
+## `results` 条目
 
-Every entry starts with the same routing fields, then flattens the engine's own
-result fields in beside them:
+每条都以相同的路由字段开头，然后把引擎自己的结果字段平铺在旁边：
 
-| Field | Meaning |
+| 字段 | 含义 |
 | :-- | :-- |
-| `source` | `web` or `x`, the corpus this entry's evidence actually came from |
-| `requestedSource` | `web` or `x`, the corpus that was asked for. Differs from `source` when the run degraded |
-| `engine` | which engine actually answered (`antigravity-cli`, `tavily`, `keenable`, `youcom`, `grok-cli`, `local`), or `null` when the source was unreachable |
-| `model` | the model used, where the engine has one (empty string when it does not) |
-| `status` | `ok`, `degraded`, or `unavailable` (see below) |
-| `warnings` | routing and runtime warnings for this source: a fallback, a degrade caveat, a config typo, the local engine's "no synthesis" and "private network allowed" notices. About how the answer was produced, not the facts in it. Always an array, often empty |
-| `attempts` | every request attempt for this source, in order: `{ engine, keyIndex?, ok, error?, durationSeconds, cost?, credits? }`. `keyIndex` is a zero-based index present only when that engine has multiple configured keys. Single-key and keyless attempts keep the previous shape without it. `ok: false` entries carry the failure `error`. An engine that reports spend adds `cost` (exa, US dollars) or `credits` (firecrawl). Both are optional and absent on engines that report neither. An engine skipped because the run's `--deadline` was already used up has `ok: false`, an `error` that says so, and `durationSeconds: null`. One `ok: true` entry at the end on a successful run |
-| `durationSeconds` | how long this one source took, or `null` when nothing ran |
+| `source` | `web` 或 `x`，这条证据实际来自的语料 |
+| `requestedSource` | `web` 或 `x`，被请求的语料。运行降级时与 `source` 不同 |
+| `engine` | 实际作答的引擎（`antigravity-cli`、`tavily`、`keenable`、`youcom`、`grok-cli`、`local`），语料不可达时为 `null` |
+| `model` | 使用的模型，引擎有模型时才有值（没有时是空字符串） |
+| `status` | `ok`、`degraded` 或 `unavailable`（见下文） |
+| `warnings` | 这个语料的路由与运行警告：一次回退、一条降级说明、一个配置笔误、本地引擎的「无综述」和「已放行私有网络」提示。说的是答案怎么产生的，不是答案里的事实。永远是数组，常为空 |
+| `attempts` | 这个语料按顺序发出的每次请求：`{ engine, keyIndex?, ok, error?, durationSeconds, cost?, credits? }`。同一引擎配置多个 key 时会带零基的 `keyIndex`。单 key 和免 key 请求维持原有结构，不出现该字段。`ok: false` 的条目带失败 `error`。会上报消耗的引擎会附 `cost`（exa，美元）或 `credits`（firecrawl）。两个字段都可选，不上报的引擎上没有。因运行的 `--deadline` 已用完而被跳过的引擎记为 `ok: false`，`error` 写明原因，`durationSeconds` 为 `null`。成功的运行末尾恰有一条 `ok: true` |
+| `durationSeconds` | 这一个语料花了多久，什么都没跑时为 `null` |
 
-The remaining fields depend on the mode.
+其余字段取决于模式。
 
-### `uncertainty` vs `warnings`
+### `uncertainty` 与 `warnings` 的区别
 
-Two separate lists, and the split matters when you relay a result:
+两个独立的列表，转述结果时这个区分很重要：
 
-- `uncertainty` is the engine's own epistemic doubt about the **facts**: a gap it
-  could not fill, sources that conflict, a figure that might be stale, a page
-  that came back too thin to trust. Surface these as caveats on the answer.
-  A suspected client-rendered shell signals missing content rather than an
-  empty page, even when `status` remains `ok`.
-- `warnings` is about **how the answer was produced**: an engine failed and
-  another stood in, an X request was served by the web, a config key was a typo,
-  a fetch followed redirects or ran with the private-network guard off. Surface
-  these when they change how much to trust the routing (a degrade especially),
-  not as doubt about the facts themselves.
+- `uncertainty` 是引擎对**事实本身**的存疑：填不上的空缺、互相矛盾的来源、可能过期的数字、薄得不可信的页面。转述时把它们作为答案的保留意见。
+- `warnings` 说的是**答案怎么产生的**：一个引擎挂了由另一个顶上、X 请求由网页作答、配置 key 是个笔误、一次抓取跟了重定向或关了私有网络防护。当它影响对路由的信任（尤其是降级）时要转述，但它不是对事实的怀疑。
 
-Older versions folded both into `uncertainty`. A consumer that parsed routing
-notes out of `uncertainty` should read `warnings` now.
+老版本把两者都塞在 `uncertainty` 里。曾从 `uncertainty` 里解析路由信息的消费者现在应改读 `warnings`。
 
-### `status` and degraded X answers
+### `status` 与降级的 X 答案
 
-`status` tells a consumer how well the entry served the source that was asked
-for:
+`status` 告诉消费者这条结果把请求的语料服务得怎么样：
 
-- `ok`: the requested corpus answered. `source` equals `requestedSource`.
-- `degraded`: a stand-in corpus answered. Only X degrades today: when Grok Build
-  is missing, signed out, or failing, a web engine answers the X request. The
-  entry then reads `requestedSource: "x"`, `source: "web"`, `status: "degraded"`,
-  and `warnings` explains that web data cannot see inside X. Do not present a
-  degraded entry as X coverage.
-- `unavailable`: nothing could serve the source. `engine` is `null`, `items` is
-  empty, `attempts` lists every engine that was tried or skipped (empty when
-  routing found no engine to try), `durationSeconds` is `null`, and `warnings` says why. This appears for the X slot of a `--source web,x` run when X is
-  unreachable, so the slot is explicit rather than silently missing:
+- `ok`：请求的语料作了答。`source` 等于 `requestedSource`。
+- `degraded`：替补语料作了答。目前只有 X 会降级：Grok Build 缺失、未登录或故障时，由网页引擎回答 X 请求。此时条目是 `requestedSource: "x"`、`source: "web"`、`status: "degraded"`，`warnings` 解释网页数据看不到 X 内部。不要把降级条目当成 X 的覆盖来呈现。
+- `unavailable`：没有任何东西能服务这个语料。`engine` 为 `null`，`items` 为空，`attempts` 列出试过或被跳过的每个引擎（路由一个可试的引擎都没找到时为空），`durationSeconds` 为 `null`，`warnings` 说明原因。`--source web,x` 运行中 X 不可达时，X 槽位就是这样显式存在，而不是无声消失：
 
 ```json
 {
@@ -122,15 +96,12 @@ for:
 }
 ```
 
-### Engine spend on an attempt
+### attempt 上的引擎消耗
 
-Engines that meter their usage report it on the attempt that ran, so a caller can
-track what a run cost. Both fields are optional: they appear only on the engine
-that reports them, and never on engines that report neither (agy, tavily,
-keenable, youcom, the local engine).
+计量自己用量的引擎会在实际运行的那条 attempt 上报告，调用方可以据此统计一次运行的成本。两个字段都可选：只出现在上报它们的引擎上，都不上报的引擎（agy、tavily、keenable、youcom、本地引擎）上永远没有。
 
-- `cost`: US dollars, from exa.
-- `credits`: firecrawl credits.
+- `cost`：美元，来自 exa。
+- `credits`：firecrawl 的 credits。
 
 ```json
 {
@@ -141,9 +112,9 @@ keenable, youcom, the local engine).
 }
 ```
 
-## Search mode (`-q`)
+## 搜索模式（`-q`）
 
-The engine result flattened into the entry:
+平铺进条目的引擎结果：
 
 ```json
 {
@@ -153,22 +124,20 @@ The engine result flattened into the entry:
       "title": "string",
       "url": "string",
       "snippet": "string",
-      "source": "string (optional)",
-      "published_at": "string (optional)"
+      "source": "string（可选）",
+      "published_at": "string（可选）"
     }
   ],
   "uncertainty": ["string"]
 }
 ```
 
-- `items` order carries relevance ranking. There is no numeric `relevance`
-  score: models fabricate them, and ordering already carries it.
-- Empty `items` with a populated `uncertainty` means the search found nothing
-  reliable.
+- `items` 的顺序就是相关性排序。没有数值型 `relevance` 分数：模型会编造它，顺序本身已经携带了相关性。
+- `items` 为空且 `uncertainty` 有内容，表示这次搜索没找到可靠的东西。
 
-## Fetch mode (`-u`)
+## 抓取模式（`-u`）
 
-`items` is replaced by `content` plus `links`:
+`items` 换成 `content` 加 `links`：
 
 ```json
 {
@@ -202,13 +171,10 @@ The engine result flattened into the entry:
 }
 ```
 
-- `content` is the page's main content as markdown (agy) or as served text (the
-  local engine, which runs no JavaScript and adds no synthesis).
-- `links` is the useful outbound links, at most 20. It can be empty.
+- `content` 是页面主体内容，agy 给 markdown，本地引擎给原样文本（它不跑 JavaScript，也不做综述）。
+- `links` 是有用的外链，至多 20 条，可以为空。
 
-## Notes
+## 备注
 
-- `query` and `url` mirror the request: exactly one is non-null.
-- The example envelopes above are checked against a real `RunSearchResult` by
-  `src/output-schema.test.ts`, so this document cannot drift from the code
-  without a test failing.
+- `query` 和 `url` 与请求对应：恰有一个非 null。
+- 上面的示例信封由 `src/output-schema.test.ts` 与真实的 `RunSearchResult` 对照校验，这份文档与代码脱节时测试会失败。

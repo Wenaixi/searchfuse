@@ -104,17 +104,14 @@ export function dshInstallTargets(root, pkgName) {
     target('INSTALL.md dsh install', 'INSTALL.md', '"$PROFILE"'),
     installConfigTarget,
     target('README.md dsh install', 'README.md', 'web'),
+    // README.zh-CN.md 是唯一保留双语的文档，所以它仍然有自己的版本号行。
     target('README.zh-CN.md dsh install', 'README.zh-CN.md', 'web'),
+    // 其余文档只剩中文版，主文件名就是它们自己。
     target('harness-setup.md dsh install', 'docs/harness-setup.md', 'web'),
     target('harness-setup.md dsh update', 'docs/harness-setup.md', '<name>'),
-    target('harness-setup.zh-CN.md dsh install', 'docs/harness-setup.zh-CN.md', 'web'),
-    target('harness-setup.zh-CN.md dsh update', 'docs/harness-setup.zh-CN.md', '<name>'),
     target('dsh.md install', 'docs/dsh.md', 'web'),
     doctorTarget('dsh.md doctor', 'docs/dsh.md'),
     target('dsh.md update', 'docs/dsh.md', '<name>'),
-    target('dsh.zh-CN.md install', 'docs/dsh.zh-CN.md', 'web'),
-    doctorTarget('dsh.zh-CN.md doctor', 'docs/dsh.zh-CN.md'),
-    target('dsh.zh-CN.md update', 'docs/dsh.zh-CN.md', '<name>'),
   ];
 }
 

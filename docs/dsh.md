@@ -1,80 +1,78 @@
 ---
-summary: 'DeepSeek Harness plugin: install, configure, verify, update, and troubleshoot modsearch'
+summary: 'DeepSeek Harness 插件：安装、配置、验证、更新与故障定位'
 read_when:
-  - Installing or updating modsearch in a dsh profile
-  - Configuring the dsh plugin switches or modsearch engines
-  - Verifying web_search, x_search, or read_page in dsh
-  - Checking compatibility after a dsh release
+  - 在 dsh profile 中安装或更新 modsearch
+  - 配置 dsh 插件开关或 modsearch 引擎
+  - 验证 dsh 中的 web_search、x_search 或 read_page
+  - dsh 发布新版本后检查兼容性
 ---
 
-# DeepSeek Harness plugin
+# DeepSeek Harness 插件
 
-English | [简体中文](dsh.zh-CN.md)
+ModSearch 是原生 dsh bundle。它保留 dsh 内置的 `web_search` 工具与引用卡片，只替换背后的搜索 provider，同时补上 dsh web 接缝没有的 `x_search` 和 `read_page`。
 
-ModSearch is a native dsh bundle. It keeps dsh's built-in `web_search` tool and citation cards, replaces only the search provider behind them, and adds `x_search` plus `read_page` for capabilities the dsh web seam does not expose.
+## 兼容性
 
-## Compatibility
+当前 bundle 已对照 `@deepseek-ai/dsh 0.1.7-alpha.1` 检查，设置卡片另外对照过 `0.1.5-rc.2`。这些版本保留了 ModSearch 用到的接口：
 
-The current bundle has been checked against `@deepseek-ai/dsh 0.1.7-alpha.1`, and its settings card against `0.1.5-rc.2` too. These releases keep the surfaces ModSearch uses:
+- npm bundle 仍通过 `dsh.bundle.patch` 声明配置层。
+- web 接缝仍通过 `ctx.web.registerSearchProvider(...)` 接收 provider。
+- 工具仍通过 `ctx.tools.register(...)` 注册。
+- bundle 可以显示自己的设置卡片。从 0.1.6-alpha.2 起，它通过 `plugins.bundle.config` 插槽出现在「插件」面板里该 bundle 的页面上。更早的版本通过 `settings.plugin.item` 把它放在设置页里。
 
-- npm bundles still declare `dsh.bundle.patch`.
-- The web seam still accepts `ctx.web.registerSearchProvider(...)`.
-- Tools still register through `ctx.tools.register(...)`.
-- A bundle can show its own settings card. From 0.1.6-alpha.2 on it goes on the bundle's page in the Plugins panel, through the `plugins.bundle.config` slot. Earlier releases show it in Settings, through `settings.plugin.item`.
-
-dsh is still a preview release, so check again after each dsh update. A quick composition check needs no model, API key, or quota:
+dsh 仍是预览版本，每次升级后都应重新检查。下面的组合检查不调用模型，不需要 API key，也不消耗额度：
 
 ```sh
 npx -y @deepseek-ai/dsh --version
 npx -y @deepseek-ai/dsh --profile web --dump-config
 ```
 
-The dump should contain both `searchProvider: modsearch` and a plugin row named `@liustack/modsearch`.
+输出中应同时出现 `searchProvider: modsearch` 和名为 `@liustack/modsearch` 的插件行。
 
-## Install
+## 安装
 
-Install into the profile you actually start. `web` is the normal browser UI profile:
+把插件装进实际启动的 profile。浏览器界面通常使用 `web`：
 
 ```sh
 npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@5.10.12
 ```
 
-Restart dsh after installation, then confirm the resolved package:
+安装后重启 dsh，再确认真正解析到的包：
 
 ```sh
 npx -y @deepseek-ai/dsh plugin --profile web list --depth 0
 ```
 
-The exact version is intentional. pnpm 11 can hold back very recent releases through `minimumReleaseAge`, which can make `@latest` resolve to an older package. The release process keeps the version in this command synchronized with `package.json`.
+这里故意写精确版本。pnpm 11 可能通过 `minimumReleaseAge` 扣住刚发布的版本，让 `@latest` 解析成旧包。发布流程会让本命令中的版本与 `package.json` 保持同步。
 
-The desktop app's `desktop` profile is installed only from its own window: the dsh CLI rejects it with `profile "desktop" is managed exclusively by the Electron application`. In the **Add plugin** dialog, enter the package name `@liustack/modsearch`, not the GitHub repository URL. Only the npm package ships the built CLI. A GitHub install brings source only, and pnpm blocks the build step that would fill in the gap.
+桌面版的 `desktop` profile 只能在桌面版窗口里装，dsh CLI 会以 `profile "desktop" is managed exclusively by the Electron application` 拒绝它。在「添加插件」对话框里，填包名 `@liustack/modsearch`，不要填 GitHub 仓库地址。只有 npm 包带构建好的 CLI。从 GitHub 安装只拿到源码，而 pnpm 会拦下补构建的那一步。
 
-## What the bundle changes
+## bundle 改了什么
 
-The bundle contributes two patch operations:
+bundle 贡献两条 patch：
 
-1. It sets the dsh web seam's `searchProvider` to `modsearch` and keeps the shipped `fetchProvider: http`, since the row replaces the host's whole web config.
-2. It mounts the package root as the `modsearch` plugin.
+1. 把 dsh web 接缝的 `searchProvider` 设为 `modsearch`，并保留自带的 `fetchProvider: http`（这一行会整体替换宿主的 web 配置）。
+2. 把包根入口挂载为 `modsearch` 插件。
 
-The plugin then exposes:
+插件随后提供：
 
-| Capability | dsh surface | Behavior |
+| 能力 | dsh 接口 | 行为 |
 | :-- | :-- | :-- |
-| Web search | Built-in `web_search` | Runs the ModSearch web engine chain and keeps native citation cards. |
-| X search | Added `x_search` tool | Uses Grok Build when available. A web substitute is labeled degraded. |
-| Focused page read | Added `read_page` tool | Reads one URL, optionally focused by a question. Private-network targets stay blocked. dsh's own `web_fetch` stays on for raw page text and status codes. |
+| 网页搜索 | 内置 `web_search` | 运行 ModSearch 网页引擎链，保留原生引用卡片。 |
+| X 搜索 | 新增 `x_search` 工具 | 有 Grok Build 时直接使用。网页替代结果会明确标成降级。 |
+| 带焦点读单页 | 新增 `read_page` 工具 | 读取一个 URL，可附问题聚焦。私网目标仍会拦截。dsh 自带的 `web_fetch` 照常保留，用于取原始正文和状态码。 |
 
-## Configure search engines
+## 配置搜索引擎
 
-The dsh plugin does not keep a second engine config. It inherits the same environment and reads the same `~/.modsearch/config.json` as the CLI and skill.
+dsh 插件不维护第二份引擎配置。它继承同一组环境变量，并读取 CLI 与 skill 共用的 `~/.modsearch/config.json`。
 
-Start with the offline health check:
+先跑离线体检：
 
 ```sh
 npx -y @liustack/modsearch@5.10.12 doctor
 ```
 
-Common settings:
+常用配置：
 
 ```sh
 modsearch config set engine antigravity-cli
@@ -86,38 +84,39 @@ modsearch config set firecrawl.keylessFetch false
 modsearch config set cooldown off
 ```
 
-No setting is required to start: search and page fetch run on Firecrawl's keyless free quota (1,000 free credits/month, no signup), and search falls back to Keenable's keyless pool (1,000 requests/hour per IP, no signup), then to You.com's keyless search (100 searches/day per IP, no signup). Keyless public-page fetch is on by default. It sends the requested URL to Firecrawl's cloud crawler, and the result warning names that route. `firecrawl.keylessFetch false` keeps automatic fetch local-only. Private and reserved targets are never sent to Firecrawl and fall through to the local fetcher.
+不做任何设置就能开跑：搜索和单页抓取默认运行在 Firecrawl 的免注册免费额度上（每月 1,000 免费 credits，无需注册），搜索还能退到 Keenable 的免注册额度（每个 IP 每小时 1,000 次，无需注册），再退到 You.com 的免注册搜索（每个 IP 每天 100 次，无需注册）。免注册公网抓取默认开启，它会把请求的 URL 交给 Firecrawl 的云端爬虫，结果中的 warning 会标明这条路径。`firecrawl.keylessFetch false` 可让自动抓取只走本地。私有或保留地址不会发给 Firecrawl，而会落到本地抓取器。
 
-See the [full engine configuration reference](../skills/modsearch/references/configure.md) and [security model](security.md).
+完整说明见[引擎配置手册](../skills/modsearch/references/configure.md)和[安全说明](security.md)。
 
-## Configure from the web UI
+## 在网页端配置
 
-The dsh web UI has no terminal, so the plugin brings its own settings card. On dsh 0.1.6-alpha.2 and later it sits on the plugin's page: open **Plugins** in the sidebar and pick `@liustack/modsearch`. Earlier dsh releases show it as a **Search engine (ModSearch)** card under Settings → Plugins → Plugin config. Either way it edits the same `~/.modsearch/config.json` as the CLI, through a route the plugin registers at `/modsearch/config`. That file belongs to your user account, not to a dsh profile, so every dsh profile on this machine and the CLI share one set of engine settings.
+dsh 网页端没有终端，所以插件自带一张设置卡片。dsh 0.1.6-alpha.2 及之后的版本里，它在插件自己的页面上：在侧栏点开「插件」，进入 `@liustack/modsearch`。更早的 dsh 版本把它显示为「设置 → 插件 → 插件配置」里的**搜索引擎（ModSearch）**卡片（dsh 自带的「网页搜索」卡片是 DeepSeek 自己的搜索提供方，两者不是一回事）。无论在哪，它改的都是 CLI 改的那份 `~/.modsearch/config.json`，走插件注册的路由 `/modsearch/config`。这份文件属于当前系统用户，不属于某个 dsh profile，所以本机所有 dsh profile 和 CLI 共用同一套引擎设置。
 
-The card holds three things:
+卡片管四件事：
 
-- The preferred engine: automatic, or one of `antigravity-cli`, `tavily`, `exa`, `firecrawl`, `keenable`, `youcom`, `grok-cli`. The `firecrawl`, `keenable`, and `youcom` options are labelled as the keyless free tier. `local` fetches single pages and searches nothing, so it is not offered, unless the config file already names it as `engine`, in which case it stays listed rather than let the card disagree with the file.
-- The selected engine's own settings: API key and base URL for the HTTP engines (`tavily`, `exa`, `firecrawl`, `keenable`), and the model for `antigravity-cli`. Engines that sign in through their own command-line tool, and the built-in fetcher, show a line saying they need neither. Selecting `firecrawl` or `keenable` with no key stored adds a line saying it runs on the keyless free tier by default. Selecting `youcom` shows a note instead of a key field, since it is keyless only.
-- The automatic engine chain: one checkbox per search engine `modsearch doctor` found ready on this machine. Checked means automatic routing may use it. Engines this machine cannot run are left out, since they are not a decision to make, and so is `local`, which fetches pages rather than searching. `grok-cli` carries an "X search only" note, since it serves the social role alone. When doctor's answer never arrives, every search engine is listed with a line saying the status is unknown. A successful save re-reads doctor, so an engine the save just made ready gets its checkbox straight away.
+- 首选引擎：自动，或 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`youcom`、`searxng`、`arxiv`、`grok-cli` 之一。`firecrawl`、`keenable` 和 `youcom` 三项标注「免注册免费」。`local` 只抓单页不搜索，所以不在这个列表里，除非配置文件当前就把它设成了 `engine`，那时它照常显示，免得界面与文件不一致。
+- 当前所选引擎自己的设置：HTTP 引擎（`tavily`、`exa`、`firecrawl`、`keenable`，以及 `searxng`——它的接口地址就是实例地址）显示 API 密钥与接口地址，`antigravity-cli` 显示模型，每个引擎都可以单独配一个代理。走自家命令行工具登录的引擎和内置抓取器只显示一行说明，因为它们两样都不需要。选中未配置密钥的 `firecrawl` 或 `keenable` 时会多一行说明，讲清它默认跑在免注册的免费额度上。选中 `youcom` 时不显示密钥框，改显示一行说明，因为它只有免注册这一种用法。
+- 自动引擎链：只列出 `modsearch doctor` 判定本机已就绪的搜索引擎，每个一个复选框，勾选表示允许自动路由使用它。本机跑不了的引擎不出现在这里，它们不是需要用户做的决定。`local` 是单页抓取，不参与搜索，所以也不在这排里。`grok-cli` 只服务 X 搜索，旁边标注「仅 X 搜索」。读不到 doctor 结果时会列出全部搜索引擎并说明状态未知。保存成功后卡片会重新问一次 doctor，刚配好密钥的引擎马上就能长出复选框。
+- 曝光矩阵：每个引擎一个四选一——融入 `web_search`、作为独立工具、两者兼得、或关闭，外加独立形态下用的工具名。默认是只融入，但 `antigravity-cli` 与 `arxiv` 默认关闭。卡片显示的是**生效状态**，所以一个因为从未被启用而关着的引擎，看起来不会和一个被手动关掉的引擎一样。
 
-Every engine is checked by default. Unchecking one writes only `enabled: false`. Checking it again deletes that override instead of storing a redundant `true`. Unchecking the current preference returns the preference to automatic. The card only edits engines it lists: the `enabled` of an engine with no checkbox (one this machine cannot run, and `local`) is copied through untouched, and `modsearch config set <engine>.enabled` is the only way to change it. When no engine is ready here, the row of checkboxes is replaced by a line reading "No engine is ready on this machine yet."
+每个引擎默认都勾选，但插件主动留着不启用的两个除外：`antigravity-cli` 与 `arxiv`。卡片把它们的关闭状态连同理由一起显示出来，而不是假装它们是开着的。取消勾选只写入 `enabled: false`，重新勾选会删除这项覆盖，不保存多余的 `true`。取消当前首选引擎时，首选项会回到自动。卡片只改自己列出来的引擎：没有复选框的引擎（本机跑不了的，以及 `local`）的 `enabled` 一律原样带过，改它们只能用 `modsearch config set <engine>.enabled`。本机一个就绪引擎都没有时，这排复选框换成一行提示，说明本机暂无就绪的引擎。
 
-Official Tavily, Exa, Firecrawl, and Keenable endpoints live in the provider code. The base URL field is an override only. Leaving it blank or clearing it uses the built-in official address and writes no default URL into the config file.
+Tavily、Exa、Firecrawl、Keenable 的官方接口地址内置在 provider 代码里。界面的接口地址只表示覆盖值。留空或清空都会使用内置官方地址，不会把默认 URL 写进配置文件。
 
-Everything else stays CLI only, including `bin`, `allowPrivateNetwork`, `cooldown` and `keylessFetch`. A card save copies them through untouched, and cannot create them.
+其余设置仍然只走 CLI，包括 `bin`、`allowPrivateNetwork`、`cooldown` 和 `keylessFetch`。卡片保存时会原样带过这些字段，也无法新建它们。
 
-Key handling:
+密钥的处理：
 
-- The browser is never sent a stored key, only whether one exists. Leaving the key box empty keeps the stored key.
-- Enter multiple keys as one comma-separated value. ModSearch tries them in order and rotates after authentication, rate-limit, or quota failures. Other failures continue through the engine fallback chain without trying every key.
-- A key from an environment variable still wins over the file at run time, and the card says so instead of pretending a save changed the answer.
-- The plugin does not restrict Host, Origin, or Fetch Metadata headers, so domain-based and LAN deployments can read and save settings. Deployment authentication must cover `/modsearch/config` as well as dsh itself. This raw plugin route does not automatically inherit dsh Connection authentication.
-- The file is rewritten as a fresh `0600` file renamed into place, the same way the CLI writes it.
-- The route exists only while the plugin is on. Switching the bundle off on the Plugins page takes it down, and switching it back on serves it again without a restart.
+- 浏览器拿不到已保存的密钥，只知道有没有。密钥框留空保存，原密钥保持不变。
+- 多个密钥写在同一个输入框中，用英文逗号分隔。ModSearch 会按顺序尝试，鉴权、限流或配额失败时自动轮换。其他失败不会逐个尝试所有密钥，而是继续走引擎后备链。
+- 环境变量里的密钥在运行时仍然优先于配置文件，卡片会直说这一点，而不是让人以为保存改变了结果。
+- 插件不限制 Host、Origin 或 Fetch Metadata 请求头，域名反代和局域网部署都可以读取、保存设置。部署时，认证必须同时覆盖 `/modsearch/config` 和 dsh 本身。这个直接注册的插件路由不会自动继承 dsh Connection 的登录认证。
+- 写盘方式与 CLI 一致：先写一个新的 0600 临时文件，再重命名覆盖。
+- 这个路由只在插件开启时存在。在「插件」页关掉 bundle 会把它一起撤下，重新打开后不用重启就会恢复。
 
-## Configure the dsh plugin
+## 配置 dsh 插件
 
-Plugin switches live in the profile patch, normally `~/.dsh/profiles/<name>/cordis.patch.yml`. A later profile patch overrides the bundle row:
+插件开关写在 profile patch 中，通常是 `~/.dsh/profiles/<name>/cordis.patch.yml`。后应用的 profile patch 会覆盖 bundle 行：
 
 ```yaml
 - id: modsearch
@@ -130,18 +129,18 @@ Plugin switches live in the profile patch, normally `~/.dsh/profiles/<name>/cord
     providerDeadlineMs: 55000
 ```
 
-All fields are optional:
+所有字段都可省略：
 
-| Field | Default | Effect |
+| 字段 | 默认值 | 作用 |
 | :-- | :-- | :-- |
-| `searchProvider` | `true` | Register ModSearch with the dsh web seam. |
-| `xSearch` | `true` | Register `x_search`. |
-| `readPage` | `true` | Register `read_page`. |
-| `settingsCard` | `true` | Serve the settings card and its `/modsearch/config` route. Off removes both, and the browser half stands down. |
-| `providerTimeoutMs` | `40000` | Time one engine may take on the `web_search` provider path (the CLI's `--timeout`). Keep it well below `providerDeadlineMs` so a fallback engine still gets a turn. |
-| `providerDeadlineMs` | `55000` | Time the whole `web_search` run may take, every engine included (the CLI's `--deadline`). Keep it below dsh's tool budget, 60s for the shipped search route. |
+| `searchProvider` | `true` | 向 dsh web 接缝注册 ModSearch。 |
+| `xSearch` | `true` | 注册 `x_search`。 |
+| `readPage` | `true` | 注册 `read_page`。 |
+| `settingsCard` | `true` | 提供设置卡片与 `/modsearch/config` 路由。关掉后两者都不注册，浏览器那半边也随之停手。 |
+| `providerTimeoutMs` | `40000` | `web_search` provider 路径上单个引擎最多用多久（即 CLI 的 `--timeout`）。要明显小于 `providerDeadlineMs`，备用引擎才轮得到。 |
+| `providerDeadlineMs` | `55000` | `web_search` 整次运行最多用多久，所有引擎合计（即 CLI 的 `--deadline`）。应小于 dsh 的工具预算，自带搜索路由是 60 秒。 |
 
-Disabling only `x_search` or `read_page` is safe. If `searchProvider` is disabled, also point the web seam at another registered provider. Otherwise dsh is still configured to select `modsearch`, but the provider is absent:
+只关闭 `x_search` 或 `read_page` 不会影响别的能力。关闭 `searchProvider` 时还要把 web 接缝指向另一个已注册 provider。否则 dsh 仍被配置成选择 `modsearch`，但对应 provider 已不存在：
 
 ```yaml
 - id: web
@@ -154,50 +153,50 @@ Disabling only `x_search` or `read_page` is safe. If `searchProvider` is disable
     searchProvider: false
 ```
 
-Run `--dump-config` after editing a patch. dsh patch rows replace the target row's whole `config`, so include every value you need on that row.
+修改 patch 后运行 `--dump-config`。dsh patch 行会整体替换目标行的 `config`，所以同一行需要保留的值必须全部重写。
 
-## Verify at runtime
+## 运行时验证
 
-Start the profile with dsh's documented launcher:
+按 dsh 的标准入口启动 profile：
 
 ```sh
 npx -y @deepseek-ai/dsh --profile web
 ```
 
-Use three small prompts:
+依次使用三个小问题：
 
-1. `Search the web for the current Node.js LTS release and cite the sources.`
-2. `Search X for recent posts from @deepseek_ai.`
-3. `Read https://example.com and summarize the page.`
+1. `搜索当前 Node.js LTS 版本并引用来源。`
+2. `搜索 X 上 @deepseek_ai 最近的帖子。`
+3. `读取 https://example.com 并总结页面。`
 
-The first call should use dsh's native `web_search` card. The other two should appear as `x_search` and `read_page`. Run `modsearch doctor` if a tool exists but its engine fails.
+第一个调用应使用 dsh 原生 `web_search` 卡片。后两个应分别显示为 `x_search` 和 `read_page`。工具存在但引擎失败时，运行 `modsearch doctor`。
 
-## Update or remove
+## 更新与卸载
 
-Refresh the recorded request with the exact current version:
+用当前精确版本刷新 profile 中记录的请求：
 
 ```sh
 npx -y @deepseek-ai/dsh plugin --profile <name> add @liustack/modsearch@5.10.12
 ```
 
-Remove it with:
+卸载命令：
 
 ```sh
 npx -y @deepseek-ai/dsh plugin --profile <name> remove @liustack/modsearch
 ```
 
-If a user patch still names `searchProvider: modsearch`, change or remove that override after uninstalling.
+如果用户 patch 仍写着 `searchProvider: modsearch`，卸载后要修改或删除该覆盖。
 
-## Troubleshooting
+## 故障定位
 
-- `declares no dsh.bundle`: an older ModSearch release landed. Reinstall the exact version shown above.
-- `modsearch's CLI build is missing`, or `Cannot find module .../dist/main.js` on 5.10.6 and older: the plugin was installed from the GitHub repository, which ships no build. Remove it and add it again by package name, `@liustack/modsearch`.
-- `web seam has no registerSearchProvider`: dsh moved a developer-preview interface. `x_search` and `read_page` still register, while web search is skipped with a visible log message. Check the latest dsh release before changing the plugin.
-- `modsearch failed (exit ...)`: run `modsearch doctor`. The error includes the engine attempts made by the CLI.
-- The package appears in `plugin list` but not `--dump-config`: verify it appears in `dsh.profile.bundles` inside `~/.dsh/profiles/<name>/package.json`.
-- Electron opens another app process instead of running the CLI: use ModSearch 5.4.3 or newer. The plugin sets `ELECTRON_RUN_AS_NODE=1` for its child process.
-- `settings namespace skipped: TypeError: scope.settings.register is not a function`: ModSearch 5.10.3 or older on dsh 0.1.7 or newer. Search and both tools keep working, but the settings card is missing. Update ModSearch to 5.10.4 or newer.
-- No ModSearch settings on the plugin's page: dsh 0.1.6-alpha.2 moved plugin settings there, and ModSearch 5.10.3 or older only offers its card to the old Settings slot. Update ModSearch to 5.10.4 or newer. With `settingsCard: false` the card is off on purpose.
-- `settings card route skipped: Error: webserver: duplicate exact route "/modsearch/config"`: ModSearch 5.10.3 or older left its route behind when the plugin was switched off on the Plugins page. Restart dsh, or update ModSearch to 5.10.4 or newer.
+- `declares no dsh.bundle`：装到了旧版 ModSearch。按上方精确版本重新安装。
+- `modsearch's CLI build is missing`，或 5.10.6 及更早版本报 `Cannot find module .../dist/main.js`：插件是从 GitHub 仓库装的，没有构建产物。卸载后按包名 `@liustack/modsearch` 重新添加。
+- `web seam has no registerSearchProvider`：dsh 移动了开发预览接口。`x_search` 与 `read_page` 仍会注册，网页搜索则跳过并打印明确日志。修改插件前先检查最新 dsh release。
+- `modsearch failed (exit ...)`：运行 `modsearch doctor`。错误会保留 CLI 尝试过的引擎。
+- `plugin list` 有包但 `--dump-config` 没有：检查 `~/.dsh/profiles/<name>/package.json` 的 `dsh.profile.bundles` 中是否存在该包。
+- Electron 又打开一个应用进程，没有运行 CLI：使用 ModSearch 5.4.3 或更高版本。插件会给子进程设置 `ELECTRON_RUN_AS_NODE=1`。
+- `settings namespace skipped: TypeError: scope.settings.register is not a function`：在 dsh 0.1.7 或更新版本上用了 ModSearch 5.10.3 或更旧版本。搜索和两个工具照常可用，只是设置卡片缺失。升级到 ModSearch 5.10.4 或更高版本。
+- 插件页上看不到 ModSearch 的设置：dsh 0.1.6-alpha.2 把插件设置搬到了插件页，而 ModSearch 5.10.3 及更旧版本只把卡片交给旧的设置页插槽。升级到 ModSearch 5.10.4 或更高版本。如果配置了 `settingsCard: false`，卡片是被有意关掉的。
+- `settings card route skipped: Error: webserver: duplicate exact route "/modsearch/config"`：ModSearch 5.10.3 或更旧版本在「插件」页关掉插件时没有撤下路由。重启 dsh，或升级到 ModSearch 5.10.4 或更高版本。
 
-For errors emitted by the CLI itself, use [Troubleshooting](troubleshooting.md).
+CLI 自身的错误见[故障排查](troubleshooting.md)。

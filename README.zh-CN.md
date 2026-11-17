@@ -8,14 +8,14 @@
 
 <p align="center">🥇 <b>全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件</b> 🥇</p>
 
-<p align="center">引擎：<b>Firecrawl</b>（免注册，默认）· <b>Keenable</b>（免注册）· <b>You.com</b>（免注册）· <b>Antigravity CLI</b> · <b>Tavily</b> · <b>Exa</b> · <b>Grok（X）</b> · <b>local</b>，自动故障转移</p>
+<p align="center">引擎：<b>Firecrawl</b>（免注册，默认）· <b>Keenable</b>（免注册）· <b>You.com</b>（免注册）· <b>SearXNG</b>（自建）· <b>Tavily</b> · <b>Exa</b> · <b>arXiv</b> · <b>Antigravity CLI</b> · <b>Grok（X）</b> · <b>local</b>，默认融合</p>
 
 <p align="center">
   <a href="./README.md">English</a> ·
-  <a href="docs/troubleshooting.zh-CN.md">故障排查</a> ·
-  <a href="skills/modsearch/references/configure.zh-CN.md">配置</a> ·
-  <a href="skills/modsearch/references/output-schema.zh-CN.md">输出契约</a> ·
-  <a href="docs/security.zh-CN.md">安全</a> ·
+  <a href="docs/troubleshooting.md">故障排查</a> ·
+  <a href="skills/modsearch/references/configure.md">配置</a> ·
+  <a href="skills/modsearch/references/output-schema.md">输出契约</a> ·
+  <a href="docs/security.md">安全</a> ·
   <a href="https://github.com/liustack/modlens">ModLens（视觉）</a>
 </p>
 
@@ -36,10 +36,13 @@ DeepSeek 和 GLM 等模型没有联网能力或联网能力羸弱。ModSearch �
 
 ## 特性
 
-- **🥇 全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件：** 一条命令即刻安装 `npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@5.10.12`。桌面版「添加插件」里填 `@liustack/modsearch`，不要填 GitHub 地址。细节见[接入指南](docs/harness-setup.zh-CN.md#deepseek-harness-dsh)。
+- **🥇 全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件：** 一条命令即刻安装 `npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@5.10.12`。桌面版「添加插件」里填 `@liustack/modsearch`，不要填 GitHub 地址。细节见[接入指南](docs/harness-setup.md#deepseek-harness-dsh)。
 - **开箱免费，免注册。** 搜索和单页抓取默认跑在 Firecrawl 免注册通道上：[每月 1,000 免费 credits](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)，没有账号、没有 API key、没有绑卡。后备通道也全部免费：Antigravity CLI 只需浏览器登录，Tavily、Exa 和免费的 Firecrawl key 各带独立的月度额度，均不要求绑卡。
-- **自动故障转移。** 一个通道失败或额度耗尽时自动切换下一个。
+- **融合搜索，不是故障转移。** 默认情况下 `web_search` 同时询问每个可达引擎，用倒数排名融合合并它们的排序列表，于是答案反映多个索引；两个引擎都认可的页面，排在只有一个引擎喜欢的页面之前。想要旧的串行行为就设 `aggregate.mode chain`。
+- **自动故障转移。** 一个通道失败或额度耗尽时自动切换下一个。融合模式下，一个引擎报错只损失它自己那份贡献，答案其余部分照常成立，失败原因写进 `uncertainty`。
 - **单引擎多密钥轮换。** Tavily、Exa、Firecrawl、Keenable 都可配置逗号分隔的多个密钥。鉴权、限流或配额失败时先轮换到下一个密钥，再按引擎链故障转移。
+- **每个引擎各有缰绳。** 每个引擎可以独立地选择：参与融合、作为独立工具供模型点名调用、两者兼得、或关闭。每个引擎还可以单独配代理，让其中一个离开本机代理而其余照旧。
+- **MCP 服务端变成工具。** 把插件指向任意 Streamable HTTP MCP 服务端，它的工具就以 `mcp__<server>__<tool>` 出现，不需要另装插件。连接是并发建立的，连不上的服务端只损失它自己的工具。
 - **可搜索 X（推特）。** 安装 Grok Build 后，可检索网页索引覆盖不到的 X 内容。
 - **一次安装，多端可用。** 支持 Claude Code、Codex、Pi、OpenCode。
 
@@ -72,13 +75,15 @@ Firecrawl、Keenable 和 You.com 零配置直接可用，其余引擎各一条�
 | Firecrawl（默认） | 网页搜索 + 单页抓取 | 免注册每月 1,000 免费 credits。注册免费 key 再得独享的每月 1,000 | 无需任何操作，装完即用 |
 | Keenable | 网页搜索 | 免注册每小时 1,000 次（按 IP 计，同一 IP 上所有人共用）。注册免费 key 得独享的每月 100,000 次 | 无需任何操作，装完即用 |
 | You.com | 网页搜索 | 免注册每天 100 次（按 IP 计，同一 IP 上所有人共用） | 无需任何操作，装完即用 |
-| Antigravity CLI | 网页搜索 + 单页抓取 | 免费，浏览器登录 | 安装 `agy` 并登录 |
+| SearXNG | 网页搜索（它自己那 70+ 上游引擎，全部经一个适配器） | 免费，自建 | 先跑起实例，再 `modsearch config set searxng.baseURL <url>` |
 | Tavily | 网页搜索 | 每月 1,000 credits，不绑卡 | `modsearch config set tavily.apiKey <key>` |
 | Exa | 网页搜索 | 每月 $10 循环额度（约 1,400 次），不绑卡 | `modsearch config set exa.apiKey <key>` |
+| arXiv | 网页搜索（文献） | 免费，无需 key | 默认关闭：`modsearch config set engines.arxiv.enabled true` |
+| Antigravity CLI | 网页搜索 + 单页抓取 | 免费，浏览器登录 | 默认关闭：安装 `agy` 并登录，再 `modsearch config set engines.antigravity-cli.enabled true` |
 | Grok Build | X（推特）搜索 | 随 SuperGrok 或 X Premium 订阅 | 安装 `grok` 并登录 |
 | local | 单页抓取 | 内置，零安装 | 无需任何操作 |
 
-key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎就自动故障转移，好的优先。每个引擎默认都参与，可以用 `modsearch config set tavily.enabled false` 排除一个。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`modsearch config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/modsearch/references/configure.zh-CN.md)。
+key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎时它们会一起跑并融合结果。每个引擎默认都参与，但 `antigravity-cli` 与 `arxiv` 例外——它们要你用 `modsearch config set engines.<name>.enabled true` 打开才生效，前者慢到超出融合预算，后者按任意词命中检索。任何引擎都可以用 `modsearch config set <engine>.enabled false` 排除。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`modsearch config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/modsearch/references/configure.md)。
 
 ## 安装
 
@@ -116,16 +121,16 @@ dsh 用户还有一条不碰命令行的路。在 dsh 侧栏点开「插件」�
 | 文档                                                     | 适用场景                                    |
 | :------------------------------------------------------- | :------------------------------------------ |
 | [INSTALL.md](INSTALL.md)                                 | 一步步安装 skill（为 agent 编写）           |
-| [CLI 手册](skills/modsearch/references/cli.zh-CN.md)           | skill 所驱动的 CLI：参数、配置与体检        |
-| [故障排查](docs/troubleshooting.zh-CN.md)                      | 命令报错，查成因和解法                      |
-| [配置手册](skills/modsearch/references/configure.zh-CN.md)     | 配置 key、切换引擎、排查配置                |
-| [输出契约](skills/modsearch/references/output-schema.zh-CN.md) | 解析 JSON 或构建下游工具                    |
-| [dsh 插件](docs/dsh.zh-CN.md)                                | 安装、配置、验证与更新原生 dsh bundle       |
-| [宿主接入](docs/harness-setup.zh-CN.md)                        | 在 Codex、Claude Code、OpenCode、Pi 中配置  |
-| [安全说明](docs/security.zh-CN.md)                             | SSRF 防护、DNS 重绑定防护、不可信输入的处理 |
+| [CLI 手册](skills/modsearch/references/cli.md)           | skill 所驱动的 CLI：参数、配置与体检        |
+| [故障排查](docs/troubleshooting.md)                      | 命令报错，查成因和解法                      |
+| [配置手册](skills/modsearch/references/configure.md)     | 配置 key、切换引擎、排查配置                |
+| [输出契约](skills/modsearch/references/output-schema.md) | 解析 JSON 或构建下游工具                    |
+| [dsh 插件](docs/dsh.md)                                | 安装、配置、验证与更新原生 dsh bundle       |
+| [宿主接入](docs/harness-setup.md)                        | 在 Codex、Claude Code、OpenCode、Pi 中配置  |
+| [安全说明](docs/security.md)                             | SSRF 防护、DNS 重绑定防护、不可信输入的处理 |
 | [更新日志](CHANGELOG.md)                                 | 查询版本变更                                |
 
-Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：DNS 返回的 `198.18.0.0/15` 地址会被视为 fake-ip 占位值，不用开任何开关。URL 中直写的 `http://198.18.0.5/` 这类地址在 `allowPrivateNetwork` 关闭时仍会被拦。VPN 用的其它保留段，或 Steam++ / Watt Toolkit 这类 hosts 文件加速器，见[私有网络目标被拦](docs/troubleshooting.zh-CN.md#私有网络目标被拦)。
+Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：DNS 返回的 `198.18.0.0/15` 地址会被视为 fake-ip 占位值，不用开任何开关。URL 中直写的 `http://198.18.0.5/` 这类地址在 `allowPrivateNetwork` 关闭时仍会被拦。VPN 用的其它保留段，或 Steam++ / Watt Toolkit 这类 hosts 文件加速器，见[私有网络目标被拦](docs/troubleshooting.md#私有网络目标被拦)。
 
 ## 参与方式
 

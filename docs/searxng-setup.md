@@ -1,18 +1,12 @@
-# SearXNG setup
+# SearXNG 搭建
 
-SearXNG is the answer to "I want Google's index too". modsearch does not scrape
-Google, Bing or Baidu itself: those need TLS fingerprint impersonation and
-challenge solvers, and SearXNG maintains exactly that. Point modsearch at an
-instance and every engine the instance enables arrives through one adapter.
+SearXNG 是"我还想要 Google 的索引"这个需求的答案。modsearch 自己不去抓 Google、Bing 或百度：那些需要 TLS 指纹伪装和挑战求解器，而 SearXNG 维护的正是这一套。把 modsearch 指向一个实例，那个实例启用的每个引擎就都通过一个适配器进来。
 
-## Why an instance is needed
+## 为什么需要一个实例
 
-A public SearXNG instance almost always answers 403 to `format=json`, because
-the JSON API is off in its `settings.yml`. There is therefore no default host:
-`engines.searxng.baseURL` must be set, and without it the engine reports
-"not ready" rather than failing at search time.
+公开的 SearXNG 实例几乎总是对 `format=json` 返回 403，因为 JSON API 在它的 `settings.yml` 里是关的。所以没有默认主机：必须设 `engines.searxng.baseURL`，不设的话这个引擎报"未就绪"，而不是等到搜索时才失败。
 
-## Starting one
+## 起一个
 
 ```bash
 mkdir -p searxng-config
@@ -23,17 +17,11 @@ docker run -d --name searxng-local --restart unless-stopped \
   searxng/searxng:latest
 ```
 
-Three things trip people up on Windows:
+Windows 上有三件事会绊人：
 
-1. **Path conversion.** Git Bash rewrites `/etc/searxng` into
-   `D:/Program Files/Git/etc/searxng` before Docker sees it, so the mount
-   silently lands nowhere and the container runs on its built-in defaults.
-   Prefix the command with `MSYS_NO_PATHCONV=1` and use a Windows-style source.
-2. **Image source.** `docker.1ms.run` resolves to a CDN host this machine cannot
-   reach; `docker.m.daocloud.io` works.
-3. **Verifying the mount.** `docker exec <name> grep formats /etc/searxng/settings.yml`
-   must show `- json`. The stock file opens with "Read the documentation before
-   extending the defaults"; if that is what you see, the mount missed.
+1. **路径转换。** Git Bash 会在 Docker 看到之前把 `/etc/searxng` 改写成 `D:/Program Files/Git/etc/searxng`，于是挂载悄悄落到空处，容器跑的是它内置的默认配置。在命令前加 `MSYS_NO_PATHCONV=1`，并用 Windows 风格的源路径。
+2. **镜像源。** `docker.1ms.run` 解析到一个本机连不上的 CDN 主机；`docker.m.daocloud.io` 可用。
+3. **验证挂载。** `docker exec <name> grep formats /etc/searxng/settings.yml` 必须显示出 `- json`。仓库自带的文件以"Read the documentation before extending the defaults"开头；如果你看到的是这句，说明挂载没挂上。
 
 ## settings.yml
 
@@ -44,17 +32,17 @@ server:
   secret_key: "change-me"
   bind_address: "0.0.0.0"
   port: 8080
-  limiter: false          # a local single-user instance has nothing to rate limit
+  limiter: false          # 本地单用户实例没有东西需要限流
 
 search:
   formats:
     - html
-    - json                # without this the API answers 403
+    - json                # 少了这一条，API 会返回 403
 
 outgoing:
-  request_timeout: 20.0   # Brave measured 10.3s through a proxy; 3s cuts it off
+  request_timeout: 20.0   # 走代理时 Brave 实测 10.3 秒；3 秒的默认值会把它掐断
   max_request_timeout: 30.0
-  proxies:                # curl_cffi ignores HTTP_PROXY; this is its own knob
+  proxies:                # curl_cffi 不认 HTTP_PROXY；这是它自己的开关
     all://:
       - http://host.docker.internal:10801
 
@@ -63,22 +51,20 @@ engines:
     disabled: false
 ```
 
-## What actually answers, measured here
+## 实际能应答的引擎（本机实测）
 
-| Engine | Through the proxy | Note |
+| 引擎 | 走代理的结果 | 说明 |
 |---|---|---|
-| `google cse` | 20 results | The reliable Google path; the plain `google` engine returns 403 |
-| `bing news` | 20 results | Plain `bing` returns 0 — its HTML parser yields nothing |
-| `wikipedia` | 20 results | |
-| `google` | `access denied` | Anti-scraping |
+| `google cse` | 20 条结果 | 可靠的 Google 通路；朴素的 `google` 引擎返回 403 |
+| `bing news` | 20 条结果 | 朴素的 `bing` 返回 0 条——它的 HTML 解析器什么也没捞到 |
+| `wikipedia` | 20 条结果 | |
+| `google` | `access denied` | 反抓取 |
 | `duckduckgo` | `CAPTCHA` | |
 | `brave` | `too many requests` | |
 
-So the productive configuration is `google cse` plus the vertical engines, not
-the flagship engines. That is SearXNG's own maintenance situation, not
-something modsearch can fix.
+所以有产出的配置是 `google cse` 加上那些垂类引擎，而不是旗舰引擎。这是 SearXNG 自己的维护状况，不是 modsearch 能修好的。
 
-## Wiring it into modsearch
+## 接进 modsearch
 
 ```jsonc
 {
@@ -89,20 +75,17 @@ something modsearch can fix.
 }
 ```
 
-`proxy: "direct"` is right here: the container does its own proxying through
-`outgoing.proxies`, so the request from modsearch to `127.0.0.1:8888` must not
-take the system proxy.
+这里 `proxy: "direct"` 是对的：容器自己通过 `outgoing.proxies` 做代理，所以从 modsearch 到 `127.0.0.1:8888` 的这一跳不能走系统代理。
 
-`aggregate.deadlineMs` needs raising from the 8s default: a SearXNG instance
-fans out to its own engines, and the slower ones take 10s or more.
+`aggregate.deadlineMs` 需要从 8 秒的默认值往上调：一个 SearXNG 实例会向它自己那批引擎扇出，慢的那些要十秒以上。
 
-## Measured result
+## 实测结果
 
 ```
-8 engines → 64 results → 9 corroborated by more than one engine
+8 个引擎 → 64 条结果 → 9 条被多于一个引擎共同印证
 
 [exa,firecrawl,keenable,youcom,searxng]  Rust Async Runtimes: Tokio vs async-std
-[exa,firecrawl,keenable,youcom,searxng]  The State of Async Rust: Runtimes
+[exa,firecrawl,keenable,youcom,searxng]  The State of Async Runtimes
 [arxiv]                                  Modular Responsiveness Verification
 [hackernews]                             Migrating from Go to Rust
 ```

@@ -1,55 +1,55 @@
 ---
-summary: 'Testing Guide: Vitest usage, co-located layout, conventions'
+summary: '测试指南：Vitest 用法、就近布局、约定'
 read_when:
-  - Running tests
-  - Writing tests
-  - Troubleshooting test failures
+  - 运行测试
+  - 编写测试
+  - 排查测试失败
 ---
 
-# Testing Guide
+# 测试指南
 
-## Layout
+## 布局
 
-Tests are co-located with sources: every module gets an adjacent `*.test.ts` (for example `src/search.ts` and `src/search.test.ts`, `src/providers/tavily.ts` and `src/providers/tavily.test.ts`). There is no separate `test/` directory. Vite's lib build only follows the import graph from `src/main.ts`, so test files never enter `dist/`.
+测试与源码就近放置：每个模块旁边就有一个 `*.test.ts`（例如 `src/search.ts` 与 `src/search.test.ts`、`src/providers/tavily.ts` 与 `src/providers/tavily.test.ts`）。没有单独的 `test/` 目录。Vite 的库构建只从 `src/main.ts` 顺着导入图走，所以测试文件永远不会进 `dist/`。
 
-## Commands
+## 命令
 
 ```bash
-pnpm test                                   # run everything
-pnpm exec vitest run src/xSource.test.ts    # run a single file
-pnpm typecheck                              # tsc --noEmit, run before tests
+pnpm test                                   # 跑全部
+pnpm exec vitest run src/xSource.test.ts    # 只跑一个文件
+pnpm typecheck                              # tsc --noEmit，跑测试前先跑这个
 ```
 
-## Conventions
+## 约定
 
-- No network in unit tests. The HTTP engines (Tavily, Exa, Firecrawl, Keenable, You.com) are exercised by stubbing the global `fetch`, a page fetch runs against the loopback server from `startLocalPage`, and the `agy`/`grok` subprocess engines are replaced with fake CLIs that echo canned envelopes.
-- To fake the home directory or PATH (grok availability checks), use `withTempHome` / `envWithBinaries` from `src/testing/helpers.ts`. They restore what they change. `withTempHome` redirects both `HOME` and `USERPROFILE`, because `os.homedir()` follows `HOME` on POSIX and `USERPROFILE` on Windows.
-- Engines with subprocess transports test `buildInvocation` / `parseOutput` as pure functions, which run on every platform. The end-to-end route-and-fallback tests spawn a fake CLI through `runSearch`, and a fake CLI is a POSIX shell script, so those suites are gated on `SPAWNS_FAKE_CLI` and skipped on Windows.
+- 单元测试里不碰网络。HTTP 引擎（Tavily、Exa、Firecrawl、Keenable、You.com）靠打桩全局 `fetch` 来验，页面抓取跑在 `startLocalPage` 起的回环服务端上，`agy` 与 `grok` 两个子进程引擎换成回放固定信封的假 CLI。
+- 要伪造家目录或 PATH（grok 可用性检查用得上），用 `src/testing/helpers.ts` 里的 `withTempHome` 与 `envWithBinaries`。它们会还原自己动过的东西。`withTempHome` 同时重定向 `HOME` 和 `USERPROFILE`，因为 `os.homedir()` 在 POSIX 上认 `HOME`、在 Windows 上认 `USERPROFILE`。
+- 走子进程传输的引擎把 `buildInvocation` 与 `parseOutput` 当纯函数测，这在任何平台上都能跑。端到端的路由与回退测试要通过 `runSearch` 拉起一个假 CLI，而假 CLI 是 POSIX shell 脚本，所以那些套件挂在 `SPAWNS_FAKE_CLI` 上、在 Windows 上跳过。
 
-## Platform coverage
+## 平台覆盖
 
-`macos-latest`, `ubuntu-latest`, and `windows-latest` all run `pnpm typecheck && pnpm test && pnpm build` on Node 22 and 24. A few Unix-only suites are guarded so the Windows job stays honest rather than red:
+`macos-latest`、`ubuntu-latest`、`windows-latest` 都会在 Node 22 与 24 上跑 `pnpm typecheck && pnpm test && pnpm build`。少数只在 Unix 成立的套件被加了门，好让 Windows 那一格保持诚实而不是一路红：
 
-- **Spawned fake CLIs** (`SPAWNS_FAKE_CLI`). modsearch runs engines with `spawn(bin, args)` and no shell, a deliberate security choice. On Windows only a real `.exe` is a runnable image by path: Node refuses to spawn a `.cmd`/`.bat` without `shell: true` (CVE-2024-27980), and a POSIX shell script is not executable there. A cross-platform fake would need a real `.exe` the tests cannot produce, so the suites that spawn `agy`/`grok` fakes run on Unix only. The in-process HTTP engines and all pure routing, config, and parsing logic still run on Windows.
-- **SIGTERM/SIGKILL escalation** (`src/subprocess.test.ts`). Unix signal semantics: on Windows `child.kill` always calls `TerminateProcess`, so there is no ignorable SIGTERM to escalate from.
-- **POSIX permission bits** (`expectPosixMode`). Windows models file access through ACLs, not rwx bits, so `stat.mode` never reflects a `chmod`. The assertion is a no-op there.
-- **Hidden child consoles** (`src/spawnContract.test.ts`). The core and separately shipped dsh plugin each start children through one wrapper that writes `windowsHide: true` after caller options. The contract test also scans shipped source and fails if any other file reaches `child_process`, so a future provider cannot quietly bring the black console flash back to GUI hosts.
+- **拉起假 CLI**（`SPAWNS_FAKE_CLI`）。modsearch 用 `spawn(bin, args)` 且不带 shell 地启动引擎，这是个刻意的安全选择。在 Windows 上只有真正的 `.exe` 才是可按路径执行的镜像：Node 拒绝在不加 `shell: true` 的情况下启动 `.cmd`/`.bat`（CVE-2024-27980），POSIX shell 脚本在那里也执行不了。要让假 CLI 跨平台就得有一个测试造不出来的真 `.exe`，所以拉起 `agy`/`grok` 假货的那几个套件只在 Unix 跑。进程内 HTTP 引擎以及全部纯路由、配置、解析逻辑仍然在 Windows 上跑。
+- **SIGTERM/SIGKILL 逐级升级**（`src/subprocess.test.ts`）。这是 Unix 的信号语义：在 Windows 上 `child.kill` 总是调 `TerminateProcess`，没有可忽略的 SIGTERM 可供升级。
+- **POSIX 权限位**（`expectPosixMode`）。Windows 用 ACL 而不是 rwx 位来表示文件访问，`stat.mode` 从不反映 `chmod`。那条断言在那里是空操作。
+- **隐藏子进程控制台**（`src/spawnContract.test.ts`）。核心包与单独发布的 dsh 插件各自都只通过一个包装器启动子进程，它会在调用方选项之后写上 `windowsHide: true`。那条契约测试还会扫已发布的源码，一旦有别的文件伸手进 `child_process` 就失败，于是以后新加的 provider 没法悄悄把黑窗口闪一下带回到图形宿主上。
 
-- Real `agy` / `grok` calls are end-to-end verification, not unit tests. They consume real quota, so keep them out of `pnpm test`.
+- 真实调用 `agy` / `grok` 属于端到端验证，不是单元测试。它们会真花额度，所以别放进 `pnpm test`。
 
-## Proving a test can fail
+## 证明一条测试能失败
 
-A green test proves nothing until you have seen it red. Two cheap habits catch the common cases:
+没亲眼见过它变红，一条绿测试什么也没证明。两个便宜的习惯能抓住大多数情况：
 
-- **Mutate the implementation, not the test.** Break the exact line the test is meant to cover, run it, and confirm it fails. A test that stays green under the mutation is decorative. Revert the mutation afterwards and re-run to confirm green.
-- **Assert on a quantity the wrong implementation cannot accidentally produce.** For cancellation, asserting "throws" is weak: a timeout throws too. Assert the elapsed time instead — with a 5 s timeout and a 50 ms abort, finishing under 2 s can only come from the abort. For cache and reload logic, assert the call count, not the return value.
+- **改实现，别改测试。** 打断这条测试本该覆盖的那一行，跑一遍，确认它失败。在变异下仍然绿的测试只是装饰。之后把变异还原，再跑一遍确认转绿。
+- **断言落在错误实现产生不出来的量上。** 取消这种事上，断言"抛错了"很弱：超时也抛错。改断言耗时——5 秒超时配 50 毫秒中止，2 秒内结束只可能来自那次中止。缓存与重载逻辑则断言调用次数，而不是返回值。
 
-A test double that is less capable than the real system silently skips whole paths. The `house()` stage in `src/dshPlugin.test.ts` returns a disposer from `tools.register` for exactly this reason: without it, the "dispose the old generation, then register the new one" path never runs, and hot-reload tests would pass against an implementation that never disposes anything. When a double cannot model a behaviour the production code depends on, extend the double rather than weakening the assertion.
+比真实系统能力更弱的测试替身，会悄悄跳过整条路径。`src/dshPlugin.test.ts` 里的 `house()` 夹具之所以让 `tools.register` 返回一个撤销函数，正是这个理由：不这么做，"先撤掉旧一代、再注册新一代"那条路径永远不会跑，而热重载测试会对一个从不撤销任何东西的实现照样绿。当替身模拟不了生产代码依赖的某个行为时，去扩展替身，而不是把断言放宽。
 
-## Hot reload
+## 热重载
 
-The plugin owns `~/.modsearch/config.json`, outside the host's profile, so the host's reload signal never fires for it. `watchModsearchConfigFile` polls its mtime every few seconds and both MCP tools and engine tools hang off that single watcher — one timer, because two watchers on one file let the two halves disagree briefly after a save.
+插件自己拥有 `~/.modsearch/config.json`，它在宿主的 profile 之外，所以宿主的重载信号永远不会为它触发。`watchModsearchConfigFile` 每隔几秒 stat 一次它的 mtime，MCP 工具与引擎工具都挂在这唯一一个监视器上——只有一个定时器，因为对同一个文件挂两套监视器会让两半在一次保存之后短暂地看法不一致。
 
-Each reloader keeps its own signature and skips work when it is unchanged. The engine-tool signature covers only what decides *whether a tool exists*: raw name, engine, enabled, and custom tool name. API keys, proxies and base URLs are deliberately outside it, so rotating a key does not make tools flicker out of the list the user is looking at.
+每个重载器各带自己的签名，没变就跳过。引擎工具的签名只覆盖决定**某个工具存不存在**的那几项：原始名、引擎、启用状态、自定义工具名。API 密钥、代理、base URL 被刻意排除在外，于是轮换一把密钥不会让工具从用户正看着的那个列表里闪一下消失又出现。
 
-Tests drive this with `vi.useFakeTimers()` and `advanceTimersByTimeAsync`, which requires that the poll interval stay a plain `setInterval` rather than an `await new Promise(setTimeout)`.
+测试用 `vi.useFakeTimers()` 和 `advanceTimersByTimeAsync` 驱动它，这要求轮询间隔保持是一个普通的 `setInterval`，而不是 `await new Promise(setTimeout)`。

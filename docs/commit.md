@@ -1,76 +1,76 @@
 ---
-summary: 'Git Commit Conventions: Conventional Commits format, atomic commits, HEREDOC usage'
+summary: 'Git 提交规范：Conventional Commits 格式、原子提交、HEREDOC 用法'
 read_when:
-  - Preparing to commit code
-  - Writing a commit message
-  - Need to understand commit conventions
+  - 准备提交代码
+  - 写提交信息
+  - 需要了解提交规范
 ---
 
-# Git Commit Conventions
+# Git 提交规范
 
-## Commit Message Format
+## 提交信息格式
 
 ```
-<type>[optional scope]: <imperative summary>
+<类型>[可选范围]: <祈使句摘要>
 
-[optional body]
+[可选正文]
 
-[optional footer(s)]
+[可选脚注]
 ```
 
-- Use imperative mood in summary, max 72 characters
-- Do not end with a period
-- Use scope only when it adds clarity (e.g., `auth`, `api`, `ui`)
-- Mark breaking changes with `!` (e.g., `feat!:`) or a `BREAKING CHANGE:` footer
+- 摘要用祈使句，不超过 72 个字符
+- 结尾不加句号
+- 只在能增加清晰度时使用范围（例如 `auth`、`api`、`ui`）
+- 破坏性变更用 `!` 标记（例如 `feat!:`），或写一行 `BREAKING CHANGE:` 脚注
 
-## Available Types
+## 可用类型
 
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation update |
-| `style` | Formatting (no logic changes) |
-| `refactor` | Code restructuring (no behavior changes) |
-| `perf` | Performance improvement |
-| `test` | Testing related |
-| `build` | Build system or dependency changes |
-| `ci` | CI/CD changes |
-| `chore` | Maintenance tasks |
-| `revert` | Revert a commit |
+| 类型 | 说明 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | 缺陷修复 |
+| `docs` | 文档更新 |
+| `style` | 格式调整（不改逻辑） |
+| `refactor` | 代码重构（不改行为） |
+| `perf` | 性能优化 |
+| `test` | 测试相关 |
+| `build` | 构建系统或依赖变更 |
+| `ci` | CI/CD 变更 |
+| `chore` | 杂务 |
+| `revert` | 回退一次提交 |
 
-## Atomic Commit Principles
+## 原子提交原则
 
-1. One commit does one thing
-2. The repository should remain buildable/runnable after each commit
-3. Each commit should be independently revertible, affecting only that specific change
-4. Include related tests in the same commit when behavior changes
-5. Do not mix refactoring/formatting with behavior changes
+1. 一次提交只做一件事
+2. 每次提交之后仓库都应当仍可构建、仍可运行
+3. 每次提交都应当能被独立回退，只影响它对应的那一处改动
+4. 行为有变化时，把相关测试放在同一次提交里
+5. 不要把重构、格式化与行为变更混在一次提交里
 
-## Commit Workflow
+## 提交流程
 
 ```bash
-# 1. Review changes
+# 1. 查看改动
 git status --short
 git diff --staged --stat
 
-# 2. Stage selectively (avoid git add -A)
-git add <specific-files>
+# 2. 选择性暂存（避免 git add -A）
+git add <具体文件>
 
-# 3. Review what will be committed
+# 3. 复核将要提交的内容
 git diff --staged
 
-# 4. Commit (HEREDOC format)
+# 4. 提交（HEREDOC 格式）
 git commit -m "$(cat <<'EOF'
-<type>[scope]: <summary>
+<类型>[范围]: <摘要>
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
 
-## Notes
+## 注意事项
 
-- Do not commit sensitive files such as `.env` or credentials
-- After a pre-commit hook failure, fix the issue and create a **new commit** (do not use `--amend`)
-- Do not push automatically; wait for user instructions
+- 不要提交 `.env`、凭据之类敏感文件
+- 提交钩子失败后，修好问题再建一次**新提交**（不要用 `--amend`）
+- 不要自动推送；等用户的指示
