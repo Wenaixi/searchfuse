@@ -125,9 +125,11 @@ Once installed, you do not need to remember any commands. Just chat. Ask anythin
 | [Troubleshooting](docs/troubleshooting.md) | A command failed and the message needs decoding |
 | [Configuration](skills/modsearch/references/configure.md) | Setting a key, switching engines, fixing config |
 | [Output contract](skills/modsearch/references/output-schema.md) | Parsing the JSON or building on it |
+| [SearXNG setup](docs/searxng-setup.md) | Running your own instance to reach Google's index |
 | [dsh plugin](docs/dsh.md) | Installing, configuring, verifying, and updating the native dsh bundle |
 | [Harness setup](docs/harness-setup.md) | Wiring it into Codex, Claude Code, OpenCode, or Pi |
 | [Security](docs/security.md) | SSRF guards, DNS-rebinding protection, untrusted input |
+| [Testing](docs/testing.md) | Running the suite or writing a test that can fail |
 | [CHANGELOG](CHANGELOG.md) | Finding what changed in a version |
 
 Proxy fake-IP mode (Clash, Clash Verge Rev, mihomo, Surge) works out of the box. DNS answers in `198.18.0.0/15` are treated as fake-IP placeholders with no switch needed. Literal URLs such as `http://198.18.0.5/` stay blocked when `allowPrivateNetwork` is off. For other reserved ranges used by VPNs or hosts-file accelerators such as Steam++ / Watt Toolkit, see [Blocked private network target](docs/troubleshooting.md#blocked-private-network-target).

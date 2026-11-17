@@ -1,7 +1,7 @@
 {
   "name": "@liustack/modsearch",
   "version": "0.1.0",
-  "description": "The strongest free web search plugin for coding agents. Plug-in web search, X search, and page fetch for models without native web access. Free out of the box: no signup, no API key (Firecrawl keyless, 1,000 free credits/month)",
+  "description": "融合搜索插件：并发询问多个搜索引擎并用倒数排名融合结果，为原生无联网能力的模型补上网搜、X 搜索与单页抓取。开箱免费，免注册免密钥（Firecrawl 免注册通道每月 1,000 免费额度）。",
   "type": "module",
   "bin": {
     "modsearch": "./dist/main.js"

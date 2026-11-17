@@ -125,9 +125,11 @@ dsh 用户还有一条不碰命令行的路。在 dsh 侧栏点开「插件」�
 | [故障排查](docs/troubleshooting.md)                      | 命令报错，查成因和解法                      |
 | [配置手册](skills/modsearch/references/configure.md)     | 配置 key、切换引擎、排查配置                |
 | [输出契约](skills/modsearch/references/output-schema.md) | 解析 JSON 或构建下游工具                    |
+| [SearXNG 搭建](docs/searxng-setup.md)                    | 自建实例，用它够到 Google 的索引            |
 | [dsh 插件](docs/dsh.md)                                | 安装、配置、验证与更新原生 dsh bundle       |
 | [宿主接入](docs/harness-setup.md)                        | 在 Codex、Claude Code、OpenCode、Pi 中配置  |
 | [安全说明](docs/security.md)                             | SSRF 防护、DNS 重绑定防护、不可信输入的处理 |
+| [测试指南](docs/testing.md)                              | 跑测试套件，或写一条会失败的测试            |
 | [更新日志](CHANGELOG.md)                                 | 查询版本变更                                |
 
 Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：DNS 返回的 `198.18.0.0/15` 地址会被视为 fake-ip 占位值，不用开任何开关。URL 中直写的 `http://198.18.0.5/` 这类地址在 `allowPrivateNetwork` 关闭时仍会被拦。VPN 用的其它保留段，或 Steam++ / Watt Toolkit 这类 hosts 文件加速器，见[私有网络目标被拦](docs/troubleshooting.md#私有网络目标被拦)。

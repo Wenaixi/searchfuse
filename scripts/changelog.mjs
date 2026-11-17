@@ -4,8 +4,8 @@
  *
  * The heading may be written either way:
  *
- * - `## 3.3.0 - 2026-08-06` (the plain form this project shipped with), or
- * - `## [3.3.0] - 2026-08-06` (the Keep a Changelog 1.1.0 form, where the
+ * - `## 0.2.0 - 2026-11-20` (the plain form older sections use), or
+ * - `## [0.2.0] - 2026-11-20` (the Keep a Changelog 1.1.0 form, where the
  *   brackets carry a per-version compare link).
  *
  * Both must resolve: the changelog is now written in the bracketed form, while
