@@ -1,0 +1,797 @@
+﻿2026-11-17T18:03:57.7674170Z Current runner version: '2.338.2'
+2026-11-17T18:03:57.7699623Z ##[group]Runner Image Provisioner
+2026-11-17T18:03:57.7700758Z Hosted Compute Agent
+2026-11-17T18:03:57.7701431Z Version: 20261103.629
+2026-11-17T18:03:57.7702070Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-17T18:03:57.7702787Z Build Date: 2026-11-03T17:26:59Z
+2026-11-17T18:03:57.7703569Z Worker ID: {58d32cef-dc79-4448-8147-6105e97b4bf5}
+2026-11-17T18:03:57.7704262Z Region: westus
+2026-11-17T18:03:57.7705347Z Cloud: Azure
+2026-11-17T18:03:57.7705931Z ##[endgroup]
+2026-11-17T18:03:57.7708134Z ##[group]Operating System
+2026-11-17T18:03:57.7709346Z Ubuntu
+2026-11-17T18:03:57.7711126Z 26.04.1
+2026-11-17T18:03:57.7712306Z LTS
+2026-11-17T18:03:57.7712839Z ##[endgroup]
+2026-11-17T18:03:57.7713379Z ##[group]Runner Image
+2026-11-17T18:03:57.7715379Z Image: ubuntu-26.04
+2026-11-17T18:03:57.7715952Z Version: 20261111.196.1
+2026-11-17T18:03:57.7718641Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-17T18:03:57.7721742Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-17T18:03:57.7723069Z ##[endgroup]
+2026-11-17T18:03:57.7725153Z ##[group]GITHUB_TOKEN Permissions
+2026-11-17T18:03:57.7727865Z Contents: read
+2026-11-17T18:03:57.7728487Z Metadata: read
+2026-11-17T18:03:57.7730894Z Packages: read
+2026-11-17T18:03:57.7732446Z ##[endgroup]
+2026-11-17T18:03:57.7735367Z Secret source: Actions
+2026-11-17T18:03:57.7736317Z Cache mode: write
+2026-11-17T18:03:57.7737927Z Prepare workflow directory
+2026-11-17T18:03:57.8208339Z Prepare all required actions
+2026-11-17T18:03:57.8257829Z Getting action download info
+2026-11-17T18:03:58.1742294Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-17T18:03:58.3647979Z Download action repository 'pnpm/action-setup@v4' (SHA:b906affcce14559ad1aafd4ab0e942779e9f58b1)
+2026-11-17T18:03:58.7443149Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-11-17T18:03:58.9375387Z Complete job name: test (ubuntu-latest, 22)
+2026-11-17T18:03:59.0272420Z ##[group]Run actions/checkout@v4
+2026-11-17T18:03:59.0273317Z with:
+2026-11-17T18:03:59.0273768Z   repository: Wenaixi/searchfuse
+2026-11-17T18:03:59.0277439Z   token: ***
+2026-11-17T18:03:59.0277880Z   ssh-strict: true
+2026-11-17T18:03:59.0278320Z   ssh-user: git
+2026-11-17T18:03:59.0278758Z   persist-credentials: true
+2026-11-17T18:03:59.0279234Z   clean: true
+2026-11-17T18:03:59.0279673Z   sparse-checkout-cone-mode: true
+2026-11-17T18:03:59.0280358Z   fetch-depth: 1
+2026-11-17T18:03:59.0280793Z   fetch-tags: false
+2026-11-17T18:03:59.0281228Z   show-progress: true
+2026-11-17T18:03:59.0281675Z   lfs: false
+2026-11-17T18:03:59.0282080Z   submodules: false
+2026-11-17T18:03:59.0282526Z   set-safe-directory: true
+2026-11-17T18:03:59.0283031Z   allow-unsafe-pr-checkout: false
+2026-11-17T18:03:59.0283801Z ##[endgroup]
+2026-11-17T18:03:59.5748139Z Syncing repository: Wenaixi/searchfuse
+2026-11-17T18:03:59.5750356Z ##[group]Getting Git version info
+2026-11-17T18:03:59.5751360Z Working directory is '/home/runner/work/searchfuse/searchfuse'
+2026-11-17T18:03:59.5752606Z [command]/usr/bin/git version
+2026-11-17T18:03:59.5955133Z git version 2.56.1
+2026-11-17T18:03:59.5985946Z ##[endgroup]
+2026-11-17T18:03:59.5995581Z Temporarily overriding HOME='/home/runner/work/_temp/b48a7716-b973-43f3-a164-45f4252b99e8' before making global git config changes
+2026-11-17T18:03:59.5998481Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-17T18:03:59.6001992Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/searchfuse/searchfuse
+2026-11-17T18:03:59.6074911Z Deleting the contents of '/home/runner/work/searchfuse/searchfuse'
+2026-11-17T18:03:59.6078376Z ##[group]Initializing the repository
+2026-11-17T18:03:59.6083525Z [command]/usr/bin/git init /home/runner/work/searchfuse/searchfuse
+2026-11-17T18:03:59.6429899Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-17T18:03:59.6432551Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-17T18:03:59.6434422Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-17T18:03:59.6435921Z hint: call:
+2026-11-17T18:03:59.6436757Z hint:
+2026-11-17T18:03:59.6437705Z hint: 	git config --global init.defaultBranch <name>
+2026-11-17T18:03:59.6438841Z hint:
+2026-11-17T18:03:59.6440363Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-17T18:03:59.6442168Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-17T18:03:59.6443584Z hint:
+2026-11-17T18:03:59.6444413Z hint: 	git branch -m <name>
+2026-11-17T18:03:59.6445390Z hint:
+2026-11-17T18:03:59.6446593Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-17T18:03:59.6448912Z Initialized empty Git repository in /home/runner/work/searchfuse/searchfuse/.git/
+2026-11-17T18:03:59.6458259Z [command]/usr/bin/git remote add origin https://github.com/Wenaixi/searchfuse
+2026-11-17T18:03:59.6523799Z ##[endgroup]
+2026-11-17T18:03:59.6525504Z ##[group]Disabling automatic garbage collection
+2026-11-17T18:03:59.6527032Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-17T18:03:59.6572828Z ##[endgroup]
+2026-11-17T18:03:59.6574318Z ##[group]Setting up auth
+2026-11-17T18:03:59.6589904Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-17T18:03:59.6624040Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-17T18:03:59.7285455Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-17T18:03:59.7322010Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-17T18:03:59.7623429Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-17T18:03:59.7659647Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-17T18:03:59.7933526Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-17T18:03:59.7973667Z ##[endgroup]
+2026-11-17T18:03:59.7982749Z ##[group]Fetching the repository
+2026-11-17T18:03:59.7984549Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +4255bd8de409c0b5823105248918438665efc4b5:refs/remotes/origin/main
+2026-11-17T18:04:00.4734710Z From https://github.com/Wenaixi/searchfuse
+2026-11-17T18:04:00.4736198Z  * [new ref]         4255bd8de409c0b5823105248918438665efc4b5 -> origin/main
+2026-11-17T18:04:00.4739709Z ##[endgroup]
+2026-11-17T18:04:00.4741461Z ##[group]Determining the checkout info
+2026-11-17T18:04:00.4743121Z ##[endgroup]
+2026-11-17T18:04:00.4749059Z [command]/usr/bin/git sparse-checkout disable
+2026-11-17T18:04:00.4805415Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-17T18:04:00.4835192Z ##[group]Checking out the ref
+2026-11-17T18:04:00.4839129Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-17T18:04:00.5229444Z Switched to a new branch 'main'
+2026-11-17T18:04:00.5236191Z branch 'main' set up to track 'origin/main'.
+2026-11-17T18:04:00.5291165Z ##[endgroup]
+2026-11-17T18:04:00.5294525Z [command]/usr/bin/git log -1 --format=%H
+2026-11-17T18:04:00.5319718Z 4255bd8de409c0b5823105248918438665efc4b5
+2026-11-17T18:04:00.5669670Z ##[group]Run pnpm/action-setup@v4
+2026-11-17T18:04:00.5670949Z with:
+2026-11-17T18:04:00.5671709Z   version: 10
+2026-11-17T18:04:00.5672517Z   dest: ~/setup-pnpm
+2026-11-17T18:04:00.5673402Z   run_install: null
+2026-11-17T18:04:00.5674458Z   cache: false
+2026-11-17T18:04:00.5675355Z   cache_dependency_path: pnpm-lock.yaml
+2026-11-17T18:04:00.5676596Z   package_json_file: package.json
+2026-11-17T18:04:00.5677672Z   standalone: false
+2026-11-17T18:04:00.5678530Z ##[endgroup]
+2026-11-17T18:04:00.7272476Z ##[group]Running self-installer...
+2026-11-17T18:04:01.1547267Z (node:2390) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-17T18:04:01.1553300Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-17T18:04:01.2920189Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-11-17T18:04:01.3018693Z Packages: +1
+2026-11-17T18:04:01.3020293Z +
+2026-11-17T18:04:01.7632967Z Progress: resolved 1, reused 0, downloaded 1, added 1, done
+2026-11-17T18:04:01.7923749Z 
+2026-11-17T18:04:01.7924392Z dependencies:
+2026-11-17T18:04:01.7948394Z + pnpm 10.34.9 (12.21.0 is available)
+2026-11-17T18:04:01.7948727Z 
+2026-11-17T18:04:01.7948877Z Done in 890ms
+2026-11-17T18:04:01.8158523Z ##[endgroup]
+2026-11-17T18:04:01.8159196Z Installation Completed!
+2026-11-17T18:04:01.8377750Z ##[group]Run actions/setup-node@v4
+2026-11-17T18:04:01.8378250Z with:
+2026-11-17T18:04:01.8378631Z   node-version: 22
+2026-11-17T18:04:01.8378998Z   cache: pnpm
+2026-11-17T18:04:01.8379355Z   always-auth: false
+2026-11-17T18:04:01.8379727Z   check-latest: false
+2026-11-17T18:04:01.8382603Z   token: ***
+2026-11-17T18:04:01.8382977Z env:
+2026-11-17T18:04:01.8383426Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-17T18:04:01.8383914Z ##[endgroup]
+2026-11-17T18:04:01.9865154Z (node:2405) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-17T18:04:01.9867926Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-17T18:04:01.9869055Z Found in cache @ /opt/hostedtoolcache/node/22.23.4/x64
+2026-11-17T18:04:01.9870659Z ##[group]Environment details
+2026-11-17T18:04:02.4557773Z node: v22.23.4
+2026-11-17T18:04:02.4558995Z npm: 10.9.9
+2026-11-17T18:04:02.4559916Z yarn: 1.22.22
+2026-11-17T18:04:02.4561459Z ##[endgroup]
+2026-11-17T18:04:02.4584400Z [command]/home/runner/setup-pnpm/node_modules/.bin/pnpm store path --silent
+2026-11-17T18:04:02.9076188Z /home/runner/setup-pnpm/node_modules/.bin/store/v10
+2026-11-17T18:04:03.1786296Z pnpm cache is not found
+2026-11-17T18:04:03.1948837Z ##[group]Run pnpm install --frozen-lockfile
+2026-11-17T18:04:03.1949236Z [36;1mpnpm install --frozen-lockfile[0m
+2026-11-17T18:04:03.2010401Z shell: /usr/bin/bash -e {0}
+2026-11-17T18:04:03.2010672Z env:
+2026-11-17T18:04:03.2010934Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-17T18:04:03.2011245Z ##[endgroup]
+2026-11-17T18:04:03.6112068Z Lockfile is up to date, resolution step is skipped
+2026-11-17T18:04:03.6450803Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-11-17T18:04:03.6753237Z Packages: +119
+2026-11-17T18:04:03.6754272Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-11-17T18:04:04.5257507Z Progress: resolved 119, reused 0, downloaded 119, added 119, done
+2026-11-17T18:04:04.6120927Z 
+2026-11-17T18:04:04.6121775Z dependencies:
+2026-11-17T18:04:04.6122227Z + commander 13.1.0
+2026-11-17T18:04:04.6122613Z + undici 7.29.0
+2026-11-17T18:04:04.6122823Z 
+2026-11-17T18:04:04.6123003Z devDependencies:
+2026-11-17T18:04:04.6123514Z + @biomejs/biome 2.5.7
+2026-11-17T18:04:04.6123935Z + @types/node 22.19.11
+2026-11-17T18:04:04.6124364Z + @vitest/coverage-v8 3.2.4
+2026-11-17T18:04:04.6124802Z + typescript 5.9.3
+2026-11-17T18:04:04.6125237Z + vite 6.4.1
+2026-11-17T18:04:04.6125587Z + vitest 3.2.4
+2026-11-17T18:04:04.6125815Z 
+2026-11-17T18:04:04.6218194Z ╭ Warning ─────────────────────────────────────────────────────────────────────╮
+2026-11-17T18:04:04.6218979Z │                                                                              │
+2026-11-17T18:04:04.6220410Z │   Ignored build scripts: esbuild@0.25.12.                                    │
+2026-11-17T18:04:04.6221254Z │   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+2026-11-17T18:04:04.6222053Z │   to run scripts.                                                            │
+2026-11-17T18:04:04.6222599Z │                                                                              │
+2026-11-17T18:04:04.6223181Z ╰──────────────────────────────────────────────────────────────────────────────╯
+2026-11-17T18:04:04.6349425Z Done in 1.3s using pnpm v10.34.9
+2026-11-17T18:04:04.6686447Z ##[group]Run pnpm typecheck
+2026-11-17T18:04:04.6686767Z [36;1mpnpm typecheck[0m
+2026-11-17T18:04:04.6738657Z shell: /usr/bin/bash -e {0}
+2026-11-17T18:04:04.6738949Z env:
+2026-11-17T18:04:04.6739201Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-17T18:04:04.6739508Z ##[endgroup]
+2026-11-17T18:04:05.0215958Z 
+2026-11-17T18:04:05.0217400Z > @wenaixi/searchfuse@0.1.0 typecheck /home/runner/work/searchfuse/searchfuse
+2026-11-17T18:04:05.0218512Z > tsc --noEmit
+2026-11-17T18:04:05.0218813Z 
+2026-11-17T18:04:08.0844864Z ##[group]Run pnpm test
+2026-11-17T18:04:08.0845146Z [36;1mpnpm test[0m
+2026-11-17T18:04:08.0895283Z shell: /usr/bin/bash -e {0}
+2026-11-17T18:04:08.0895531Z env:
+2026-11-17T18:04:08.0895793Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-17T18:04:08.0896103Z ##[endgroup]
+2026-11-17T18:04:08.4130739Z 
+2026-11-17T18:04:08.4131486Z > @wenaixi/searchfuse@0.1.0 test /home/runner/work/searchfuse/searchfuse
+2026-11-17T18:04:08.4132232Z > vitest run
+2026-11-17T18:04:08.4132437Z 
+2026-11-17T18:04:08.7515398Z 
+2026-11-17T18:04:08.7518342Z [1m[46m RUN [49m[22m [36mv3.2.4 [39m[90m/home/runner/work/searchfuse/searchfuse[39m
+2026-11-17T18:04:08.7519238Z 
+2026-11-17T18:04:09.4130819Z  [32m✓[39m src/dshClient.test.ts [2m([22m[2m60 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+2026-11-17T18:04:10.0137050Z  [32m✓[39m src/providers/firecrawl.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 84[2mms[22m[39m
+2026-11-17T18:04:10.3077117Z [90mstderr[2m | src/dshPlugin.test.ts[2m > [22m[2mdsh settings card route[2m > [22m[2mreports a broken config instead of treating it as empty
+2026-11-17T18:04:10.3099646Z [22m[39m[searchfuse] mcp skipped: /tmp/modsearch-home-aeTMYR/.modsearch/config.json is not valid JSON: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+2026-11-17T18:04:10.3102639Z [searchfuse] engine tools reload skipped: /tmp/modsearch-home-aeTMYR/.modsearch/config.json is not valid JSON: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+2026-11-17T18:04:10.3103929Z 
+2026-11-17T18:04:10.4536043Z  [32m✓[39m src/config.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+2026-11-17T18:04:10.4854987Z [90mstderr[2m | src/dshPlugin.test.ts[2m > [22m[2mdsh plugin config switches[2m > [22m[2mstays a tools-only plugin when the web seam surface moved
+2026-11-17T18:04:10.4857196Z [22m[39m[searchfuse] web seam has no registerSearchProvider; search provider skipped
+2026-11-17T18:04:10.4860389Z 
+2026-11-17T18:04:10.4884213Z  [32m✓[39m src/dshPlugin.test.ts [2m([22m[2m56 tests[22m[2m)[22m[33m 730[2mms[22m[39m
+2026-11-17T18:04:10.9632110Z  [32m✓[39m src/doctor.test.ts [2m([22m[2m36 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+2026-11-17T18:04:10.9866551Z  [32m✓[39m src/router.test.ts [2m([22m[2m39 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+2026-11-17T18:04:11.4098663Z  [32m✓[39m src/cooldown.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+2026-11-17T18:04:11.4341165Z  [32m✓[39m src/mcp/protocol.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 158[2mms[22m[39m
+2026-11-17T18:04:11.7939572Z  [32m✓[39m src/providers/http/network.test.ts [2m([22m[2m46 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+2026-11-17T18:04:11.9777909Z  [32m✓[39m src/providers/httpFetch.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 167[2mms[22m[39m
+2026-11-17T18:04:12.0663064Z  [32m✓[39m src/util/redact.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+2026-11-17T18:04:12.4532208Z  [32m✓[39m src/providers/exa.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 62[2mms[22m[39m
+2026-11-17T18:04:12.4914912Z  [32m✓[39m src/mcp/registry.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 84[2mms[22m[39m
+2026-11-17T18:04:12.8990319Z  [32m✓[39m src/providers/tavily.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+2026-11-17T18:04:12.9035205Z  [32m✓[39m src/providers/keenable.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+2026-11-17T18:04:13.5713580Z  [32m✓[39m src/main.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 391[2mms[22m[39m
+2026-11-17T18:04:13.8365860Z  [32m✓[39m src/providers/httpFetch.systemCa.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 51[2mms[22m[39m
+2026-11-17T18:04:14.1864302Z  [32m✓[39m src/util/timedRequest.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 69[2mms[22m[39m
+2026-11-17T18:04:14.5319180Z  [32m✓[39m src/aggregate/fanout.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 130[2mms[22m[39m
+2026-11-17T18:04:14.8415626Z  [32m✓[39m src/providers/grok.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+2026-11-17T18:04:15.1442577Z  [32m✓[39m src/providers/youcom.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+2026-11-17T18:04:15.3923809Z  [32m✓[39m src/aggregate/cache.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+2026-11-17T18:04:15.6191989Z  [32m✓[39m src/providers/http/htmlExtract.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+2026-11-17T18:04:15.8401583Z  [32m✓[39m src/aggregate/rrf.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+2026-11-17T18:04:16.0542237Z  [32m✓[39m src/util/proxy.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+2026-11-17T18:04:16.3473921Z  [32m✓[39m src/providers/searxng.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+2026-11-17T18:04:16.5813964Z  [32m✓[39m src/providers/antigravity.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+2026-11-17T18:04:16.8640854Z  [32m✓[39m src/providers/arxiv.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+2026-11-17T18:04:17.6130402Z  [31m❯[39m src/output-schema.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 449[2mms[22m[39m
+2026-11-17T18:04:17.6131710Z    [32m✓[39m output-schema reference stays in step with RunSearchResult[2m > [22mdocuments both a search and a fetch envelope[32m 2[2mms[22m[39m
+2026-11-17T18:04:17.6133596Z [31m   [31m×[31m output-schema reference stays in step with RunSearchResult[2m > [22msearch envelope matches a real run[39m[33m 436[2mms[22m[39m
+2026-11-17T18:04:17.6135130Z [31m     → expected [ …(5) ] to deeply equal [ …(5) ][39m
+2026-11-17T18:04:17.6136671Z    [32m✓[39m output-schema reference stays in step with RunSearchResult[2m > [22mfetch envelope matches a real run[32m 10[2mms[22m[39m
+2026-11-17T18:04:17.8369550Z  [32m✓[39m src/aggregate/canonicalUrl.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+2026-11-17T18:04:18.1300371Z  [32m✓[39m src/aggregate-config.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+2026-11-17T18:04:18.3830190Z  [32m✓[39m src/spawnContract.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+2026-11-17T18:04:18.6209253Z  [32m✓[39m src/util/secretInput.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+2026-11-17T18:04:18.8356067Z  [2m[90m↓[39m[22m src/mcp/real-server.integration.test.ts [2m([22m[2m3 tests[22m[2m | [22m[33m3 skipped[39m[2m)[22m
+2026-11-17T18:04:19.0439337Z  [32m✓[39m src/util/explicitProxy.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+2026-11-17T18:04:19.2521051Z  [32m✓[39m scripts/changelog.test.mjs [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+2026-11-17T18:04:19.4761624Z  [32m✓[39m src/system.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+2026-11-17T18:04:19.6923786Z  [32m✓[39m scripts/stamp.test.mjs [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+2026-11-17T18:04:20.0754510Z  [32m✓[39m src/providers/http/dnsDeadline.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 105[2mms[22m[39m
+2026-11-17T18:04:20.2848675Z  [32m✓[39m evals/cases/fetch-firecrawl.test.mjs [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+2026-11-17T18:04:20.4895518Z  [32m✓[39m src/util/apiKeys.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+2026-11-17T18:04:23.3390752Z  [31m❯[39m src/search.test.ts [2m([22m[2m37 tests[22m[2m | [22m[31m11 failed[39m[2m)[22m[33m 13473[2mms[22m[39m
+2026-11-17T18:04:23.3391670Z    [32m✓[39m mode resolution[2m > [22mis search for a query, fetch for a url[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3392386Z    [32m✓[39m mode resolution[2m > [22mrejects runs with neither[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3393471Z    [32m✓[39m mode resolution[2m > [22mvalidates fetch urls[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3395272Z    [32m✓[39m zero-config machine[2m > [22msearches through keyless firecrawl on a bare machine, failing honestly offline[32m 8[2mms[22m[39m
+2026-11-17T18:04:23.3396528Z    [32m✓[39m zero-config machine[2m > [22mstill fetches a page with nothing installed[32m 65[2mms[22m[39m
+2026-11-17T18:04:23.3397511Z [31m   [31m×[31m zero-config machine[2m > [22malways returns an array of results, one per source[39m[33m 760[2mms[22m[39m
+2026-11-17T18:04:23.3398346Z [31m     → expected { source: 'web', …(9) } to match object { source: 'web', …(2) }
+2026-11-17T18:04:23.3398880Z (7 matching properties omitted from actual)[39m
+2026-11-17T18:04:23.3399569Z    [32m✓[39m zero-config machine[2m > [22mfalls through to the next engine and says so[32m 23[2mms[22m[39m
+2026-11-17T18:04:23.3400873Z    [32m✓[39m per-engine API key rotation[2m > [22mtries comma-separated keys in order after a key-related HTTP 401 failure[32m 5[2mms[22m[39m
+2026-11-17T18:04:23.3401976Z    [32m✓[39m per-engine API key rotation[2m > [22mtries comma-separated keys in order after a key-related HTTP 403 failure[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3403033Z    [32m✓[39m per-engine API key rotation[2m > [22mtries comma-separated keys in order after a key-related HTTP 429 failure[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3404001Z    [32m✓[39m per-engine API key rotation[2m > [22mdoes not try another key after a network failure[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3405038Z    [32m✓[39m per-engine API key rotation[2m > [22mdoes not try another key after a 5xx response, even when its body mentions quota[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3406181Z    [32m✓[39m per-engine API key rotation[2m > [22mdoes not treat unrelated 4xx wording as a quota failure[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3408101Z    [32m✓[39m per-engine API key rotation[2m > [22mrecords quota cooldown only for the key that failed[32m 3[2mms[22m[39m
+2026-11-17T18:04:23.3409661Z    [32m✓[39m per-engine API key rotation[2m > [22mtries healthy keys before a cooling key in the same engine[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3411061Z    [32m✓[39m a forced --engine is strict[2m > [22merrors instead of silently spending another engine when the forced one fails[32m 14[2mms[22m[39m
+2026-11-17T18:04:23.3413448Z    [32m✓[39m X degrade is labeled, never silently mislabeled[2m > [22mmarks a web-served X answer as degraded web while keeping requestedSource x[32m 20[2mms[22m[39m
+2026-11-17T18:04:23.3415417Z    [32m✓[39m X degrade is labeled, never silently mislabeled[2m > [22memits an explicit empty unavailable X entry for web,x when X is unreachable[32m 5[2mms[22m[39m
+2026-11-17T18:04:23.3417169Z [31m   [31m×[31m multiple sources run concurrently and fail independently[2m > [22mruns web and X in parallel: total time is near the slower source, not the sum[39m[33m 3190[2mms[22m[39m
+2026-11-17T18:04:23.3418294Z [31m     → expected 3.187 to be less than 1.8[39m
+2026-11-17T18:04:23.3419295Z [31m   [31m×[31m multiple sources run concurrently and fail independently[2m > [22mkeeps a succeeding source when the other source fails entirely[39m[32m 4[2mms[22m[39m
+2026-11-17T18:04:23.3421285Z [31m     → Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test[39m
+2026-11-17T18:04:23.3422939Z [31m   [31m×[31m multiple sources run concurrently and fail independently[2m > [22ma single failing source still throws, so its behavior is unchanged[39m[32m 3[2mms[22m[39m
+2026-11-17T18:04:23.3424238Z [31m     → expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'[39m
+2026-11-17T18:04:23.3425618Z [31m   [31m×[31m a run deadline bounds the whole chain[2m > [22mcuts a hung engine at the deadline and skips the engines after it[39m[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3426744Z [31m     → expected 'Every engine failed or was skipped, s…' to match /Every engine for the web source failed/[39m
+2026-11-17T18:04:23.3427819Z [31m   [31m×[31m a run deadline bounds the whole chain[2m > [22mgives the next engine only the time the deadline has left[39m[33m 8002[2mms[22m[39m
+2026-11-17T18:04:23.3428640Z [31m     → Cannot read properties of undefined (reading 'find')[39m
+2026-11-17T18:04:23.3429661Z [31m   [31m×[31m a run deadline bounds the whole chain[2m > [22mleaves the fallback room when a subprocess engine ignores its own timeout[39m[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3430877Z [31m     → expected 'firecrawl,keenable,youcom' to be 'firecrawl' // Object.is equality[39m
+2026-11-17T18:04:23.3431917Z [31m   [31m×[31m a run deadline bounds the whole chain[2m > [22mcounts the deadline from the moment the caller started it[39m[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3432737Z [31m     → Cannot read properties of undefined (reading 'length')[39m
+2026-11-17T18:04:23.3433702Z    [32m✓[39m a run deadline holds over an in-process engine that overruns[2m > [22mhands engines a whole-millisecond budget from a fractional clock[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3434956Z    [33m[2m✓[22m[39m a run deadline holds over an in-process engine that overruns[2m > [22mstops waiting on the engine when the deadline falls [33m 302[2mms[22m[39m
+2026-11-17T18:04:23.3436192Z    [32m✓[39m uncertainty, warnings, and attempts are separate channels[2m > [22mkeeps the engine epistemic uncertainty, routing goes to warnings[32m 8[2mms[22m[39m
+2026-11-17T18:04:23.3437419Z    [32m✓[39m uncertainty, warnings, and attempts are separate channels[2m > [22mrecords every engine attempt in order with per-try outcome[32m 6[2mms[22m[39m
+2026-11-17T18:04:23.3438630Z    [32m✓[39m uncertainty, warnings, and attempts are separate channels[2m > [22mscrubs token-shaped secrets from attempts and warnings[32m 9[2mms[22m[39m
+2026-11-17T18:04:23.3439896Z    [32m✓[39m uncertainty, warnings, and attempts are separate channels[2m > [22mhttp sorts a thin page into uncertainty and its method notice into warnings[32m 3[2mms[22m[39m
+2026-11-17T18:04:23.3441491Z [31m   [31m×[31m quota cooldown records, clears, and can be switched off[2m > [22mrecords a cooling engine when it fails with a quota error[39m[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3442729Z [31m     → expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'[39m
+2026-11-17T18:04:23.3444014Z [31m   [31m×[31m quota cooldown records, clears, and can be switched off[2m > [22mstill tries a cooling engine, clears it on success, and warns[39m[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3445936Z [31m     → Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test[39m
+2026-11-17T18:04:23.3447355Z    [32m✓[39m quota cooldown records, clears, and can be switched off[2m > [22mreads and writes nothing when the switch is off[32m 2[2mms[22m[39m
+2026-11-17T18:04:23.3448563Z    [32m✓[39m engine spend surfaces on the attempt[2m > [22mcarries exa dollar cost onto the attempt, and no credits[32m 1[2mms[22m[39m
+2026-11-17T18:04:23.3449579Z    [32m✓[39m engine spend surfaces on the attempt[2m > [22mcarries firecrawl credits onto the attempt, and no cost[32m 0[2mms[22m[39m
+2026-11-17T18:04:23.3451044Z [31m   [31m×[31m routing facts cannot be faked by an engine[2m > [22moverwrites source, engine, and model even when the engine has no model[39m[33m 1015[2mms[22m[39m
+2026-11-17T18:04:23.3452056Z [31m     → expected 'firecrawl,keenable,youcom' to be 'antigravity-cli' // Object.is equality[39m
+2026-11-17T18:04:29.4462564Z  [32m✓[39m src/subprocess.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 16225[2mms[22m[39m
+2026-11-17T18:04:29.4464620Z    [33m[2m✓[22m[39m runCommand timeout handling[2m > [22mSIGKILLs a child that ignores SIGTERM, so its PID goes away [33m 5026[2mms[22m[39m
+2026-11-17T18:04:29.4466445Z    [33m[2m✓[22m[39m runCommand kill escalation outlives the caller[2m > [22mstill SIGKILLs a SIGTERM-ignoring child when the caller has nothing left to do [33m 5128[2mms[22m[39m
+2026-11-17T18:04:29.4468136Z    [33m[2m✓[22m[39m runCommand pending kills[2m > [22marms no kill for an engine that already exited while its pipe drains [33m 1003[2mms[22m[39m
+2026-11-17T18:04:29.4469620Z    [33m[2m✓[22m[39m runCommand pending kills[2m > [22mlets a caller wait until a SIGTERM-ignoring child is SIGKILLed [33m 5059[2mms[22m[39m
+2026-11-17T18:04:29.4598578Z 
+2026-11-17T18:04:29.4599760Z [31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 12 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+2026-11-17T18:04:29.4600880Z 
+2026-11-17T18:04:29.4605330Z [41m[1m FAIL [22m[49m src/output-schema.test.ts[2m > [22moutput-schema reference stays in step with RunSearchResult[2m > [22msearch envelope matches a real run
+2026-11-17T18:04:29.4622789Z [31m[1mAssertionError[22m: expected [ …(5) ] to deeply equal [ …(5) ][39m
+2026-11-17T18:04:29.4623476Z 
+2026-11-17T18:04:29.4623953Z [32m- Expected[39m
+2026-11-17T18:04:29.4624437Z [31m+ Received[39m
+2026-11-17T18:04:29.4624796Z 
+2026-11-17T18:04:29.4625077Z [33m@@ -27,24 +27,11 @@[39m
+2026-11-17T18:04:29.4625696Z [2m        [[22m
+2026-11-17T18:04:29.4626423Z [2m          [[22m
+2026-11-17T18:04:29.4627317Z [2m            "attempts",[22m
+2026-11-17T18:04:29.4627918Z [2m            [[22m
+2026-11-17T18:04:29.4628425Z [2m              "[]",[22m
+2026-11-17T18:04:29.4628930Z [32m-             [[39m
+2026-11-17T18:04:29.4629435Z [32m-               [[39m
+2026-11-17T18:04:29.4630296Z [32m-                 "durationSeconds",[39m
+2026-11-17T18:04:29.4631004Z [32m-                 "number",[39m
+2026-11-17T18:04:29.4631594Z [32m-               ],[39m
+2026-11-17T18:04:29.4632117Z [32m-               [[39m
+2026-11-17T18:04:29.4632712Z [32m-                 "engine",[39m
+2026-11-17T18:04:29.4633352Z [32m-                 "string",[39m
+2026-11-17T18:04:29.4633922Z [32m-               ],[39m
+2026-11-17T18:04:29.4634447Z [32m-               [[39m
+2026-11-17T18:04:29.4635015Z [32m-                 "ok",[39m
+2026-11-17T18:04:29.4635619Z [32m-                 "boolean",[39m
+2026-11-17T18:04:29.4705914Z [32m-               ],[39m
+2026-11-17T18:04:29.4706688Z [32m-             ],[39m
+2026-11-17T18:04:29.4707273Z [31m+             "empty",[39m
+2026-11-17T18:04:29.4707824Z [2m            ],[22m
+2026-11-17T18:04:29.4708317Z [2m          ],[22m
+2026-11-17T18:04:29.4708784Z [2m          [[22m
+2026-11-17T18:04:29.4709367Z [2m            "durationSeconds",[22m
+2026-11-17T18:04:29.4710672Z [2m            "number",[22m
+2026-11-17T18:04:29.4711243Z [33m@@ -55,14 +42,25 @@[39m
+2026-11-17T18:04:29.4711757Z [2m          ],[22m
+2026-11-17T18:04:29.4712255Z [2m          [[22m
+2026-11-17T18:04:29.4712734Z [2m            "items",[22m
+2026-11-17T18:04:29.4713218Z [2m            [[22m
+2026-11-17T18:04:29.4713676Z [2m              "[]",[22m
+2026-11-17T18:04:29.4714161Z [31m+             [[39m
+2026-11-17T18:04:29.4714631Z [2m                [[22m
+2026-11-17T18:04:29.4715191Z [31m+                 "foundIn",[39m
+2026-11-17T18:04:29.4715740Z [2m                  [[22m
+2026-11-17T18:04:29.4716305Z [31m+                   "[]",[39m
+2026-11-17T18:04:29.4716907Z [31m+                   "string",[39m
+2026-11-17T18:04:29.4717492Z [31m+                 ],[39m
+2026-11-17T18:04:29.4717986Z [31m+               ],[39m
+2026-11-17T18:04:29.4718482Z [31m+               [[39m
+2026-11-17T18:04:29.4719077Z [2m                  "published_at",[22m
+2026-11-17T18:04:29.4719732Z [2m                  "string",[22m
+2026-11-17T18:04:29.4720473Z [31m+               ],[39m
+2026-11-17T18:04:29.4721209Z [31m+               [[39m
+2026-11-17T18:04:29.4721790Z [31m+                 "score",[39m
+2026-11-17T18:04:29.4722408Z [31m+                 "number",[39m
+2026-11-17T18:04:29.4722952Z [2m                ],[22m
+2026-11-17T18:04:29.4723439Z [2m                [[22m
+2026-11-17T18:04:29.4723993Z [2m                  "snippet",[22m
+2026-11-17T18:04:29.4724594Z [2m                  "string",[22m
+2026-11-17T18:04:29.4725118Z [2m                ],[22m
+2026-11-17T18:04:29.4725609Z [33m@@ -75,17 +73,13 @@[39m
+2026-11-17T18:04:29.4726172Z [2m                  "string",[22m
+2026-11-17T18:04:29.4726704Z [2m                ],[22m
+2026-11-17T18:04:29.4727218Z [2m                [[22m
+2026-11-17T18:04:29.4727830Z [2m                  "url",[22m
+2026-11-17T18:04:29.4728417Z [2m                  "string",[22m
+2026-11-17T18:04:29.4728955Z [32m-               ],[39m
+2026-11-17T18:04:29.4729472Z [2m                ],[22m
+2026-11-17T18:04:29.4729953Z [2m              ],[22m
+2026-11-17T18:04:29.4730647Z [2m            ],[22m
+2026-11-17T18:04:29.4731099Z [32m-         [[39m
+2026-11-17T18:04:29.4731605Z [32m-           "model",[39m
+2026-11-17T18:04:29.4732163Z [32m-           "string",[39m
+2026-11-17T18:04:29.4732666Z [2m          ],[22m
+2026-11-17T18:04:29.4733110Z [2m          [[22m
+2026-11-17T18:04:29.4733657Z [2m            "requestedSource",[22m
+2026-11-17T18:04:29.4734257Z [2m            "string",[22m
+2026-11-17T18:04:29.4734739Z [2m          ],[22m
+2026-11-17T18:04:29.4734996Z 
+2026-11-17T18:04:29.4735533Z [36m [2m❯[22m src/output-schema.test.ts:[2m85:27[22m[39m
+2026-11-17T18:04:29.4736503Z     [90m 83| [39m      timeoutMs[33m:[39m [34m20_000[39m[33m,[39m
+2026-11-17T18:04:29.4737235Z     [90m 84| [39m    })[33m;[39m
+2026-11-17T18:04:29.4738527Z     [90m 85| [39m    [34mexpect[39m([34mshapeOf[39m(real))[33m.[39m[34mtoEqual[39m([34mshapeOf[39m(doc[33m.[39msearch))[33m;[39m
+2026-11-17T18:04:29.4739735Z     [90m   | [39m                          [31m^[39m
+2026-11-17T18:04:29.4740702Z     [90m 86| [39m  }[33m,[39m [34m30_000[39m)[33m;[39m
+2026-11-17T18:04:29.4741281Z     [90m 87| [39m
+2026-11-17T18:04:29.4741496Z 
+2026-11-17T18:04:29.4741899Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯[22m[39m
+2026-11-17T18:04:29.4742245Z 
+2026-11-17T18:04:29.4743350Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mzero-config machine[2m > [22malways returns an array of results, one per source
+2026-11-17T18:04:29.4745009Z [31m[1mAssertionError[22m: expected { source: 'web', …(9) } to match object { source: 'web', …(2) }
+2026-11-17T18:04:29.4746102Z (7 matching properties omitted from actual)[39m
+2026-11-17T18:04:29.4746474Z 
+2026-11-17T18:04:29.4746710Z [32m- Expected[39m
+2026-11-17T18:04:29.4747153Z [31m+ Received[39m
+2026-11-17T18:04:29.4747390Z 
+2026-11-17T18:04:29.4747561Z [2m  {[22m
+2026-11-17T18:04:29.4748379Z [32m-   "engine": "antigravity-cli",[39m
+2026-11-17T18:04:29.4749158Z [31m+   "engine": "firecrawl,keenable,youcom",[39m
+2026-11-17T18:04:29.4749798Z [2m    "source": "web",[22m
+2026-11-17T18:04:29.4750599Z [32m-   "summary": "web-sum",[39m
+2026-11-17T18:04:29.4752978Z [31m+   "summary": "Fused 25 result(s) from 3 engine(s) (firecrawl, keenable, youcom) for \"node lts\". 5 result(s) were returned by more than one engine. Read items for the sources; each item's foundIn names the engines that returned it.",[39m
+2026-11-17T18:04:29.4754793Z [2m  }[22m
+2026-11-17T18:04:29.4755008Z 
+2026-11-17T18:04:29.4755482Z [36m [2m❯[22m src/search.test.ts:[2m143:33[22m[39m
+2026-11-17T18:04:29.4880974Z     [90m141| [39m      })[33m;[39m
+2026-11-17T18:04:29.4901497Z     [90m142| [39m      [34mexpect[39m(result[33m.[39mresults)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+2026-11-17T18:04:29.4931313Z     [90m143| [39m      [34mexpect[39m(result[33m.[39mresults[[34m0[39m])[33m.[39m[34mtoMatchObject[39m({
+2026-11-17T18:04:29.4933055Z     [90m   | [39m                                [31m^[39m
+2026-11-17T18:04:29.4960994Z     [90m144| [39m        source[33m:[39m [32m'web'[39m[33m,[39m
+2026-11-17T18:04:29.4976034Z     [90m145| [39m        engine[33m:[39m [32m'antigravity-cli'[39m[33m,[39m
+2026-11-17T18:04:29.4976858Z 
+2026-11-17T18:04:29.4977522Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯[22m[39m
+2026-11-17T18:04:29.4978111Z 
+2026-11-17T18:04:29.4980262Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mmultiple sources run concurrently and fail independently[2m > [22mruns web and X in parallel: total time is near the slower source, not the sum
+2026-11-17T18:04:29.4982573Z [31m[1mAssertionError[22m: expected 3.187 to be less than 1.8[39m
+2026-11-17T18:04:29.4984020Z [36m [2m❯[22m src/search.test.ts:[2m477:43[22m[39m
+2026-11-17T18:04:29.4985369Z     [90m475| [39m      expect(result.results.every((r) => r.status === 'ok')).toBe(true…
+2026-11-17T18:04:29.4986957Z     [90m476| [39m      // Serial execution would put this near 2s. Allow headroom for s…
+2026-11-17T18:04:29.4989033Z     [90m477| [39m      [34mexpect[39m(result[33m.[39mmeta[33m.[39mdurationSeconds)[33m.[39m[34mtoBeLessThan[39m([34m1.8[39m)[33m;[39m
+2026-11-17T18:04:29.4990954Z     [90m   | [39m                                          [31m^[39m
+2026-11-17T18:04:29.4992026Z     [90m478| [39m    } [35mfinally[39m {
+2026-11-17T18:04:29.4992994Z     [90m479| [39m      [34mrestore[39m()[33m;[39m
+2026-11-17T18:04:29.4993637Z 
+2026-11-17T18:04:29.4994286Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯[22m[39m
+2026-11-17T18:04:29.4994900Z 
+2026-11-17T18:04:29.4996760Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mmultiple sources run concurrently and fail independently[2m > [22mkeeps a succeeding source when the other source fails entirely
+2026-11-17T18:04:29.5000800Z [31m[1mError[22m: Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test[39m
+2026-11-17T18:04:29.5006950Z [36m [2m❯[22m fanout src/aggregate/fanout.ts:[2m117:11[22m[39m
+2026-11-17T18:04:29.5008505Z     [90m115| [39m    [35mconst[39m lines [33m=[39m [[33m...[39mfailures[33m,[39m [33m...[39mskipped][33m;[39m
+2026-11-17T18:04:29.5010240Z     [90m116| [39m    const why = cancelledByCaller() ? 'The run was cancelled.' : 'Ever…
+2026-11-17T18:04:29.5012410Z     [90m117| [39m    [35mthrow[39m [35mnew[39m [33mError[39m([32m`[39m[36m${[39mwhy[36m}[39m[32m [39m[36m${[39mlines[33m.[39m[34mjoin[39m([32m' | '[39m)[36m}[39m[32m`[39m)[33m;[39m
+2026-11-17T18:04:29.5013835Z     [90m   | [39m          [31m^[39m
+2026-11-17T18:04:29.5014571Z     [90m118| [39m  }
+2026-11-17T18:04:29.5015153Z     [90m119| [39m
+2026-11-17T18:04:29.5019787Z [90m [2m❯[22m runFused src/search.ts:[2m388:20[22m[39m
+2026-11-17T18:04:29.5021572Z [90m [2m❯[22m runSearch src/search.ts:[2m244:16[22m[39m
+2026-11-17T18:04:29.5022737Z [90m [2m❯[22m src/search.test.ts:[2m497:22[22m[39m
+2026-11-17T18:04:29.5023384Z 
+2026-11-17T18:04:29.5024031Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯[22m[39m
+2026-11-17T18:04:29.5024602Z 
+2026-11-17T18:04:29.5026416Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mmultiple sources run concurrently and fail independently[2m > [22ma single failing source still throws, so its behavior is unchanged
+2026-11-17T18:04:29.5029354Z [31m[1mAssertionError[22m: expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'[39m
+2026-11-17T18:04:29.5030914Z 
+2026-11-17T18:04:29.5031365Z [32m- Expected:[39m 
+2026-11-17T18:04:29.5032074Z /Every engine for the web source failed/
+2026-11-17T18:04:29.5032604Z 
+2026-11-17T18:04:29.5033014Z [31m+ Received:[39m 
+2026-11-17T18:04:29.5035555Z "Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test"
+2026-11-17T18:04:29.5036965Z 
+2026-11-17T18:04:29.5037517Z [36m [2m❯[22m src/search.test.ts:[2m540:7[22m[39m
+2026-11-17T18:04:29.5059227Z     [90m538| [39m    [35mtry[39m {
+2026-11-17T18:04:29.5060930Z     [90m539| [39m      [35mconst[39m config [33m=[39m [34magyConfig[39m({ code[33m:[39m [34m1[39m })[33m;[39m
+2026-11-17T18:04:29.5061780Z 
+2026-11-17T18:04:29.5062505Z     [90m540| [39m      [35mawait[39m [34mexpect[39m(
+2026-11-17T18:04:29.5063435Z     [90m   | [39m      [31m^[39m
+2026-11-17T18:04:29.5064588Z     [90m541| [39m        runSearch({ query: 'anything', config, env: BARE_ENV, timeoutM…
+2026-11-17T18:04:29.5066404Z     [90m542| [39m      )[33m.[39mrejects[33m.[39m[34mtoThrow[39m([36m/Every engine for the web source failed/[39m)[33m;[39m
+2026-11-17T18:04:29.5067520Z 
+2026-11-17T18:04:29.5068172Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯[22m[39m
+2026-11-17T18:04:29.5068736Z 
+2026-11-17T18:04:29.5070544Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22ma run deadline bounds the whole chain[2m > [22mcuts a hung engine at the deadline and skips the engines after it
+2026-11-17T18:04:29.5073149Z [31m[1mAssertionError[22m: expected 'Every engine failed or was skipped, s…' to match /Every engine for the web source failed/[39m
+2026-11-17T18:04:29.5074374Z 
+2026-11-17T18:04:29.5074843Z [32m- Expected:[39m 
+2026-11-17T18:04:29.5075574Z /Every engine for the web source failed/
+2026-11-17T18:04:29.5076123Z 
+2026-11-17T18:04:29.5076616Z [31m+ Received:[39m 
+2026-11-17T18:04:29.5079716Z "Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: firecrawl should not run once the deadline is spent | keenable: keenable request failed: firecrawl should not run once the deadline is spent | youcom: youcom request failed: firecrawl should not run once the deadline is spent"
+2026-11-17T18:04:29.5083186Z [2m Test Files [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m40 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (43)[39m
+2026-11-17T18:04:29.5084199Z 
+2026-11-17T18:04:29.5084899Z [36m [2m❯[22m src/search.test.ts:[2m582:27[22m[39m
+2026-11-17T18:04:29.5086185Z     [90m580| [39m    // Without the deadline agy answers at 10s. The bound is loose on …
+2026-11-17T18:04:29.5088149Z     [90m581| [39m    [34mexpect[39m([33mDate[39m[33m.[39m[34mnow[39m() [33m-[39m startedAt)[33m.[39m[34mtoBeLessThan[39m([34m8_000[39m)[33m;[39m
+2026-11-17T18:04:29.5090206Z     [90m582| [39m    expect(error.message).toMatch(/Every engine for the web source fai…
+2026-11-17T18:04:29.5091512Z     [90m   | [39m                          [31m^[39m
+2026-11-17T18:04:29.5093143Z     [90m583| [39m    [34mexpect[39m(error[33m.[39mmessage)[33m.[39m[34mtoMatch[39m([36m/run deadline of 1500 ms/[39m)[33m;[39m
+2026-11-17T18:04:29.5095448Z     [90m584| [39m    [34mexpect[39m(fetchCalls)[33m.[39m[34mtoHaveLength[39m([34m0[39m)[33m;[39m
+2026-11-17T18:04:29.5096411Z 
+2026-11-17T18:04:29.5097214Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯[22m[39m
+2026-11-17T18:04:29.5097861Z 
+2026-11-17T18:04:29.5099482Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22ma run deadline bounds the whole chain[2m > [22mgives the next engine only the time the deadline has left
+2026-11-17T18:04:29.5101894Z [2m      Tests [22m [1m[31m12 failed[39m[22m[2m | [22m[1m[32m667 passed[39m[22m[2m | [22m[33m3 skipped[39m[90m (682)[39m
+2026-11-17T18:04:29.5103045Z [2m   Start at [22m 18:04:08
+2026-11-17T18:04:29.5104438Z [2m   Duration [22m 20.71s[2m (transform 1.39s, setup 0ms, collect 4.35s, tests 32.69s, environment 10ms, prepare 3.70s)[22m
+2026-11-17T18:04:29.5105287Z 
+2026-11-17T18:04:29.5105298Z 
+2026-11-17T18:04:29.5156105Z ##[error]AssertionError: expected [ …(5) ] to deeply equal [ …(5) ]
+
+- Expected
++ Received
+
+@@ -27,24 +27,11 @@
+        [
+          [
+            "attempts",
+            [
+              "[]",
+-             [
+-               [
+-                 "durationSeconds",
+-                 "number",
+-               ],
+-               [
+-                 "engine",
+-                 "string",
+-               ],
+-               [
+-                 "ok",
+-                 "boolean",
+-               ],
+-             ],
++             "empty",
+            ],
+          ],
+          [
+            "durationSeconds",
+            "number",
+@@ -55,14 +42,25 @@
+          ],
+          [
+            "items",
+            [
+              "[]",
++             [
+                [
++                 "foundIn",
+                  [
++                   "[]",
++                   "string",
++                 ],
++               ],
++               [
+                  "published_at",
+                  "string",
++               ],
++               [
++                 "score",
++                 "number",
+                ],
+                [
+                  "snippet",
+                  "string",
+                ],
+@@ -75,17 +73,13 @@
+                  "string",
+                ],
+                [
+                  "url",
+                  "string",
+-               ],
+                ],
+              ],
+            ],
+-         [
+-           "model",
+-           "string",
+          ],
+          [
+            "requestedSource",
+            "string",
+          ],
+
+ ❯ src/output-schema.test.ts:85:27
+
+
+2026-11-17T18:04:29.5174732Z 
+2026-11-17T18:04:29.5183207Z ##[error]AssertionError: expected { source: 'web', …(9) } to match object { source: 'web', …(2) }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "engine": "antigravity-cli",
++   "engine": "firecrawl,keenable,youcom",
+    "source": "web",
+-   "summary": "web-sum",
++   "summary": "Fused 25 result(s) from 3 engine(s) (firecrawl, keenable, youcom) for \"node lts\". 5 result(s) were returned by more than one engine. Read items for the sources; each item's foundIn names the engines that returned it.",
+  }
+
+ ❯ src/search.test.ts:143:33
+
+
+2026-11-17T18:04:29.5188092Z [31m[1mTypeError[22m: Cannot read properties of undefined (reading 'find')[39m
+2026-11-17T18:04:29.5189158Z [36m [2m❯[22m src/search.test.ts:[2m613:38[22m[39m
+2026-11-17T18:04:29.5189833Z     [90m611| [39m    })[33m;[39m
+2026-11-17T18:04:29.5192505Z     [90m612| [39m
+2026-11-17T18:04:29.5193504Z     [90m613| [39m    const firecrawl = error.attempts.find((attempt) => attempt.engine …
+2026-11-17T18:04:29.5194655Z     [90m   | [39m                                     [31m^[39m
+2026-11-17T18:04:29.5195732Z     [90m614| [39m    const capped = Number(/timed out after (\d+) ms/.exec(firecrawl?.e…
+2026-11-17T18:04:29.5197173Z     [90m615| [39m    [34mexpect[39m(capped)[33m.[39m[34mtoBeGreaterThan[39m([34m0[39m)[33m;[39m
+2026-11-17T18:04:29.5197884Z 
+2026-11-17T18:04:29.5198375Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯[22m[39m
+2026-11-17T18:04:29.5198772Z 
+2026-11-17T18:04:29.5200816Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22ma run deadline bounds the whole chain[2m > [22mleaves the fallback room when a subprocess engine ignores its own timeout
+2026-11-17T18:04:29.5202997Z [31m[1mAssertionError[22m: expected 'firecrawl,keenable,youcom' to be 'firecrawl' // Object.is equality[39m
+2026-11-17T18:04:29.5203834Z 
+2026-11-17T18:04:29.5204219Z Expected: [32m"firecrawl"[39m
+2026-11-17T18:04:29.5205131Z Received: [31m"firecrawl[7m,keenable,youcom[27m"[39m
+2026-11-17T18:04:29.5205588Z 
+2026-11-17T18:04:29.5206080Z [36m [2m❯[22m src/search.test.ts:[2m643:38[22m[39m
+2026-11-17T18:04:29.5206781Z     [90m641| [39m    })[33m;[39m
+2026-11-17T18:04:29.5207289Z     [90m642| [39m
+2026-11-17T18:04:29.5208680Z     [90m643| [39m    [34mexpect[39m(result[33m.[39mresults[[34m0[39m][33m.[39mengine)[33m.[39m[34mtoBe[39m([32m'firecrawl'[39m)[33m;[39m
+2026-11-17T18:04:29.5240431Z     [90m   | [39m                                     [31m^[39m
+2026-11-17T18:04:29.5241584Z     [90m644| [39m    expect(result.results[0].attempts[0]).toMatchObject({ engine: 'ant…
+2026-11-17T18:04:29.5242218Z     [90m645| [39m  }[33m,[39m [34m20_000[39m)[33m;[39m
+2026-11-17T18:04:29.5242457Z 
+2026-11-17T18:04:29.5242707Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯[22m[39m
+2026-11-17T18:04:29.5242919Z 
+2026-11-17T18:04:29.5243639Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22ma run deadline bounds the whole chain[2m > [22mcounts the deadline from the moment the caller started it
+2026-11-17T18:04:29.5244561Z [31m[1mTypeError[22m: Cannot read properties of undefined (reading 'length')[39m
+2026-11-17T18:04:29.5245200Z [36m [2m❯[22m src/search.test.ts:[2m660:27[22m[39m
+2026-11-17T18:04:29.5245577Z     [90m658| [39m    })[33m;[39m
+2026-11-17T18:04:29.5245863Z     [90m659| [39m
+2026-11-17T18:04:29.5246520Z     [90m660| [39m    [34mexpect[39m(error[33m.[39mattempts[33m.[39mlength)[33m.[39m[34mtoBeGreaterThan[39m([34m0[39m)[33m;[39m
+2026-11-17T18:04:29.5247209Z     [90m   | [39m                          [31m^[39m
+2026-11-17T18:04:29.5247762Z     [90m661| [39m    expect(error.attempts.every((attempt) => attempt.durationSeconds =…
+2026-11-17T18:04:29.5248316Z     [90m662| [39m  }[33m,[39m [34m20_000[39m)[33m;[39m
+2026-11-17T18:04:29.5248547Z 
+2026-11-17T18:04:29.5248770Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯[22m[39m
+2026-11-17T18:04:29.5248978Z 
+2026-11-17T18:04:29.5249770Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mquota cooldown records, clears, and can be switched off[2m > [22mrecords a cooling engine when it fails with a quota error
+2026-11-17T18:04:29.5252482Z [31m[1mAssertionError[22m: expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'[39m
+2026-11-17T18:04:29.5253660Z 
+2026-11-17T18:04:29.5253964Z [32m- Expected:[39m 
+2026-11-17T18:04:29.5254500Z /Every engine for the web source failed/
+2026-11-17T18:04:29.5255192Z 
+2026-11-17T18:04:29.5255468Z [31m+ Received:[39m 
+2026-11-17T18:04:29.5257587Z "Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test"
+2026-11-17T18:04:29.5259144Z 
+2026-11-17T18:04:29.5259769Z [36m [2m❯[22m src/search.test.ts:[2m855:5[22m[39m
+2026-11-17T18:04:29.5261366Z     [90m853| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([32m'offline unit test'[39m)[33m;[39m
+2026-11-17T18:04:29.5262438Z     [90m854| [39m    })[33m;[39m
+2026-11-17T18:04:29.5263165Z     [90m855| [39m    [35mawait[39m [34mexpect[39m(
+2026-11-17T18:04:29.5263865Z     [90m   | [39m    [31m^[39m
+2026-11-17T18:04:29.5264821Z     [90m856| [39m      runSearch({ query: 'q', config, env: BARE_ENV, timeoutMs: 20_000…
+2026-11-17T18:04:29.5266410Z     [90m857| [39m    )[33m.[39mrejects[33m.[39m[34mtoThrow[39m([36m/Every engine for the web source failed/[39m)[33m;[39m
+2026-11-17T18:04:29.5267281Z 
+2026-11-17T18:04:29.5267797Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯[22m[39m
+2026-11-17T18:04:29.5268187Z 
+2026-11-17T18:04:29.5269719Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mquota cooldown records, clears, and can be switched off[2m > [22mstill tries a cooling engine, clears it on success, and warns
+2026-11-17T18:04:29.5273828Z [31m[1mError[22m: Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test[39m
+2026-11-17T18:04:29.5276069Z [36m [2m❯[22m fanout src/aggregate/fanout.ts:[2m117:11[22m[39m
+2026-11-17T18:04:29.5277454Z     [90m115| [39m    [35mconst[39m lines [33m=[39m [[33m...[39mfailures[33m,[39m [33m...[39mskipped][33m;[39m
+2026-11-17T18:04:29.5278869Z     [90m116| [39m    const why = cancelledByCaller() ? 'The run was cancelled.' : 'Ever…
+2026-11-17T18:04:29.5281330Z     [90m117| [39m    [35mthrow[39m [35mnew[39m [33mError[39m([32m`[39m[36m${[39mwhy[36m}[39m[32m [39m[36m${[39mlines[33m.[39m[34mjoin[39m([32m' | '[39m)[36m}[39m[32m`[39m)[33m;[39m
+2026-11-17T18:04:29.5282871Z     [90m   | [39m          [31m^[39m
+2026-11-17T18:04:29.5283460Z     [90m118| [39m  }
+2026-11-17T18:04:29.5283905Z     [90m119| [39m
+2026-11-17T18:04:29.5284624Z [90m [2m❯[22m runFused src/search.ts:[2m388:20[22m[39m
+2026-11-17T18:04:29.5285610Z [90m [2m❯[22m runSearch src/search.ts:[2m244:16[22m[39m
+2026-11-17T18:04:29.5286561Z [90m [2m❯[22m src/search.test.ts:[2m886:16[22m[39m
+2026-11-17T18:04:29.5286982Z 
+2026-11-17T18:04:29.5287415Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯[22m[39m
+2026-11-17T18:04:29.5287807Z 
+2026-11-17T18:04:29.5289478Z [41m[1m FAIL [22m[49m src/search.test.ts[2m > [22mrouting facts cannot be faked by an engine[2m > [22moverwrites source, engine, and model even when the engine has no model
+2026-11-17T18:04:29.5291960Z [31m[1mAssertionError[22m: expected 'firecrawl,keenable,youcom' to be 'antigravity-cli' // Object.is equality[39m
+2026-11-17T18:04:29.5292823Z 
+2026-11-17T18:04:29.5293236Z Expected: [32m"antigravity-cli"[39m
+2026-11-17T18:04:29.5294050Z Received: [31m"firecrawl,keenable,youcom"[39m
+2026-11-17T18:04:29.5294469Z 
+2026-11-17T18:04:29.5294953Z [36m [2m❯[22m src/search.test.ts:[2m999:38[22m[39m
+2026-11-17T18:04:29.5295707Z     [90m997| [39m    })[33m;[39m
+2026-11-17T18:04:29.5297088Z     [90m998| [39m    [34mexpect[39m(result[33m.[39mresults[[34m0[39m][33m.[39msource)[33m.[39m[34mtoBe[39m([32m'web'[39m)[33m;[39m
+2026-11-17T18:04:29.5299168Z     [90m999| [39m    [34mexpect[39m(result[33m.[39mresults[[34m0[39m][33m.[39mengine)[33m.[39m[34mtoBe[39m([32m'antigravity-cli'[39m)[33m;[39m
+2026-11-17T18:04:29.5300855Z     [90m   | [39m                                     [31m^[39m
+2026-11-17T18:04:29.5302787Z     [90m1000| [39m    [34mexpect[39m(result[33m.[39mresults[[34m0[39m][33m.[39mmodel)[33m.[39m[34mtoBe[39m([32m'gemini-3.8-flash-low'[39m)[33m;[39m
+2026-11-17T18:04:29.5305036Z     [90m1001| [39m    [34mexpect[39m(result[33m.[39mresults[[34m0[39m][33m.[39mdurationSeconds)[33m.[39m[34mtoBeLessThan[39m([34m100[39m)[33m;[39m
+2026-11-17T18:04:29.5306067Z 
+2026-11-17T18:04:29.5306631Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯[22m[39m
+2026-11-17T18:04:29.5307035Z 
+2026-11-17T18:04:29.5307053Z 
+2026-11-17T18:04:29.5309024Z ##[error]AssertionError: expected 3.187 to be less than 1.8
+ ❯ src/search.test.ts:477:43
+
+
+2026-11-17T18:04:29.5312143Z 
+2026-11-17T18:04:29.5317755Z ##[error]Error: Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test
+ ❯ fanout src/aggregate/fanout.ts:117:11
+ ❯ runFused src/search.ts:388:20
+ ❯ runSearch src/search.ts:244:16
+ ❯ src/search.test.ts:497:22
+
+
+2026-11-17T18:04:29.5321265Z 
+2026-11-17T18:04:29.5328245Z ##[error]AssertionError: expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'
+
+- Expected: 
+/Every engine for the web source failed/
+
++ Received: 
+"Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test"
+
+ ❯ src/search.test.ts:540:7
+
+
+2026-11-17T18:04:29.5332471Z 
+2026-11-17T18:04:29.5340709Z ##[error]AssertionError: expected 'Every engine failed or was skipped, s…' to match /Every engine for the web source failed/
+
+- Expected: 
+/Every engine for the web source failed/
+
++ Received: 
+"Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: firecrawl should not run once the deadline is spent | keenable: keenable request failed: firecrawl should not run once the deadline is spent | youcom: youcom request failed: firecrawl should not run once the deadline is spent"
+
+ ❯ src/search.test.ts:582:27
+
+
+2026-11-17T18:04:29.5345177Z 
+2026-11-17T18:04:29.5347252Z ##[error]TypeError: Cannot read properties of undefined (reading 'find')
+ ❯ src/search.test.ts:613:38
+
+
+2026-11-17T18:04:29.5348802Z 
+2026-11-17T18:04:29.5352237Z ##[error]AssertionError: expected 'firecrawl,keenable,youcom' to be 'firecrawl' // Object.is equality
+
+Expected: "firecrawl"
+Received: "firecrawl,keenable,youcom"
+
+ ❯ src/search.test.ts:643:38
+
+
+2026-11-17T18:04:29.5354408Z 
+2026-11-17T18:04:29.5356494Z ##[error]TypeError: Cannot read properties of undefined (reading 'length')
+ ❯ src/search.test.ts:660:27
+
+
+2026-11-17T18:04:29.5358125Z 
+2026-11-17T18:04:29.5365395Z ##[error]AssertionError: expected [Function] to throw error matching /Every engine for the web source failed/ but got 'Every engine failed or was skipped, s…'
+
+- Expected: 
+/Every engine for the web source failed/
+
++ Received: 
+"Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test"
+
+ ❯ src/search.test.ts:855:5
+
+
+2026-11-17T18:04:29.5369375Z 
+2026-11-17T18:04:29.5375110Z ##[error]Error: Every engine failed or was skipped, so nothing could be fused. firecrawl: firecrawl request failed: offline unit test | keenable: keenable request failed: offline unit test | youcom: youcom request failed: offline unit test
+ ❯ fanout src/aggregate/fanout.ts:117:11
+ ❯ runFused src/search.ts:388:20
+ ❯ runSearch src/search.ts:244:16
+ ❯ src/search.test.ts:886:16
+
+
+2026-11-17T18:04:29.5378421Z 
+2026-11-17T18:04:29.5382118Z ##[error]AssertionError: expected 'firecrawl,keenable,youcom' to be 'antigravity-cli' // Object.is equality
+
+Expected: "antigravity-cli"
+Received: "firecrawl,keenable,youcom"
+
+ ❯ src/search.test.ts:999:38
+
+
+2026-11-17T18:04:29.6298216Z  ELIFECYCLE  Test failed. See above for more details.
+2026-11-17T18:04:29.6546608Z ##[error]Process completed with exit code 1.
+2026-11-17T18:04:29.6698723Z Post job cleanup.
+2026-11-17T18:04:29.8306627Z Pruning is unnecessary.
+2026-11-17T18:04:29.8517433Z Post job cleanup.
+2026-11-17T18:04:29.9383478Z [command]/usr/bin/git version
+2026-11-17T18:04:29.9428581Z git version 2.56.1
+2026-11-17T18:04:29.9471912Z Temporarily overriding HOME='/home/runner/work/_temp/91a9dbbe-66c0-4d31-a9ae-0b476af5a8d6' before making global git config changes
+2026-11-17T18:04:29.9473558Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-17T18:04:29.9475815Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/searchfuse/searchfuse
+2026-11-17T18:04:29.9519960Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-17T18:04:29.9561516Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-17T18:04:29.9874217Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-17T18:04:29.9906398Z http.https://github.com/.extraheader
+2026-11-17T18:04:29.9921472Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-17T18:04:29.9976182Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-17T18:04:30.0401365Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-17T18:04:30.0455707Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-17T18:04:30.0928352Z Cleaning up orphan processes
+2026-11-17T18:04:30.1286451Z Terminate orphan process: pid (3242) (sleep)
+2026-11-17T18:04:30.1315467Z Terminate orphan process: pid (3739) (sleep)
+2026-11-17T18:04:30.1348264Z Terminate orphan process: pid (4094) (sleep)
+2026-11-17T18:04:30.1449246Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, pnpm/action-setup@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

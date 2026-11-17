@@ -47,6 +47,11 @@ function agyConfig(
   const bin = fakeEngine({ name: 'agy', ...fake });
   return {
     engine: 'antigravity-cli',
+    // 用这个构造器的测试都在测链式回退的语义：attempts 的顺序、严格强制、
+    // 冷却、期限。融合是新的默认，不钉住的话同一份断言会在「引擎可用」的
+    // Linux 机器上跑到融合路径，然后因为措辞与 attempts 为空而失败——测的
+    // 却不是它想测的东西。extra 里显式给了 aggregate 就以 extra 为准。
+    aggregate: { mode: 'chain' },
     ...extra,
     engines: { ...extra.engines, 'antigravity-cli': { bin } },
   };
@@ -232,7 +237,10 @@ describe('per-engine API key rotation', () => {
       runSearch({
         query: 'q',
         engine: 'exa',
-        config: { engines: { exa: { apiKey: 'first-key,second-key' } } },
+        // 显式钉住链式：这一组测的是回退路径的措辞与 attempts 结构，而融合
+        // 是新的默认。不钉住的话，同一份断言在「引擎可用」的机器上会跑到
+        // 融合路径，然后因为措辞不同而失败——测的却不是它想测的东西。
+        config: { aggregate: { mode: 'chain' }, engines: { exa: { apiKey: 'first-key,second-key' } } },
         env: BARE_ENV,
         timeoutMs: 20_000,
       }),
@@ -255,7 +263,10 @@ describe('per-engine API key rotation', () => {
       runSearch({
         query: 'q',
         engine: 'exa',
-        config: { engines: { exa: { apiKey: 'first-key,second-key' } } },
+        // 显式钉住链式：这一组测的是回退路径的措辞与 attempts 结构，而融合
+        // 是新的默认。不钉住的话，同一份断言在「引擎可用」的机器上会跑到
+        // 融合路径，然后因为措辞不同而失败——测的却不是它想测的东西。
+        config: { aggregate: { mode: 'chain' }, engines: { exa: { apiKey: 'first-key,second-key' } } },
         env: BARE_ENV,
         timeoutMs: 20_000,
       }),
@@ -278,7 +289,10 @@ describe('per-engine API key rotation', () => {
       runSearch({
         query: 'q',
         engine: 'exa',
-        config: { engines: { exa: { apiKey: 'first-key,second-key' } } },
+        // 显式钉住链式：这一组测的是回退路径的措辞与 attempts 结构，而融合
+        // 是新的默认。不钉住的话，同一份断言在「引擎可用」的机器上会跑到
+        // 融合路径，然后因为措辞不同而失败——测的却不是它想测的东西。
+        config: { aggregate: { mode: 'chain' }, engines: { exa: { apiKey: 'first-key,second-key' } } },
         env: BARE_ENV,
         timeoutMs: 20_000,
       }),
@@ -466,6 +480,7 @@ describeSpawn('multiple sources run concurrently and fail independently', () => 
         sources: 'web,x',
         config: {
           engine: 'antigravity-cli',
+          aggregate: { mode: 'chain' },
           engines: { 'antigravity-cli': { bin: agyBin }, 'grok-cli': { bin: grokBin } },
         },
         env,
@@ -499,6 +514,9 @@ describeSpawn('multiple sources run concurrently and fail independently', () => 
         sources: 'web,x',
         config: {
           engine: 'antigravity-cli',
+          // 这一块测的是「来源之间并发且互不牵连」，属于链式编排；
+          // 融合是另一条路径，它会把这些断言变成测别的东西。
+          aggregate: { mode: 'chain' },
           engines: { 'antigravity-cli': { bin: agyBin }, 'grok-cli': { bin: grokBin } },
         },
         env,
