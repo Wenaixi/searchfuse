@@ -48,3 +48,5 @@ test-output
 
 docs/marketing/
 docs/marketing2/
+# 一次性操作的备份（删 tag 前导出的清单之类），不该进仓库
+.tags-backup-*.txt
