@@ -47,4 +47,5 @@ is active, or anything else that might matter.
 
 ---
 
-Not sure it is a bug, or just want to talk it through? Find me on X: [@liustack](https://x.com/liustack).
+Not sure it is a bug? Open an issue here and describe the situation: it gets read
+even when the cause is unclear.

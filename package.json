@@ -46,12 +46,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liustack/modsearch.git"
+    "url": "git+https://github.com/Wenaixi/searchfuse.git"
   },
   "bugs": {
-    "url": "https://github.com/liustack/modsearch/issues"
+    "url": "https://github.com/Wenaixi/searchfuse/issues"
   },
-  "homepage": "https://github.com/liustack/modsearch#readme",
+  "homepage": "https://github.com/Wenaixi/searchfuse#readme",
   "engines": {
     "node": ">=22.13"
   },

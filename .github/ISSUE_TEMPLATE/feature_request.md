@@ -27,4 +27,5 @@ engine, say which one and what it needs to run (key, binary, sign-in).
 
 ---
 
-Not sure it is a bug, or just want to talk it through? Find me on X: [@liustack](https://x.com/liustack).
+Not sure it is a bug? Open an issue here and describe the situation: it gets read
+even when the cause is unclear.
