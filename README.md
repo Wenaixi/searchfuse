@@ -36,7 +36,7 @@ Hit a problem? [Open an issue](https://github.com/liustack/modsearch/issues/new/
 
 ## Features
 
-- **🥇 The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@5.10.12`. In the desktop app's Add plugin dialog, enter `@liustack/modsearch`, not the GitHub URL. Details in [harness setup](docs/harness-setup.md#deepseek-harness-dsh).
+- **🥇 The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@0.1.0`. In the desktop app's Add plugin dialog, enter `@liustack/modsearch`, not the GitHub URL. Details in [harness setup](docs/harness-setup.md#deepseek-harness-dsh).
 - **Free out of the box, no signup.** Search and page fetch run on Firecrawl Keyless by default: [1,000 free credits/month](https://www.firecrawl.dev/blog/firecrawl-keyless-launch), no account, no API key, no card. Every fallback channel is free too: Antigravity CLI needs only a browser sign-in, and Tavily, Exa, and a free Firecrawl key each add their own monthly quota with no card required.
 - **Fused search, not failover.** By default `web_search` asks every reachable engine at once and merges their ranked lists with reciprocal rank fusion, so an answer reflects several indexes and a page two engines agree on outranks one only a single engine liked. Set `aggregate.mode chain` for the old sequential behaviour.
 - **Automatic failover.** When a channel fails or exhausts its quota, the next one takes over. Under fusion, one engine erroring costs only its own contribution; the rest of the answer stands and the failure is named in `uncertainty`.

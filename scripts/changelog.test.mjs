@@ -36,6 +36,25 @@ describe('changelogSection', () => {
     expect(changelogSection('## 1a2b3 - x\n\nwrong body.\n', '1.2.3')).toBeNull();
   });
 
+  it('reads the Keep a Changelog bracketed heading as well as the plain one', () => {
+    // 新版用 `## [0.1.0] - 日期` 这种写法（方括号承载每版的 compare 链接），
+    // 老版本与测试里的字面量仍是 `## 0.1.0 - 日期`。发布脚本要能读两种。
+    const bracketed = `# Changelog
+
+## [0.2.0] - 2026-11-20
+
+- bracketed body.
+
+## 0.1.0 - 2026-11-18
+
+- plain body.
+`;
+    expect(changelogSection(bracketed, '0.2.0')).toContain('bracketed body.');
+    expect(changelogSection(bracketed, '0.1.0')).toContain('plain body.');
+    // 方括号里的内容仍然要是那个版本号，不能被前缀骗过去。
+    expect(changelogSection(bracketed, '0.1')).toBeNull();
+  });
+
   it('returns null when the version is absent', () => {
     expect(changelogSection(CHANGELOG, '9.9.9')).toBeNull();
   });

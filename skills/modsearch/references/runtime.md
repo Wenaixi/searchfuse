@@ -4,7 +4,7 @@ skill 如何启动 `modsearch` CLI、钉在哪个版本、在什么都跑不了�
 
 ## 钉住的版本
 
-- Pinned CLI version: 5.10.12
+- Pinned CLI version: 0.1.0
 - npm 包：`@liustack/modsearch`
 - CLI 命令名：`modsearch`
 

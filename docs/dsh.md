@@ -34,7 +34,7 @@ npx -y @deepseek-ai/dsh --profile web --dump-config
 把插件装进实际启动的 profile。浏览器界面通常使用 `web`：
 
 ```sh
-npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@5.10.12
+npx -y @deepseek-ai/dsh plugin --profile web add @liustack/modsearch@0.1.0
 ```
 
 安装后重启 dsh，再确认真正解析到的包：
@@ -69,7 +69,7 @@ dsh 插件不维护第二份引擎配置。它继承同一组环境变量，并�
 先跑离线体检：
 
 ```sh
-npx -y @liustack/modsearch@5.10.12 doctor
+npx -y @liustack/modsearch@0.1.0 doctor
 ```
 
 常用配置：
@@ -176,7 +176,7 @@ npx -y @deepseek-ai/dsh --profile web
 用当前精确版本刷新 profile 中记录的请求：
 
 ```sh
-npx -y @deepseek-ai/dsh plugin --profile <name> add @liustack/modsearch@5.10.12
+npx -y @deepseek-ai/dsh plugin --profile <name> add @liustack/modsearch@0.1.0
 ```
 
 卸载命令：
@@ -189,14 +189,14 @@ npx -y @deepseek-ai/dsh plugin --profile <name> remove @liustack/modsearch
 
 ## 故障定位
 
-- `declares no dsh.bundle`：装到了旧版 ModSearch。按上方精确版本重新安装。
-- `modsearch's CLI build is missing`，或 5.10.6 及更早版本报 `Cannot find module .../dist/main.js`：插件是从 GitHub 仓库装的，没有构建产物。卸载后按包名 `@liustack/modsearch` 重新添加。
+- `declares no dsh.bundle`：装到了不带 dsh 插件的旧版本。按上方精确版本重新安装。
+- `modsearch's CLI build is missing`，或报 `Cannot find module .../dist/main.js`：插件是从 GitHub 仓库装的，而仓库只有源码、没有构建产物。卸载后按包名 `@liustack/modsearch` 重新添加。
 - `web seam has no registerSearchProvider`：dsh 移动了开发预览接口。`x_search` 与 `read_page` 仍会注册，网页搜索则跳过并打印明确日志。修改插件前先检查最新 dsh release。
 - `modsearch failed (exit ...)`：运行 `modsearch doctor`。错误会保留 CLI 尝试过的引擎。
 - `plugin list` 有包但 `--dump-config` 没有：检查 `~/.dsh/profiles/<name>/package.json` 的 `dsh.profile.bundles` 中是否存在该包。
-- Electron 又打开一个应用进程，没有运行 CLI：使用 ModSearch 5.4.3 或更高版本。插件会给子进程设置 `ELECTRON_RUN_AS_NODE=1`。
-- `settings namespace skipped: TypeError: scope.settings.register is not a function`：在 dsh 0.1.7 或更新版本上用了 ModSearch 5.10.3 或更旧版本。搜索和两个工具照常可用，只是设置卡片缺失。升级到 ModSearch 5.10.4 或更高版本。
-- 插件页上看不到 ModSearch 的设置：dsh 0.1.6-alpha.2 把插件设置搬到了插件页，而 ModSearch 5.10.3 及更旧版本只把卡片交给旧的设置页插槽。升级到 ModSearch 5.10.4 或更高版本。如果配置了 `settingsCard: false`，卡片是被有意关掉的。
-- `settings card route skipped: Error: webserver: duplicate exact route "/modsearch/config"`：ModSearch 5.10.3 或更旧版本在「插件」页关掉插件时没有撤下路由。重启 dsh，或升级到 ModSearch 5.10.4 或更高版本。
+- Electron 又打开一个应用进程，没有运行 CLI：插件会给子进程设置 `ELECTRON_RUN_AS_NODE=1`。
+- `settings namespace skipped: TypeError: scope.settings.register is not a function`：dsh 0.1.7 起改用按已服务命名空间分发插件卡片，而旧版 ModSearch 只注册了空 schema。搜索和两个工具照常可用，只是设置卡片缺失。装当前版本即可。
+- 插件页上看不到 ModSearch 的设置：dsh 0.1.6-alpha.2 把插件设置搬到了插件页，而更早的 ModSearch 只把卡片交给旧的设置页插槽。装当前版本即可。如果配置了 `settingsCard: false`，卡片是被有意关掉的。
+- `settings card route skipped: Error: webserver: duplicate exact route "/modsearch/config"`：旧版在「插件」页关掉插件时没有撤下路由。重启 dsh，或装当前版本。
 
 CLI 自身的错误见[故障排查](troubleshooting.md)。
