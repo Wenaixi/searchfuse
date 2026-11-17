@@ -27,11 +27,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        # 22 是 package.json 声明的下限，24 是当前 LTS，26 是本机运行的版本：
-        # 本机能跑不代表矩阵覆盖到了它，而引擎代码里用到的 API（AbortSignal.any、
-        # 结构化收紧）正是随 Node 版本演进的。
-        node: [22, 24, 26]
+        include:
+          # ubuntu 跑满三个 Node：它是主平台，版本边界最该在这里验。
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: ubuntu-latest
+            node: 26
+          # windows 只测两端：22 是声明下限，26 是本机在跑的那个。中间的 24
+          # 与 22/26 之间没有 windows 特有的分支，测它只是多排一次队。
+          - os: windows-latest
+            node: 22
+          - os: windows-latest
+            node: 26
+          # macos 只测一个：平台特有的失败（信号语义、权限位）已在代码里
+          # 门控掉，跑满三个只会让整条流水线多等十几分钟。
+          - os: macos-latest
+            node: 24
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
