@@ -41,7 +41,6 @@ jobs:
             node: 22
           - os: windows-latest
             node: 26
-          # macOS 不在这里：它是单独一个 job，见下面为什么。
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -51,29 +50,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-
-  # macOS 单独一个 job，默认只在手动触发与 PR 时跑。
-  #
-  # 原因：公共仓库的 macOS runner 排队极慢，实测一次排队十五分钟以上仍被取消。
-  # 它验证的东西——POSIX 信号语义、文件权限位——已经在代码里用 IS_WINDOWS
-  # 门控掉了，剩下的部分是 Ubuntu 也在跑的同一份测试。挂在每次 push 上只会
-  # 让主分支的绿灯被一个排队的 job 拖成红的。
-  macos:
-    if: github.event_name != 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck

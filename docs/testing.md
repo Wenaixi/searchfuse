@@ -28,7 +28,7 @@ pnpm typecheck                              # tsc --noEmit，跑测试前先跑�
 
 ## 平台覆盖
 
-`macos-latest`、`ubuntu-latest`、`windows-latest` 都会在 Node 22 与 24 上跑 `pnpm typecheck && pnpm test && pnpm build`。少数只在 Unix 成立的套件被加了门，好让 Windows 那一格保持诚实而不是一路红：
+CI 在 `ubuntu-latest` 的 Node 22 / 24 / 26 与 `windows-latest` 的 Node 22 / 26 上跑 `pnpm typecheck && pnpm test && pnpm build`。少数只在 Unix 成立的套件被加了门，好让 Windows 那一格保持诚实而不是一路红：
 
 - **拉起假 CLI**（`SPAWNS_FAKE_CLI`）。searchfuse 用 `spawn(bin, args)` 且不带 shell 地启动引擎，这是个刻意的安全选择。在 Windows 上只有真正的 `.exe` 才是可按路径执行的镜像：Node 拒绝在不加 `shell: true` 的情况下启动 `.cmd`/`.bat`（CVE-2024-27980），POSIX shell 脚本在那里也执行不了。要让假 CLI 跨平台就得有一个测试造不出来的真 `.exe`，所以拉起 `agy`/`grok` 假货的那几个套件只在 Unix 跑。进程内 HTTP 引擎以及全部纯路由、配置、解析逻辑仍然在 Windows 上跑。
 - **SIGTERM/SIGKILL 逐级升级**（`src/subprocess.test.ts`）。这是 Unix 的信号语义：在 Windows 上 `child.kill` 总是调 `TerminateProcess`，没有可忽略的 SIGTERM 可供升级。

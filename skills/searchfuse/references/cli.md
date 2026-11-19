@@ -54,9 +54,9 @@ searchfuse -q "reactions on X" --source x       # 搜 X，关于 X 的查询会�
 
 ## 平台支持
 
-macOS 和 Linux 完整支持，CI 在 Node 22 和 24 上跑全量测试。skill 附带两个启动器，macOS 和 Linux 用 `scripts/run.sh`，Windows 用 `scripts/run.ps1`，它们自动选择可用的运行方式，三个平台行为一致。
+macOS 和 Linux 完整支持，CI 在 Linux 的 Node 22 / 24 / 26 与 Windows 的 Node 22 / 26 上跑全量测试。skill 附带两个启动器，macOS 和 Linux 用 `scripts/run.sh`，Windows 用 `scripts/run.ps1`，它们自动选择可用的运行方式，三个平台行为一致。
 
-CI 矩阵同样包含 `windows-latest` 的 Node 22 和 24，跑同一套 typecheck、测试、构建关卡。各部分在 Windows 上的可用性取决于它依赖什么：
+CI 矩阵同样包含 `windows-latest` 的 Node 22 和 26，跑同一套 typecheck、测试、构建关卡。各部分在 Windows 上的可用性取决于它依赖什么：
 
 - **CLI 本体、路由与配置逻辑、HTTP 引擎**（`local` 抓取、Tavily、Exa、Firecrawl、Keenable、You.com）是纯 Node：只用 `fetch` 和文件系统，天然跨平台。
 - **agy 和 grok 是外部 CLI。** searchfuse 不经 shell 按名字直接运行它们，所以 PATH 上的原生 Windows 可执行文件可用，npm 风格的 `.cmd` 垫片不可用。有没有 Windows 构建是每个工具自己的决定，不是 searchfuse 的。每个直接子进程都会带 `windowsHide: true` 启动，因此没有控制台的 GUI 宿主不会在每次调用时闪出黑框。
