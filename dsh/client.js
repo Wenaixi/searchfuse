@@ -25,15 +25,15 @@ window.__ModuleLoader__.load({
       'exa',
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'searxng',
-      'arxiv',
       'grok-cli',
       'local',
     ];
 
     // 既不需要密钥、也不需要注册就能搜索的引擎。
-    var KEYLESS_ENGINES = ['firecrawl', 'keenable', 'youcom', 'searxng'];
+    var KEYLESS_ENGINES = ['firecrawl', 'keenable', 'anysearch', 'youcom', 'searxng'];
 
     // 故障转移链是一排搜索引擎，所以取页器不在其中。`local` 只读取交给它
     // 的一个 URL，本身不做任何搜索；在这一排里给它一个勾选框，只会招来一个

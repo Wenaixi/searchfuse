@@ -115,8 +115,8 @@ describe('doctor: search engines', () => {
         engines: {
           firecrawl: { enabled: false },
           keenable: { enabled: false },
+          anysearch: { enabled: false },
           youcom: { enabled: false },
-          arxiv: { enabled: false },
         },
       },
       env: BARE_ENV,
@@ -400,8 +400,7 @@ describe('doctor: aggregate and MCP sections', () => {
     expect(byEngine('tavily')).toBe('关闭（enabled: false）');
     expect(byEngine('exa')).toBe('不参与融合（expose.aggregate: false）');
     // 用 keenable 断言「参与融合」这一档：它在空环境里无需密钥即可用，而且
-    // 不在默认关闭名单里。换成 arxiv 会落到「关闭」——那测的是别的规则，
-    // 不是这里要验证的融合参与者分类。
+    // 不在默认关闭名单里，且空环境里无需密钥即可用。
     expect(byEngine('keenable')).toBe('参与融合');
     expect(report.aggregate.mode).toBe('rrf');
     expect(formatDoctorReport(report)).toContain('Aggregate');

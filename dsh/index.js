@@ -566,14 +566,14 @@ const CARD_ENGINES = [
   'exa',
   'firecrawl',
   'keenable',
+  'anysearch',
   'youcom',
   'searxng',
-  'arxiv',
   'grok-cli',
   'local',
 ];
 /** 需要 API 密钥的引擎。 */
-const KEYED_ENGINES = ['tavily', 'exa', 'firecrawl', 'keenable'];
+const KEYED_ENGINES = ['tavily', 'exa', 'firecrawl', 'keenable', 'anysearch'];
 /**
  * 需要 `baseURL` 的引擎。SearXNG 在这里而不在需要密钥的那组：它需要一个
  * 对端主机来通信，但不需要凭证，这两种能力分开校验，所以一次卡片保存不会
@@ -594,7 +594,7 @@ const MODEL_ENGINES = ['antigravity-cli'];
  * 它们仍然出现在卡片上，用户可以逐个打开；而 `doctor` 照样报告它们是否存在，
  * 所以「装了吗」和「开着吗」是两个可以分开看的答案。
  */
-const DEFAULT_OFF_ENGINES = ['antigravity-cli', 'arxiv'];
+const DEFAULT_OFF_ENGINES = ['antigravity-cli'];
 /**
  * 所有被接受的拼写，与 src/config.ts 里的 CANONICAL_ENGINE 对应。用别名保存
  * 的设置就是同一个引擎的设置，所以卡片必须在它们本来所在的地方读写。
@@ -616,6 +616,7 @@ const ENGINE_ENV_BINDINGS = {
   exa: { apiKey: 'EXA_API_KEY', baseURL: 'EXA_BASE_URL' },
   firecrawl: { apiKey: 'FIRECRAWL_API_KEY', baseURL: 'FIRECRAWL_BASE_URL' },
   keenable: { apiKey: 'KEENABLE_API_KEY', baseURL: 'KEENABLE_BASE_URL' },
+  anysearch: { apiKey: 'ANYSEARCH_API_KEY', baseURL: 'ANYSEARCH_BASE_URL' },
 };
 
 /** 一个存储名所指的规范引擎；它什么都不指时返回 ''。 */

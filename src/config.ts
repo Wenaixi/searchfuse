@@ -51,16 +51,9 @@ export interface AggregateConfig {
  * 超过任何有用的融合预算；留在链里也只能被跳过。想要它的用户写上
  * `engines.antigravity-cli.enabled: true` 就能把它拿回来。
  *
- * arXiv 之所以在这里，是因为它按「任意词命中」检索，语义太宽：查询
- * "electron main process" 会让它返回铜氧化物里的激子-极化激元论文
- * （electron 指的是电子），"react hooks tutorial" 会让它返回医学统计论文
- * （tutorial）与组合数学论文（hook）。而 RRF 只看名次不看语义，于是一条
- * 无关的 arXiv 头名能挤进融合结果的前几名。它的价值在于「我要找论文」，
- * 不在「我随便问问」。想要它的用户写上 `engines.arxiv.enabled: true` 即可。
  */
 const OFF_UNLESS_ENABLED: Record<string, true> = {
   'antigravity-cli': true,
-  arxiv: true,
 };
 
 export interface EngineSettings {
@@ -209,6 +202,7 @@ const ENV_BINDINGS: Record<string, Partial<Record<StringEngineSetting, string>>>
   exa: { apiKey: 'EXA_API_KEY', baseURL: 'EXA_BASE_URL' },
   firecrawl: { apiKey: 'FIRECRAWL_API_KEY', baseURL: 'FIRECRAWL_BASE_URL' },
   keenable: { apiKey: 'KEENABLE_API_KEY', baseURL: 'KEENABLE_BASE_URL' },
+  anysearch: { apiKey: 'ANYSEARCH_API_KEY', baseURL: 'ANYSEARCH_BASE_URL' },
 };
 
 const SETTABLE_ENGINE_FIELDS: Array<keyof EngineSettings> = [

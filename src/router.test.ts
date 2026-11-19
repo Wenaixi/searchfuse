@@ -68,6 +68,7 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', withKey, undefined, WITH_AGY).chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'tavily',
     ]);
@@ -78,6 +79,7 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', withKeys, undefined, WITH_AGY).chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'tavily',
       'exa',
@@ -91,6 +93,7 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', keyed, undefined, WITH_AGY).chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'tavily',
       'exa',
@@ -115,6 +118,7 @@ describe('engine chains per role', () => {
     expect(names(planRole('search', config(), undefined, BARE).chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
     ]);
   });
@@ -123,21 +127,11 @@ describe('engine chains per role', () => {
     const disabled = config({ engines: { firecrawl: { enabled: false } } });
     expect(names(planRole('search', disabled, undefined, WITH_AGY).chain)).toEqual([
       'keenable',
+      'anysearch',
       'youcom',
     ]);
   });
 
-  it('keeps arXiv out of the chain until the user turns it on', () => {
-    // arXiv 默认不激活，因为它按任意词命中检索，语义太宽：查询
-    // “electron main process” 会让它返回铜氧化物里的激子-极化激元论文。
-    // 关掉的只是默认——用户在卡片上勾一下就该拿回来，所以这条测试同时锁住
-    // 两个方向，只锁「不在链里」会让人以为这个引擎被删掉了。
-    const bare = config({});
-    expect(names(planRole('search', bare, undefined, WITH_AGY).chain)).not.toContain('arxiv');
-
-    const turnedOn = config({ engines: { arxiv: { enabled: true } } });
-    expect(names(planRole('search', turnedOn, undefined, WITH_AGY).chain)).toContain('arxiv');
-  });
 
   it('does not treat comma-only API key settings as configured keys', () => {
     // Every engine that has no key to check is switched off here, so an empty
@@ -146,8 +140,8 @@ describe('engine chains per role', () => {
       engines: {
         firecrawl: { enabled: false },
         keenable: { enabled: false },
+        anysearch: { enabled: false },
         youcom: { enabled: false },
-        arxiv: { enabled: false },
         tavily: { apiKey: ', ,' },
         exa: { apiKey: ',,' },
       },
@@ -375,6 +369,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
     expect(names(chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'exa',
       'tavily',
@@ -394,6 +389,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
     expect(names(planRole('search', multiKey, undefined, WITH_AGY, partlyCooling).chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'tavily',
       'exa',
@@ -404,6 +400,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
     expect(names(chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'exa',
       'tavily',
@@ -418,11 +415,13 @@ describe('cooldown reorders the chain without changing the base order', () => {
       firecrawl: FUTURE,
       keenable: FUTURE,
       youcom: FUTURE,
-      arxiv: FUTURE,
     });
     const { chain } = planRole('search', keyed, undefined, WITH_AGY, cd);
     // All cooling means the base order is unchanged, and nothing is dropped.
+    // anysearch 不在冷却表里（它是免 key 匿名档，无配额可耗尽），所以它
+    // 留在链首，其余冷却引擎按基础顺序跟在后面。
     expect(names(chain)).toEqual([
+      'anysearch',
       'firecrawl',
       'keenable',
       'youcom',
@@ -466,6 +465,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
     expect(names(chain)).toEqual([
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'tavily',
       'exa',

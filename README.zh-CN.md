@@ -8,7 +8,7 @@
 
 <p align="center">🥇 <b>全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件</b> 🥇</p>
 
-<p align="center">引擎：<b>Firecrawl</b>（免注册，默认）· <b>Keenable</b>（免注册）· <b>You.com</b>（免注册）· <b>SearXNG</b>（自建）· <b>Tavily</b> · <b>Exa</b> · <b>arXiv</b> · <b>Antigravity CLI</b> · <b>Grok（X）</b> · <b>local</b>，默认融合</p>
+<p align="center">引擎：<b>Firecrawl</b>（免注册，默认）· <b>Keenable</b>（免注册）· <b>You.com</b>（免注册）· <b>SearXNG</b>（自建）· <b>AnySearch</b>（免注册）· <b>Tavily</b> · <b>Exa</b> · <b>Antigravity CLI</b> · <b>Grok（X）</b> · <b>local</b>，默认融合</p>
 
 <p align="center">
   <a href="./README.md">English</a> ·
@@ -78,12 +78,11 @@ Firecrawl、Keenable 和 You.com 零配置直接可用，其余引擎各一条�
 | SearXNG | 网页搜索（它自己那 70+ 上游引擎，全部经一个适配器） | 免费，自建 | 先跑起实例，再 `searchfuse config set searxng.baseURL <url>` |
 | Tavily | 网页搜索 | 每月 1,000 credits，不绑卡 | `searchfuse config set tavily.apiKey <key>` |
 | Exa | 网页搜索 | 每月 $10 循环额度（约 1,400 次），不绑卡 | `searchfuse config set exa.apiKey <key>` |
-| arXiv | 网页搜索（文献） | 免费，无需 key | 默认关闭：`searchfuse config set engines.arxiv.enabled true` |
 | Antigravity CLI | 网页搜索 + 单页抓取 | 免费，浏览器登录 | 默认关闭：安装 `agy` 并登录，再 `searchfuse config set engines.antigravity-cli.enabled true` |
 | Grok Build | X（推特）搜索 | 随 SuperGrok 或 X Premium 订阅 | 安装 `grok` 并登录 |
 | local | 单页抓取 | 内置，零安装 | 无需任何操作 |
 
-key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎时它们会一起跑并融合结果。每个引擎默认都参与，但 `antigravity-cli` 与 `arxiv` 例外——它们要你用 `searchfuse config set engines.<name>.enabled true` 打开才生效，前者慢到超出融合预算，后者按任意词命中检索。任何引擎都可以用 `searchfuse config set <engine>.enabled false` 排除。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`searchfuse config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/searchfuse/references/configure.md)。
+key 也可以走环境变量（`TAVILY_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`、`KEENABLE_API_KEY`）。同一引擎可在配置文件或环境变量中写入逗号分隔的多个 key，例如 `key-one,key-two`。配了多个引擎时它们会一起跑并融合结果。每个引擎默认都参与，但 `antigravity-cli` 例外——它要你用 `searchfuse config set engines.antigravity-cli.enabled true` 打开才生效，因为它慢到超出融合预算。任何引擎都可以用 `searchfuse config set <engine>.enabled false` 排除。想用 Tavily、Exa、Firecrawl、Keenable 兼容的第三方或自建端点？把引擎指过去即可：`searchfuse config set tavily.baseURL <url>`。官方地址始终内置在代码里，不会作为默认配置写入文件。每个引擎的全部配置项见[配置指南](skills/searchfuse/references/configure.md)。
 
 ## 安装
 

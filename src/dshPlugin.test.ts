@@ -61,7 +61,7 @@ describe('dsh plugin bundle', () => {
     const source = fs.readFileSync(new URL('./config.ts', import.meta.url), 'utf-8');
     const host = fs.readFileSync(new URL('../dsh/index.js', import.meta.url), 'utf-8');
     const block = source.match(/OFF_UNLESS_ENABLED[^=]*=\s*\{([^}]*)\}/s)?.[1] ?? '';
-    // 键可能带引号（`'antigravity-cli'`）也可能不带（`arxiv`），两种都要抓：
+    // 键可能带引号（`'antigravity-cli'`）也可能不带（`youcom`），两种都要抓：
     // 只抓裸键名会静默漏掉带引号的那部分，于是断言比它看起来的更弱。
     const fromSource = [...block.matchAll(/['"]?([A-Za-z0-9_-]+)['"]?\s*:/g)].map((m) => m[1]);
     const listFrom = (text: string, name: string): string[] => {

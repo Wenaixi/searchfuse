@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AnySearch 引擎。** 免注册匿名档即可搜索（有限流），可配 `ANYSEARCH_API_KEY`
+  提升额度。带 key 请求被 401/403 拒绝时自动降级匿名档重试一次，并在
+  `warnings` 里注明。结果带相关性过滤：与查询无共享词汇的整批判空，让 RRF
+  融合有机会换下一个引擎。默认参与融合。
+
+### Removed
+
+- **arXiv 引擎。** 按任意词命中检索，语义太宽，会把无关论文混进融合结果。
+  把它从引擎注册表、配置、卡片与文档全部移除——不再有默认关闭，因为它不再
+  存在。
+
 ## [0.1.0] - 2026-11-18
 
 首个正式版本。modsearch 是一个给模型用的联网搜索插件：把搜索查询变成带来源

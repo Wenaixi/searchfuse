@@ -1,5 +1,6 @@
 import type { EngineSettings, Role } from '../config.ts';
 import { antigravityCliProvider } from './antigravity.ts';
+import { anysearchProvider } from './anysearch.ts';
 import { exaProvider } from './exa.ts';
 import { firecrawlProvider } from './firecrawl.ts';
 import { grokCliProvider } from './grok.ts';
@@ -8,7 +9,6 @@ import { keenableProvider } from './keenable.ts';
 import { tavilyProvider } from './tavily.ts';
 import { youcomProvider } from './youcom.ts';
 import { searxngProvider } from './searxng.ts';
-import { arxivProvider } from './arxiv.ts';
 
 export type RunMode = 'search' | 'fetch';
 
@@ -89,9 +89,9 @@ const ENGINES: Record<string, SearchEngine> = {
   exa: exaProvider,
   firecrawl: firecrawlProvider,
   keenable: keenableProvider,
+  anysearch: anysearchProvider,
   youcom: youcomProvider,
   searxng: searxngProvider,
-  arxiv: arxivProvider,
   'grok-cli': grokCliProvider,
   grok: grokCliProvider,
   // 内置直连抓取器，规范名是 `local`。`http` 和 `direct` 保留为别名，
@@ -123,9 +123,9 @@ export const ROLE_PREFERENCE: Record<Role, string[]> = {
   search: [
     'firecrawl',
     'keenable',
+    'anysearch',
     'youcom',
     'searxng',
-    'arxiv',
     'antigravity-cli',
     'tavily',
     'exa',

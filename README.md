@@ -8,7 +8,7 @@
 
 <p align="center">🥇 <b>The strongest free web search plugin for DeepSeek Harness (dsh)</b> 🥇</p>
 
-<p align="center">Engines: <b>Firecrawl</b> (keyless, default) · <b>Keenable</b> (keyless) · <b>You.com</b> (keyless) · <b>SearXNG</b> (self-hosted) · <b>Tavily</b> · <b>Exa</b> · <b>arXiv</b> · <b>Antigravity CLI</b> · <b>Grok (X)</b> · <b>local</b>, fused by default</p>
+<p align="center">Engines: <b>Firecrawl</b> (keyless, default) · <b>Keenable</b> (keyless) · <b>You.com</b> (keyless) · <b>SearXNG</b> (self-hosted) · <b>AnySearch</b> (keyless) · <b>Tavily</b> · <b>Exa</b> · <b>Antigravity CLI</b> · <b>Grok (X)</b> · <b>local</b>, fused by default</p>
 
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a> ·
@@ -78,12 +78,11 @@ Firecrawl, Keenable, and You.com work with zero setup. Every other engine is one
 | SearXNG | web search (its own 70+ upstream engines behind one adapter) | free, self-hosted | run an instance, then `searchfuse config set searxng.baseURL <url>` |
 | Tavily | web search | 1,000 credits/month, no card | `searchfuse config set tavily.apiKey <key>` |
 | Exa | web search | $10/month recurring credit (~1,400 searches), no card | `searchfuse config set exa.apiKey <key>` |
-| arXiv | web search (literature) | free, no key | off by default: `searchfuse config set engines.arxiv.enabled true` |
 | Antigravity CLI | web search + page fetch | free, browser sign-in | off by default: install `agy`, sign in, then `searchfuse config set engines.antigravity-cli.enabled true` |
 | Grok Build | X (Twitter) search | rides SuperGrok or X Premium | install `grok` and sign in |
 | local | page fetch | built in, nothing to install | nothing |
 
-Keys can also come from the environment (`TAVILY_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `KEENABLE_API_KEY`). One engine can take multiple keys as a comma-separated value such as `key-one,key-two`, in either the config file or its environment variable. Multiple engines configured means they run together and their results are fused. Every engine participates by default except `antigravity-cli` and `arxiv`, which stay off until you turn them on with `searchfuse config set engines.<name>.enabled true` because one is too slow for a fusion budget and the other matches on any keyword. Exclude any engine with `searchfuse config set <engine>.enabled false`. Using a Tavily-, Exa-, Firecrawl-, or Keenable-compatible third-party or self-hosted endpoint? Point the engine at it: `searchfuse config set tavily.baseURL <url>`. Official endpoints stay built into the code and are never written as default config. Every knob, engine by engine, is in the [configuration guide](skills/searchfuse/references/configure.md).
+Keys can also come from the environment (`TAVILY_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `KEENABLE_API_KEY`). One engine can take multiple keys as a comma-separated value such as `key-one,key-two`, in either the config file or its environment variable. Multiple engines configured means they run together and their results are fused. Every engine participates by default except `antigravity-cli`, which stays off until you turn it on with `searchfuse config set engines.antigravity-cli.enabled true` because it is too slow for a fusion budget. Exclude any engine with `searchfuse config set <engine>.enabled false`. Using a Tavily-, Exa-, Firecrawl-, or Keenable-compatible third-party or self-hosted endpoint? Point the engine at it: `searchfuse config set tavily.baseURL <url>`. Official endpoints stay built into the code and are never written as default config. Every knob, engine by engine, is in the [configuration guide](skills/searchfuse/references/configure.md).
 
 ## Installation
 

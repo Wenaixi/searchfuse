@@ -65,7 +65,7 @@ JSON 不支持注释，所以每个字段的说明在这里：
 
 | 字段 | 类型 | 作用范围 | 含义 |
 | :-- | :-- | :-- | :-- |
-| `engine` | string | 顶层 | 由哪个引擎搜索。空表示自动（用本机可用的最好那个）。取值 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`youcom`、`searxng`、`arxiv`、`grok-cli`、`local` 之一。别名 `agy`、`antigravity`、`grok`、`http`、`direct` 也接受，会归一为正式名。 |
+| `engine` | string | 顶层 | 由哪个引擎搜索。空表示自动（用本机可用的最好那个）。取值 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`youcom`、`searxng`、`grok-cli`、`local` 之一。别名 `agy`、`antigravity`、`grok`、`http`、`direct` 也接受，会归一为正式名。 |
 | `cooldown` | `"on"` / `"off"` | 顶层 | 额度冷却故障转移。默认开。关掉后不读不写任何状态，路由与从前完全一致。 |
 | `allowPrivateNetwork` | boolean | 顶层 | 允许本地抓取器访问私有或保留地址，包括 VPN 使用的其他保留地址段和 hosts 文件加速器。默认 `false`。DNS 返回的 `198.18.0.0/15` 地址已按 fake-ip 占位值放行，无需此开关。在 URL 中直写该地址段，开关关闭时仍会被拦截。此设置从不授权 Firecrawl 云端披露，URL 中直写的私有和保留目标始终不会发往云端。对于 DNS 结果，只有应用 fake-ip 例外后所有地址仍被判为私有或保留地址时，Firecrawl 才会拒绝披露。 |
 | `aggregate` | object | 顶层 | 融合搜索。开启时 `web_search` 并发询问多个引擎并合并它们的排序列表，而不是逐个尝试。详见下方「融合搜索」一节。 |
@@ -287,7 +287,6 @@ searchfuse config set engines.tavily.toolName tavily_web
 **需要你打开才生效。** 有两个引擎默认关闭，两者都仍然出现在设置卡片上，一键即可打开：
 
 - `antigravity-cli` 靠模型合成答案，可能要一分钟以上，超过任何有用的融合预算。打开它：`searchfuse config set engines.antigravity-cli.enabled true`。
-- `arxiv` 按任意词命中检索，语义太宽：查询 `electron main process` 会返回铜氧化物里的激子-极化激元论文，`react hooks tutorial` 会返回关于 cure model 的论文（命中 `tutorial`）与关于 hook length 的论文（命中 `hook`）。融合按名次排序而不看语义，于是一条无关的 arXiv 头名可能压过两个其他引擎都认可的页面。确实要做文献检索时再打开它：`searchfuse config set engines.arxiv.enabled true`。
 
 两者都仍然会被 `searchfuse doctor` 报告，所以"装了吗"和"开着吗"始终是两个分开的答案。
 

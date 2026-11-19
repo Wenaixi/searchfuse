@@ -365,9 +365,9 @@ describe('a save carries only what the save is about', () => {
         exa: false,
         firecrawl: true,
         keenable: true,
+        anysearch: true,
         youcom: true,
         searxng: true,
-        arxiv: true,
         'grok-cli': true,
         local: true,
       },
@@ -692,9 +692,9 @@ describe('the automatic engine chain lists what this machine can actually search
       'exa',
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'searxng',
-      'arxiv',
       'grok-cli X search only',
     ]);
     expect(view.texts.some((text) => /status is unavailable/i.test(text))).toBe(true);
@@ -882,9 +882,9 @@ describe('the preference list offers only engines a preference can mean', () => 
       'exa',
       'firecrawl',
       'keenable',
+      'anysearch',
       'youcom',
       'searxng',
-      'arxiv',
       'grok-cli',
     ]);
   });

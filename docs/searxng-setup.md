@@ -86,6 +86,5 @@ engines:
 
 [exa,firecrawl,keenable,youcom,searxng]  Rust Async Runtimes: Tokio vs async-std
 [exa,firecrawl,keenable,youcom,searxng]  The State of Async Runtimes
-[arxiv]                                  Modular Responsiveness Verification
 [hackernews]                             Migrating from Go to Rust
 ```
