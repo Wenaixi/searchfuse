@@ -605,7 +605,17 @@ async function withConfig(
   const file = path.join(home, '.modsearch', 'config.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, typeof contents === 'string' ? contents : JSON.stringify(contents));
+  // 只记录宿主原有的相关变量以便还原；是否清空由用例自己决定，
+  // 因为部分用例需要在 withConfig 之外注入环境密钥来验证 env 分支。
+  const KEY_ENV = [
+    'EXA_API_KEY', 'EXA_BASE_URL',
+    'TAVILY_API_KEY', 'TAVILY_BASE_URL',
+    'FIRECRAWL_API_KEY', 'FIRECRAWL_BASE_URL',
+    'KEENABLE_API_KEY', 'KEENABLE_BASE_URL',
+    'ANYSEARCH_API_KEY', 'ANYSEARCH_BASE_URL',
+  ];
   const realHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const realKeys = KEY_ENV.map((k) => [k, process.env[k]] as const);
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   try {
@@ -619,6 +629,10 @@ async function withConfig(
   } finally {
     process.env.HOME = realHome.HOME;
     process.env.USERPROFILE = realHome.USERPROFILE;
+    for (const [k, v] of realKeys) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
@@ -628,7 +642,12 @@ describe('dsh settings card route', () => {
   // where the API keys live. Every assertion here is about a key not leaving,
   // not being lost, and no other setting moving underneath the save.
   it('never puts an API key on the wire, only whether one is stored', async () => {
-    await withConfig(
+    // 宿主机上的 EXA_API_KEY 会让 exa.hasKey 变 true。本用例断言的是
+    // 「文件里没有、环境里也没有」的基线，所以先摘掉它再还原。
+    const savedExaKey = process.env.EXA_API_KEY;
+    delete process.env.EXA_API_KEY;
+    try {
+      await withConfig(
       {
         engine: 'tavily',
         engines: {
@@ -657,6 +676,10 @@ describe('dsh settings card route', () => {
         expect(engines.exa.enabled).toBe(false);
       },
     );
+    } finally {
+      if (savedExaKey === undefined) delete process.env.EXA_API_KEY;
+      else process.env.EXA_API_KEY = savedExaKey;
+    }
   });
 
   it('does not report comma-only API key settings as stored keys', async () => {
