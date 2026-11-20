@@ -20,41 +20,7 @@ import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { resolveEndpoint } from './endpoint.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from '../types.ts';
 
-// transport 依赖注入。Mod 沙箱单 worker 单会话，模块级可变状态安全。
-// dsh 侧不 import 本文件，只靠 src/ 里的原版。
-type RequestTextLike = (
-  label: string,
-  url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string },
-  signal?: AbortSignal,
-  timeoutMs?: number,
-  secrets?: ReadonlyArray<string | undefined | null>,
-  explicitProxy?: string | null,
-) => Promise<{
-  response: { status: number; ok: boolean; statusText: string; headers: { get: (name: string) => string | null } };
-  text: string;
-}>;
-
-let requestTextImpl: RequestTextLike = null as unknown as RequestTextLike;
-let signalTimeoutImpl: (ms: number) => AbortSignal = null as unknown as (ms: number) => AbortSignal;
-
-/** Mod 工厂在 register 时调用，注入 transport。 */
-export function setAnySearchDeps(deps: {
-  requestText: RequestTextLike;
-  signalTimeout: (ms: number) => AbortSignal;
-}): void {
-  requestTextImpl = deps.requestText;
-  signalTimeoutImpl = deps.signalTimeout;
-}
-
-// dsh 侧若有需要，可在这里给默认实现（null 时抛错提示要先注入）。
-function ensureDeps(): void {
-  if (requestTextImpl === null) {
-    throw new Error(
-      'anysearch transport not injected: call setAnySearchDeps({ requestText, signalTimeout }) first',
-    );
-  }
-}
+import { getEngineDeps } from '../deps.ts';
 
 const DEFAULT_MAX_RESULTS = 10;
 /** AnySearch 只接受 1-50 范围内的 max_results。 */
@@ -121,7 +87,7 @@ function looksRelevant(query: string, sources: AnySearchResult[]): boolean {
 }
 
 export async function executeAnySearch(options: EngineRequest): Promise<EngineOutput> {
-  ensureDeps();
+  
   if (options.mode === 'fetch') {
     throw new Error('The anysearch engine does not support page fetch (-u). It searches only.');
   }
@@ -140,7 +106,7 @@ export async function executeAnySearch(options: EngineRequest): Promise<EngineOu
     if (key) {
       headers.authorization = `Bearer ${key}`;
     }
-    return requestTextImpl(
+    return getEngineDeps().requestText(
       'anysearch',
       resolveEndpoint(options.settings.baseURL, ANYSEARCH_DEFAULT_BASE, '/v1/search'),
       {
@@ -148,7 +114,7 @@ export async function executeAnySearch(options: EngineRequest): Promise<EngineOu
         headers,
         body: JSON.stringify({ query: options.query, max_results: maxResults }),
       },
-      signalTimeoutImpl(options.timeoutMs),
+      getEngineDeps().signalTimeout(options.timeoutMs),
       options.timeoutMs,
       [...apiKeySecrets, options.settings.baseURL],
       resolveExplicitProxy(options.settings.proxy),

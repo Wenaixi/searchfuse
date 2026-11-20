@@ -61,8 +61,20 @@ export interface SearchEngine {
   name: string;
   /** 这个引擎能做搜索、抓取，还是两样都行。 */
   roles: ReadonlyArray<'search' | 'fetch'>;
-  /** 这个引擎现在可用吗（已配好密钥等）？ */
-  isAvailable: (settings: EngineSettings) => boolean;
+  /** 其他地方都没指定时使用的模型。没有模型时缺省。 */
+  defaultModel?: string;
+  /**
+   * 这个引擎现在可用吗？
+   *
+   * 签名与 src/providers/index.ts 保持一致（settings, env, role），
+   * 即使 Mod 版只用 settings 前几个字段——引擎实现是拷来的，保持签名
+   * 才能一字不改。
+   */
+  isAvailable: (
+    settings: EngineSettings,
+    env: Record<string, string | undefined>,
+    role: 'search' | 'fetch',
+  ) => boolean;
   /** 给人类看的一行：这个引擎要变得可用还缺什么。 */
   requirement: string;
   /** 进程内引擎的入口。 */
