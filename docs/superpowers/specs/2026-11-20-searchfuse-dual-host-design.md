@@ -124,7 +124,11 @@ export const register: Register = (on, options) => {
 ### 4.3 引擎融合（search.ts 移植）
 
 - 从 `src/search.ts` 的 `runFused` 移植：fanout → rrf → cache
-- transport 换 `$.http.fetch`（`timedRequest.ts` 改写）
+- **transport 分层**（`claude/engine/http.ts`）：
+  - `fetch`：默认路径，`$.http.fetch`（保留 headers/content-type/status/body；接受 30 秒固定超时；不保证代理）
+  - `curlFetch`：特殊路径，`$.process.spawn(['curl', ...])`（`env.HTTPS_PROXY` 传代理、`--max-time` 传超时、`next.signal` 真取消）
+  - 引擎配了 `proxy` 字段或需要短超时 → 自动走 curlFetch
+  - **SearXNG 走 curlFetch**：本机 127.0.0.1 服务，`$.http.fetch` 对 localhost 可能直接拒绝
 - SSRF 层：dns 预解析 → URL 黑名单（参考原 `http/network.ts` 的 `normalizeFetchUrl`）
 
 ### 4.4 SearXNG 管理器
