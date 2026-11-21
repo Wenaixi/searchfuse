@@ -15,6 +15,7 @@ import {
   setConfigValue,
 } from './config.ts';
 import { buildCooldownController, clearAllCooldowns, currentStatePath } from './cooldown.ts';
+import { effectiveMcp } from './config.ts';
 import { formatDoctorReport, runDoctor } from './doctor.ts';
 import {
   claudeSettingsPath,
@@ -27,6 +28,7 @@ import {
 import { findEngine, listEngines } from './providers/index.ts';
 import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
+import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, startServe } from './serve.ts';
 import { readSecret } from './util/secretInput.ts';
 
@@ -315,7 +317,8 @@ hosts
   .command('sync')
   .description('Write each host configuration from ~/.searchfuse/config.json')
   .option('--dry-run', 'Show what would change without writing')
-  .action((options: { dryRun?: boolean }) => {
+  .option('--skip-mcp-probe', 'Register MCP servers without checking they are reachable')
+  .action(async (options: { dryRun?: boolean; skipMcpProbe?: boolean }) => {
     try {
       const config = loadConfigFile();
       const lines: string[] = [];
@@ -349,19 +352,49 @@ hosts
         );
       }
 
-      // MCP：只补 omp 里缺的，不覆盖它已有的；Claude Code 侧只读报告。
+      // MCP：先用默认集合补缺，再探测可达性——注册一个连不上的 server
+      // 比不注册更糟，模型每次用它都要等超时。
+      const mcpSet = effectiveMcp(config);
+      const registeredNames = Object.keys(mcpSet);
+
       if (options.dryRun) {
-        lines.push('mcp: would add missing servers to ~/.omp/agent/mcp.json');
+        lines.push(`mcp: would register ${registeredNames.join(', ') || '(none)'} (after reachability probe)`);
       } else {
-        const mcp = syncOmpMcp(config as unknown as Record<string, unknown>);
+        let usable = registeredNames;
+        if (!options.skipMcpProbe) {
+          const servers = Object.fromEntries(
+            registeredNames
+              .map((name) => [name, mcpSet[name]] as const)
+              .filter(([, entry]) => entry !== undefined)
+              .map(([name, entry]) => [
+                name,
+                {
+                  transport: 'streamable-http' as const,
+                  url: typeof entry.url === 'string' ? entry.url : '',
+                  ...(typeof entry.timeoutMs === 'number' ? { timeoutMs: entry.timeoutMs } : {}),
+                },
+              ])
+              .filter(([, entry]) => (entry as { url: string }).url !== ''),
+          );
+          const health = await checkMcpHealth(servers);
+          usable = usableMcpNames(health);
+          const dead = registeredNames.filter((name) => !usable.includes(name));
+          if (dead.length > 0) {
+            for (const name of dead) {
+              const reason = health[name]?.reason ?? '不可达';
+              lines.push(`mcp: skipping ${name} (${reason})`);
+            }
+          }
+        }
+
+        const usableConfig = Object.fromEntries(usable.map((name) => [name, mcpSet[name]!]));
+        const mcp = syncOmpMcp({ mcp: usableConfig });
         lines.push(
           mcp.added.length > 0
             ? `mcp: added to omp: ${mcp.added.join(', ')}` +
                 (mcp.backup ? ` [backup: ${path.basename(mcp.backup)}]` : '')
-            : 'mcp: omp already has all configured servers (no change)',
+            : 'mcp: omp already has all reachable servers (no change)',
         );
-        // Claude Code 的 MCP 由它自己管；omp 会自动从 ~/.claude.json 导入。
-        // 这里只报告，让用户知道那些已经在用。
         const claudeMcp = reportClaudeMcp();
         if (claudeMcp.length > 0) {
           lines.push(`mcp: already installed in Claude Code: ${claudeMcp.join(', ')}`);
