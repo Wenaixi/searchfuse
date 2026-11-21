@@ -89,7 +89,7 @@
 
 **注意**：`kernel.js` 要接受 `--host <name>` 与 `--cwd <dir>`，才能按宿主解析覆盖层。这是对既有 I/O 契约的扩展。
 
-## 三·六、统一服务形态（v3：三条路结合）
+## 三·六、统一服务形态（v4：两条路）
 
 **三家都走同一个本地服务，服务不在时各自兜底。**
 
@@ -106,16 +106,20 @@ await $.process.run(['node', '--version'])
 裸名 `node` 由宿主按 PATH 解析，不需要 `process.execPath`。所以 mod
 **能**起子进程，只是必须走 `$`。
 
-### 三条路
+### 两条路（v4 收敛）
 
 | 路径 | 何时用 | 实现 |
 |---|---|---|
 | **HTTP**（首选） | 服务在跑 | `$.http.fetch('/v1/search')`，端口从 `runtime.json` 读 |
-| **子进程**（兜底） | 服务不在 | `$.process.run(['node', kernel.js])` |
-| **原生**（最后） | 两条都失败 | `next(e)`（仅 Claude 侧有原生可回退） |
+| **唤醒 + 重试** | 服务不在 | `serve --ensure` 拉起，再发一次 HTTP |
+| **报错/原生** | 都失败 | dsh/omp 报错；Claude 侧 `next(e)` 回退原生 |
 
-**代价对比**：HTTP 省掉一次 Node 启动（约 200ms），但要求服务活着；
-子进程慢一点，但零依赖。
+原先还有第三级「搜完 spawn 一个一次性 `kernel.js`」，**已移除**（理由见
+第五节）。Claude 侧之所以不再 spawn 搜索，是因为服务由 dsh/omp/CLI 负责
+拉起，Claude 只当客户端。
+
+**代价对比**：HTTP 省掉一次 Node 启动（约 200ms），但要求服务活着；唤醒
+失败时报错，而不是悄悄退化成一个并行实现。
 
 ### 路径怎么传给 mod
 
@@ -141,7 +145,7 @@ mod 通过 `$.settings.read({ key: 'searchfuseHosts' })` 读回来。
 | dsh | ✅ Node 进程 | 启动时 `serve --ensure` |
 | omp 扩展 | ✅ Node 进程 | `session_start` 时 `serve --ensure` |
 | CLI | ✅ | `hosts sync` 末尾拉起 |
-| Claude Code | ✅ `$.process.run` | 不主动起（只当客户端 + 子进程兜底） |
+| Claude Code | ✅ `$.process.run` | 不主动起（只当客户端，失败回退原生） |
 
 `--ensure` 幂等：已在跑就 exit 0，不会重复起。
 
@@ -210,19 +214,51 @@ export default function (pi: ExtensionAPI) {
 
 **omp 不写 `searxng.endpoint`**：那条路在随机端口下不可行（静态配置 vs 动态端口）。扩展内 `spawn` 子进程，端口由内核分配，天然满足「随机端口 + 自动保活」。
 
-## 五、随机端口与保活
+## 五、随机端口与保活（v4，已取代本文早先的「每家 spawn」）
 
-**每家 spawn 自己的 `kernel.js` 实例**。
+早先的判断是「omp 的 `searxng.endpoint` 是静态字符串，所以三家不能共用 HTTP
+服务」。那个前提已经不成立：omp 扩展改为**每次调用读 `runtime.json`**，静态
+endpoint 不再写进任何配置（`src/main.ts:351-353` 也记下了这一点）。于是三家
+可以共用一个服务，端口也可以随机。
 
 | 要求 | 如何满足 |
 |---|---|
-| 随机端口 | 不监听端口——`kernel.js` 是子进程，通过 stdin/stdout 交换 JSON |
-| 自动检测 | 子进程起不来 → 返回明确错误；宿主自己决定怎么展示 |
-| 自动保活 | 子进程随宿主的调用起灭，不需要守护进程 |
+| 随机端口 | `serve.port` 默认 0（内核分配），实际端口写入 `runtime.json` |
+| 自动检测 | `--ensure` **读 `runtime.json` 再探 `/healthz`**，不再猜端口 |
+| 自动保活 | 三级收敛为两级：`HTTP → 唤醒(serve --ensure) → 重试 HTTP`；闲置 10 分钟自动退出，下次搜索自动唤醒 |
+| 客户端跟上换端口 | 三家都从 `runtime.json` 取 port + token（Claude 侧由 `hosts sync` 写入绝对路径） |
 
-**为什么不用 HTTP 服务**：omp 的 `searxng.endpoint` 是静态字符串。要让它跟随随机端口，得每次端口变化重写 omp 配置——那就回到「固定端口」或「用户手动跑命令」，两个都不要。
+**为什么必须改 `--ensure`**：固定端口探测在随机端口下会探错端口，判定「没在
+跑」并另起一个实例——两个实例抢同一份 `runtime.json`，客户端拿到新 token 打到
+旧进程，会出现一串难以解释的失败。这是真机踩过的坑。
 
-`src/serve.ts` 保留，但**不再作为三家共用的执行点**——它只用于 omp 的 `x_search`/`read_page`（那些走 MCP 通道的场景，可选）。
+**移除的那一级**：「搜完 spawn 一个一次性 `kernel.js`」。它绕过服务，让三宿主
+本应共享的缓存与冷却状态失效，且是同一查询的第二套实现——出问题时无法判断走
+的哪一套。服务起不来就如实报错，把故障暴露出来。
+
+## 五·五、SearXNG：内置实例与逐引擎代理
+
+**内置实例是显式开关，不是默认值。** `searxng.embedded: true` 才由
+`@searxng-js/searxng@0.1.2` 拉起；默认关闭，因为那是约 22 MiB 的原生产物，
+首次启动有可感知代价。`engines.searxng.baseURL` 语义不变，且优先级更高。
+
+**代理有两层，命名空间不混**：
+
+| 层 | 位置 | 谁实现 |
+|---|---|---|
+| 我们直连的 6 个引擎 | `engines.<name>.proxy`（单值，三态） | 我们的 undici agent |
+| SearXNG 的上游引擎 | `searxng.{outgoing,networks,engines}` | SearXNG 自己 |
+
+第二层完全交给 SearXNG 原生语义：同一协议多个代理由它 `itertools.cycle` 轮询，
+我们不维护计数器（维护一份就和上游行为难以对齐）。
+
+**生成 `settings.yml` 时必须自带基础段**：传入 `settingsPath` 会完全替代包里的
+`DEFAULT_SETTINGS`，所以 `search.formats: [html, json]` 与 `server.limiter: false`
+要自己写上——缺前者会 403（实例只肯渲染网页），缺后者会被限流器拦。
+
+**`extra_proxy_timeout` 在 `outgoing` 层，不在 `networks.<name>` 下**：
+SearXNG 的 `Network.__init__` 不接受这个名字，写错层会让实例以
+`TypeError: unexpected keyword argument` 直接启动失败。
 
 ## 六、默认 MCP：context7 + grep
 
@@ -312,8 +348,6 @@ const DEFAULT_MCP = {
 
 ## 九、非目标
 
-- omp 走 SearXNG 路由（随机端口下不可行，已证）
-- 三家共用一个 HTTP 服务进程（omp 的静态 endpoint 做不到）
 - Claude 保持 `WebSearch` 原名（宿主的 `$.tool.register` 强制前缀）
 
 ## 十、已知风险
@@ -323,5 +357,7 @@ const DEFAULT_MCP = {
 | `tool.list` 的过滤依赖未文档化的内部形状（`{ value: [...] }`） | 已在 v2 实测；若宿主升级改变形状，`tool.list` 过滤会静默失效——加一条测试断言「`WebSearch` 不在最终列表里」 |
 | Claude 工具改名后模型可能不适应 | 描述里写清「这是搜索工具」；`tool.list` 已移除原名，不存在歧义 |
 | omp 扩展同名覆盖依赖宿主内部行为 | 已实测验证（`SHADOW_PROBE_HIT`）；若宿主升级破坏，`omp` 侧可退回 `web_search.enabled: false` + 注册新名 |
+| `@searxng-js/searxng@0.1.3` 的 `win32-x64` 平台包不存在（上游发布缺口） | 钉在 `0.1.2`（三平台齐全）；若升级需先确认平台包版本对齐 |
+| 内置实例的上游引擎在无代理网络下全部 timeout | 这正是 `searxng.outgoing.proxies` 要解决的问题；空配置时如实返回零结果并列 unresponsive |
 | 默认 MCP 端点将来失效 | 用户在 `~/.searchfuse/config.json` 一处修改即可 |
 | `grep`/`context7` 需要联网 | 失败时 MCP 客户端自行重试；不阻塞搜索 |
