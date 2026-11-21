@@ -190,6 +190,8 @@ dsh 现有 `runCli()` 传 `-q/--source/--timeout/--deadline`（`dsh/index.js:227
 - 冲突的 `apiKey`：保留新文件值，并在 `searchfuse doctor` 输出中列明「旧文件存在不同值」
 - 合并结果写回前先备份 `.modsearch/config.json.bak-<时间戳>`
 
+**本机实测（v6）**：现有两份真实配置对比——旧文件**无任何独有键**，新文件是旧文件的超集（19 个共有路径，值全同；新文件多 `engines.anysearch`）。所以对这个用户，合并结果 = 新文件本身，不丢数据。但通用风险仍成立：只在旧文件里配过某引擎的用户会被整文件跳过规则丢数据，因此按键级合并不能省。
+
 ### 4.2 schema（复用现有形状，v1 的顶层 `order`/`mode` 作废）
 
 依据 `src/config.ts:106-136` 的 `ModsearchConfig`，**不引入第二套字段名**：
