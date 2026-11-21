@@ -22,7 +22,7 @@
 const moduleUrl = (import.meta as unknown as { url: string }).url;
 
 /** kernel 的绝对路径。插件根在 `hooks/` 的上一级，产物在同级 `dist/`。 */
-const KERNEL_PATH = new URL('../../dist/kernel.js', moduleUrl).href;
+/** kernel 的绝对路径同样来自 settings（见 runtimePathFromSettings）。 */
 
 /** 一次搜索的墙钟上限。比聚合默认的 8 秒宽，留给慢引擎。 */
 const SEARCH_TIMEOUT_MS = 240_000;
@@ -44,6 +44,15 @@ interface HostDollar {
       timeoutMs?: number;
       signal?: unknown;
     }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  };
+  fs: {
+    read(path: string): Promise<string>;
+  };
+  http: {
+    fetch(
+      url: string,
+      init?: { method?: string; headers?: Record<string, string>; body?: string },
+    ): Promise<{ status: number; ok: boolean; text: string; headers?: Record<string, string> }>;
   };
   tool: {
     /**
@@ -115,35 +124,173 @@ interface NativeSearchOutput {
   durationSeconds: number;
 }
 
+/** `~/.searchfuse/runtime.json` 里我们关心的两字段。 */
+interface ServeRuntime {
+  port: number;
+  token: string;
+}
+
+/** 缓存：服务重启换端口时靠「连接失败后重读」兜底，所以缓存可以放心用。 */
+let cachedRuntime: ServeRuntime | undefined;
+/** 缓存对应的 `runtime.json` 内容摘要，变了就重读。 */
+let cachedStamp = '';
+
 /**
- * 跑一次 kernel，返回原始 stdout；失败返回 undefined。
+ * 读 `~/.searchfuse/runtime.json`，拿到服务的端口与 token。
  *
- * 三个工具（web_search / x_search / read_page）共用这一条通道，区别只在
- * 附加参数。集中一处的好处是超时、取消、退出码的判定只有一份——
- * 三份各写一遍迟早会在某一个工具上漏掉 `signal`。
+ * 为什么走 `$.fs.read` 而不是 `$` 的其它通道：宿主的 hooks 沙箱**没有
+ * `process`**（实测 `globalThis.process` 是 undefined），所以既不能 spawn
+ * 也不能读环境变量里的 home；`$.fs.read` 是唯一能读绝对路径的入口。
+ *
+ * 缓存策略：文件不大，但每次搜索都读一次纯属浪费。用「文件内容变化就重读」
+ * 判断——比 mtime 简单，且 runtime.json 只在服务起停时变。
  */
-async function runKernelFor(
-  $: HostDollar,
-  next: HostNext,
-  extraArgs: string[],
-): Promise<string | undefined> {
-  let run: { exitCode: number; stdout: string };
+/**
+ * 找到 `runtime.json` 的绝对路径。
+ *
+ * 为什么需要这一步：宿主的 mod 沙箱里 **`~` 不展开**，`$.env.get('HOME')`
+ * 也返回 undefined（实测），所以拿不到家目录。唯一可行的办法是让
+ * `searchfuse hosts sync` 把绝对路径写进 Claude 的 settings，mod 通过
+ * `$.settings.read` 读回来——那条通道是宿主明确支持的。
+ *
+ * 读不到就返回 undefined：调用方据此回退到 `$.process.run` 直接跑 kernel。
+ */
+async function runtimePathFromSettings($: HostDollar, next: HostNext): Promise<string | undefined> {
   try {
-    run = await $.process.run({
-      argv: [
-        // 宿主 `types: []` 没有 Node 类型，直接写 process 会 TS2591。
-        (globalThis as unknown as { process: { execPath: string } }).process.execPath,
-        KERNEL_PATH,
-        ...extraArgs,
-      ],
-      timeoutMs: SEARCH_TIMEOUT_MS,
-      signal: next.signal,
-    });
+    const value = await $.settings.read({ key: 'searchfuseHosts', signal: next.signal });
+    const hosts = asRecord(value);
+    const claude = asRecord(hosts?.claudeCode);
+    const path = claude?.runtimePath;
+    return typeof path === 'string' && path !== '' ? path : undefined;
   } catch {
     return undefined;
   }
-  if (run.exitCode !== 0) return undefined;
-  return run.stdout;
+}
+
+async function readServeRuntime(
+  $: HostDollar,
+  next: HostNext,
+): Promise<ServeRuntime | undefined> {
+  const runtimePath = await runtimePathFromSettings($, next);
+  if (runtimePath === undefined) return undefined;
+  try {
+    const raw = await $.fs.read(runtimePath);
+    if (raw === cachedStamp && cachedRuntime !== undefined) return cachedRuntime;
+    const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
+    if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
+    cachedRuntime = { port: parsed.port, token: parsed.token };
+    cachedStamp = raw;
+    return cachedRuntime;
+  } catch {
+    // 文件不在或读不了：服务没起。
+    cachedRuntime = undefined;
+    cachedStamp = '';
+    return undefined;
+  }
+}
+
+/**
+ * 通过 HTTP 调本地服务。失败返回 undefined，调用方据此回退。
+ *
+ * 为什么是 HTTP 而不是 spawn 子进程：宿主的 hooks 沙箱没有 `process`，
+ * 起不了子进程。而服务本身就是同一个聚合器，走 HTTP 拿到的是同一份结果。
+ */
+async function callServe(
+  $: HostDollar,
+  next: HostNext,
+  endpoint: string,
+  params: Record<string, string>,
+): Promise<string | undefined> {
+  // 第一次读（可能需要，也可能命中缓存）。
+  let runtime = await readServeRuntime($, next);
+  if (runtime === undefined) return undefined;
+
+  const buildUrl = (r: ServeRuntime): string => {
+    const search = new URLSearchParams(params);
+    return `http://127.0.0.1:${r.port}${endpoint}?${search.toString()}`;
+  };
+
+  const attempt = async (r: ServeRuntime): Promise<{ ok: true; text: string } | { ok: false; retry: boolean }> => {
+    try {
+      const response = await $.http.fetch(buildUrl(r), {
+        headers: { authorization: `Bearer ${r.token}`, accept: 'application/json' },
+      });
+      if (response.ok) return { ok: true, text: response.text };
+      // 401 意味着 token 过期（服务重启换过 token）：重读一次再试。
+      return { ok: false, retry: response.status === 401 };
+    } catch {
+      // 连接被拒：服务可能换端口了，重读 runtime.json 再试一次。
+      return { ok: false, retry: true };
+    }
+  };
+
+  const first = await attempt(runtime);
+  if (first.ok) return first.text;
+
+  if (!first.retry) return undefined;
+
+  // 重读并重试一次。
+  cachedStamp = '';
+  runtime = await readServeRuntime($, next);
+  if (runtime === undefined) return undefined;
+  const second = await attempt(runtime);
+  return second.ok ? second.text : undefined;
+}
+
+/**
+ * 取一次搜索结果：**服务优先，子进程兜底**。
+ *
+ * 两条路：
+ * 1. 本地服务在跑 → `$.http.fetch` 打 `/v1/search`（快，省一次进程启动）
+ * 2. 服务不在 → `$.process.run(['node', kernel.js])` 直接跑聚合器
+ *
+ * 为什么两条都要：服务是可选加速器，不是必需品。只走 HTTP 的话，用户没起
+ * 服务就等于没搜索；只走子进程的话，每次搜索都多一次 Node 启动（约 200ms）。
+ *
+ * 为什么 `$.process.run` 用裸名 `'node'`：mod 沙箱里没有 `globalThis.process`
+ * （实测 undefined），拿不到 `process.execPath`。宿主会按 PATH 解析裸名。
+ *
+ * 失败返回 undefined，调用方据此回退。
+ */
+async function fetchOrSpawn(
+  $: HostDollar,
+  next: HostNext,
+  target: { endpoint: string; params: Record<string, string>; kernelArgs: string[] },
+): Promise<string | undefined> {
+  // 路径一：HTTP。
+  const runtime = await readServeRuntime($, next);
+  if (runtime !== undefined) {
+    const text = await callServe($, next, target.endpoint, target.params);
+    if (text !== undefined) return text;
+  }
+
+  // 路径二：子进程。kernel 的绝对路径同样来自 settings。
+  const kernelPath = await kernelPathFromSettings($, next);
+  if (kernelPath === undefined) return undefined;
+  try {
+    const run = await $.process.run({
+      argv: ['node', kernelPath, ...target.kernelArgs],
+      timeoutMs: SEARCH_TIMEOUT_MS,
+      signal: next.signal,
+    });
+    if (run.exitCode !== 0) return undefined;
+    return run.stdout;
+  } catch {
+    return undefined;
+  }
+}
+
+/** kernel 的绝对路径，也由 `hosts sync` 写进 settings。 */
+async function kernelPathFromSettings($: HostDollar, next: HostNext): Promise<string | undefined> {
+  try {
+    const value = await $.settings.read({ key: 'searchfuseHosts', signal: next.signal });
+    const hosts = asRecord(value);
+    const claude = asRecord(hosts?.claudeCode);
+    const path = claude?.kernelPath;
+    return typeof path === 'string' && path !== '' ? path : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 从事件里安全取一个字符串字段；不是字符串时返回空串。 */
@@ -230,85 +377,30 @@ interface ToolListResult {
 }
 
 export function register(on: HostOn, _options: unknown): void {
-  // 1. 移除内置搜索工具 —— 模型只看到我们这一个，不存在「两个都能搜」的歧义。
-  on('tool.list', undefined as unknown as Record<string, unknown>, async ($, e, next) => {
-    const list = (await next(e)) as ToolListResult | undefined;
-    if (!list || !Array.isArray(list.value)) return next(e);
-    // 宿主关闭接管的配置下不动：用户要的就是原生行为。
-    if (!(await isHostEnabled($, next))) return list;
-    return { ...list, value: list.value.filter((tool) => tool.name !== BUILTIN_SEARCH) };
-  })
-    .catch((_$, _e, next) => next(_e));
-
-  // 2. 注册我们的搜索工具。宿主会补上 `mcp__searchfuse__` 前缀。
-  on('session.start', async ($, e, next) => {
-    try {
-      await $.tool.register({
-        name: 'web_search',
-        description: '搜索网页。多个搜索引擎并发查询并按相关性融合，返回带标题、链接与摘要的列表。',
-        inputSchema: {
-          type: 'object',
-          properties: { query: { type: 'string', description: '要搜索的内容' } },
-          required: ['query'],
-        },
-        // false：让它出现在顶层工具列表，而不是藏进 tool search 后面。
-        isDeferred: false,
-      });
-      // x_search：X/Twitter 语料。dsh 有、omp 有，这里补上同一个能力。
-      await $.tool.register({
-        name: 'x_search',
-        description: '搜索 X（Twitter）上的帖子。与网页搜索分开走语料链路，返回帖子与其上下文。',
-        inputSchema: {
-          type: 'object',
-          properties: { query: { type: 'string', description: '要搜索的内容' } },
-          required: ['query'],
-        },
-        isDeferred: false,
-      });
-      // read_page：抓取并消化一个页面（正文摘出来，而不是原始 HTML）。
-      await $.tool.register({
-        name: 'read_page',
-        description: '读取一个网页并返回它的正文摘要与链接。传 URL。',
-        inputSchema: {
-          type: 'object',
-          properties: { url: { type: 'string', description: '要读取的页面地址' } },
-          required: ['url'],
-        },
-        isDeferred: false,
-      });
-    } catch {
-      // 注册失败不该让会话起不来：没有我们的工具时，用户还能用别的办法。
-    }
-    return next(e);
-  })
-    .catch((_$, _e, next) => next(_e));
-
-  // x_search 的调用处理。名字与注册时的短名对应，宿主补前缀。
-  on('tool.call', { tool: 'mcp__searchfuse__x_search' }, async ($, e, next) => {
-    if (!(await isHostEnabled($, next))) return next(e);
-    const run = await runKernelFor($, next, ['--query', stringField(e, 'query'), '--source', 'x']);
-    if (run === undefined) return { result: 'X 搜索失败（本地聚合器不可用）。' };
-    return { result: run };
-  }).catch((_$, _e, next) => next(_e));
-
-  // read_page 的调用处理：走 --url。
-  on('tool.call', { tool: 'mcp__searchfuse__read_page' }, async ($, e, next) => {
-    if (!(await isHostEnabled($, next))) return next(e);
-    const run = await runKernelFor($, next, ['--url', stringField(e, 'url')]);
-    if (run === undefined) return { result: '页面读取失败（本地聚合器不可用）。' };
-    return { result: run };
-  }).catch((_$, _e, next) => next(_e));
-
-  on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
+  // ── 替换原生搜索：同名覆盖 ──────────────────────────────────────────
+  //
+  // 工具**仍然叫 `WebSearch`**，模型看到的就是它；我们的 hook 在同一名字上
+  // 回答，宿主的原生实现不再运行。这是「替换」，不是「加一个并列工具」——
+  // 后者会让模型在两个搜索之间犹豫。
+  //
+  // `tool.call` 在权限检查之前触发，返回 `{ result }` 即短路整条链路；
+  // 失败时 `next(e)` 交回原生，这是唯一的安全网（原生实现仍在，只是没被
+  // 走到）。
+  on('tool.call', { tool: 'WebSearch' }, async ($, e, next) => {
     if (!(await isHostEnabled($, next))) {
       return next(e);
     }
 
-    const stdout = await runKernelFor($, next, ['--query', stringField(e, 'query'), '--source', 'web']);
+    const query = stringField(e, 'query');
+    const stdout = await fetchOrSpawn($, next, {
+      endpoint: '/v1/search',
+      params: { q: query, source: 'web' },
+      kernelArgs: ['--query', query, '--source', 'web'],
+    });
     if (stdout === undefined) {
-      // 原生工具已被移除，没有「回退」可言。把原因交给模型，
-      // 让它换个办法（比如直接读已知 URL）而不是原地重试。
-      return { result: '搜索失败（本地聚合器不可用或返回非零退出码）。' };
+      // 我们答不上来：交回宿主原生实现。这是替换方案里唯一的回退，
+      // 也是它比「移除原生」更稳的原因。
+      return next(e);
     }
 
     let parsed: unknown;
@@ -324,7 +416,62 @@ export function register(on: HostOn, _options: unknown): void {
     }
     return { result };
   })
-    // 钩子抛错或超时会被宿主跳过，于是原生搜索照常跑。这个 catch 只是
-    // 让回退语义显式，而不是依赖宿主的隐式跳过。
     .catch((_$, e, next) => next(e));
+
+  // ── 额外能力：x_search / read_page ────────────────────────────────
+  //
+  // 这两个宿主原生没有，所以注册成新工具（宿主会补 `mcp__searchfuse__` 前缀）。
+  // 名字与 dsh / omp 侧保持一致：`x_search`、`read_page`。
+  on('session.start', async ($, e, next) => {
+    try {
+      await $.tool.register({
+        name: 'x_search',
+        description: '搜索 X（Twitter）上的帖子。与网页搜索分开走语料链路，返回帖子与其上下文。',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: '要搜索的内容' } },
+          required: ['query'],
+        },
+        isDeferred: false,
+      });
+      await $.tool.register({
+        name: 'read_page',
+        description: '读取一个网页并返回它的正文摘要与链接。',
+        inputSchema: {
+          type: 'object',
+          properties: { url: { type: 'string', description: '要读取的页面地址' } },
+          required: ['url'],
+        },
+        isDeferred: false,
+      });
+    } catch {
+      // 注册失败不该让会话起不来。
+    }
+    return next(e);
+  })
+    .catch((_$, _e, next) => next(_e));
+
+  on('tool.call', { tool: 'mcp__searchfuse__x_search' }, async ($, e, next) => {
+    if (!(await isHostEnabled($, next))) return next(e);
+    const query = stringField(e, 'query');
+    const stdout = await fetchOrSpawn($, next, {
+      endpoint: '/v1/search',
+      params: { q: query, source: 'x' },
+      kernelArgs: ['--query', query, '--source', 'x'],
+    });
+    if (stdout === undefined) return { result: 'X 搜索失败（本地聚合器不可用）。' };
+    return { result: stdout };
+  }).catch((_$, _e, next) => next(_e));
+
+  on('tool.call', { tool: 'mcp__searchfuse__read_page' }, async ($, e, next) => {
+    if (!(await isHostEnabled($, next))) return next(e);
+    const url = stringField(e, 'url');
+    const stdout = await fetchOrSpawn($, next, {
+      endpoint: '/v1/read-page',
+      params: { url },
+      kernelArgs: ['--url', url],
+    });
+    if (stdout === undefined) return { result: '页面读取失败（本地聚合器不可用）。' };
+    return { result: stdout };
+  }).catch((_$, _e, next) => next(_e));
 }

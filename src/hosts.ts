@@ -209,7 +209,19 @@ export function installOmpExtension(source: string, kernelPath: string): string 
  * `JSON.stringify` 回写会抹掉用户的 `permissions` / `hooks` /
  * `enabledPlugins`——备份只保住可恢复性，不保正确性。
  */
-export function syncClaudeSettings(enabled: boolean, file = claudeSettingsPath()): {
+/** `hosts sync` 写进 Claude settings 的两条路径。 */
+export interface ClaudePaths {
+  /** `~/.searchfuse/runtime.json` 的绝对路径；服务不在时读它拿端口。 */
+  runtimePath: string;
+  /** `dist/kernel.js` 的绝对路径；服务不在时用它跑子进程。 */
+  kernelPath: string;
+}
+
+export function syncClaudeSettings(
+  enabled: boolean,
+  paths: ClaudePaths,
+  file = claudeSettingsPath(),
+): {
   changed: boolean;
   backup?: string;
 } {
@@ -242,7 +254,17 @@ export function syncClaudeSettings(enabled: boolean, file = claudeSettingsPath()
     return { changed: false };
   }
 
-  raw.searchfuseHosts = { ...existing, claudeCode: { ...claude, enabled } };
+  // 一并写入两条绝对路径。mod 的沙箱里 `~` 不展开、`HOME` 读不到（实测），
+  // 所以路径必须由插件之外的 CLI 写进来。
+  raw.searchfuseHosts = {
+    ...existing,
+    claudeCode: {
+      ...claude,
+      enabled,
+      runtimePath: paths.runtimePath,
+      kernelPath: paths.kernelPath,
+    },
+  };
   const next = `${JSON.stringify(raw, null, 2)}\n`;
 
   const decision = decideWrite(file, next);

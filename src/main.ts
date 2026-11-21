@@ -365,7 +365,13 @@ hosts
       if (options.dryRun) {
         lines.push(`claudeCode: ${claudeEnabled ? 'enable' : 'disable'} (${claudeSettingsPath()})`);
       } else {
-        const result = syncClaudeSettings(claudeEnabled);
+        // 两条绝对路径：mod 的沙箱里 `~` 不展开、HOME 读不到，
+        // 所以由这里（插件之外的 CLI）写进 settings。
+        const selfDir = path.dirname(fileURLToPath(import.meta.url));
+        const result = syncClaudeSettings(claudeEnabled, {
+          runtimePath: path.join(os.homedir(), '.searchfuse', 'runtime.json'),
+          kernelPath: path.join(selfDir, 'kernel.js'),
+        });
         lines.push(
           `claudeCode: ${claudeEnabled ? 'enabled' : 'disabled'}` +
             (result.changed ? '' : ' (no change)') +

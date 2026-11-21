@@ -136,7 +136,7 @@ describe('syncClaudeSettings', () => {
       'settings.json',
       JSON.stringify({ permissions: { allow: ['Bash'] }, hooks: { x: 1 }, searchfuseHosts: { omp: { enabled: true } } }, null, 2),
     );
-    syncClaudeSettings(true, file);
+    syncClaudeSettings(true, { runtimePath: "/tmp/rt.json", kernelPath: "/tmp/k.js" }, file);
     const out = JSON.parse(fs.readFileSync(file, 'utf-8'));
     expect(out.searchfuseHosts.claudeCode.enabled).toBe(true);
     // 用户的其他配置一个都没丢。
@@ -147,14 +147,14 @@ describe('syncClaudeSettings', () => {
 
   it('已经是目标值时不写也不留备份', () => {
     const file = tempFile('settings.json', JSON.stringify({ searchfuseHosts: { claudeCode: { enabled: true } } }, null, 2));
-    const result = syncClaudeSettings(true, file);
+    const result = syncClaudeSettings(true, { runtimePath: "/tmp/rt.json", kernelPath: "/tmp/k.js" }, file);
     expect(result.changed).toBe(false);
     expect(result.backup).toBeUndefined();
   });
 
   it('拒绝覆盖无法解析的 settings 文件', () => {
     const file = tempFile('settings.json', '{ this is not json');
-    expect(() => syncClaudeSettings(true, file)).toThrow('refusing to overwrite');
+    expect(() => syncClaudeSettings(true, { runtimePath: "/tmp/rt.json", kernelPath: "/tmp/k.js" }, file)).toThrow('refusing to overwrite');
   });
 });
 

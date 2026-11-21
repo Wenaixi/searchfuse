@@ -89,6 +89,62 @@
 
 **注意**：`kernel.js` 要接受 `--host <name>` 与 `--cwd <dir>`，才能按宿主解析覆盖层。这是对既有 I/O 契约的扩展。
 
+## 三·六、统一服务形态（v3：三条路结合）
+
+**三家都走同一个本地服务，服务不在时各自兜底。**
+
+### 为什么能用同一个服务（上次的障碍已解）
+
+之前判定「必须在每家 spawn 自己的实例」，理由是 Claude 的 mod 沙箱没有
+`globalThis.process`。**这个理由不成立**——正确的出口是 `$.process.run`：
+
+```ts
+// 实测可用：exit=0, stdout=v26.12.1
+await $.process.run(['node', '--version'])
+```
+
+裸名 `node` 由宿主按 PATH 解析，不需要 `process.execPath`。所以 mod
+**能**起子进程，只是必须走 `$`。
+
+### 三条路
+
+| 路径 | 何时用 | 实现 |
+|---|---|---|
+| **HTTP**（首选） | 服务在跑 | `$.http.fetch('/v1/search')`，端口从 `runtime.json` 读 |
+| **子进程**（兜底） | 服务不在 | `$.process.run(['node', kernel.js])` |
+| **原生**（最后） | 两条都失败 | `next(e)`（仅 Claude 侧有原生可回退） |
+
+**代价对比**：HTTP 省掉一次 Node 启动（约 200ms），但要求服务活着；
+子进程慢一点，但零依赖。
+
+### 路径怎么传给 mod
+
+mod 沙箱里 **`~` 不展开、`$.env.get('HOME')` 返回 undefined**（实测）。
+所以两条绝对路径由 `searchfuse hosts sync` 写进 Claude settings：
+
+```json
+"searchfuseHosts": {
+  "claudeCode": {
+    "enabled": true,
+    "runtimePath": "C:\\Users\\...\\.searchfuse\\runtime.json",
+    "kernelPath": "E:\\...\\dist\\kernel.js"
+  }
+}
+```
+
+mod 通过 `$.settings.read({ key: 'searchfuseHosts' })` 读回来。
+
+### 服务由谁启动
+
+| 宿主 | 能 spawn | 启动责任 |
+|---|---|---|
+| dsh | ✅ Node 进程 | 启动时 `serve --ensure` |
+| omp 扩展 | ✅ Node 进程 | `session_start` 时 `serve --ensure` |
+| CLI | ✅ | `hosts sync` 末尾拉起 |
+| Claude Code | ✅ `$.process.run` | 不主动起（只当客户端 + 子进程兜底） |
+
+`--ensure` 幂等：已在跑就 exit 0，不会重复起。
+
 ## 四、三家如何接管
 
 ### 4.1 dsh（保持现状，已实现）

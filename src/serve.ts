@@ -213,6 +213,61 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
       return;
     }
 
+    // ── 三宿主共用的完整端点 ─────────────────────────────────────
+    //
+    // `/search` 是给 omp 的 SearXNG 壳；下面这两个是给 dsh / Claude Code /
+    // omp 扩展的**原生形状**：它们要的是 RunSearchResult（含 attempts、
+    // durationSeconds、summary），而不是被压扁成 SearXNG 的样子。
+    if (url.pathname === '/v1/search' || url.pathname === '/v1/read-page') {
+      inFlight += 1;
+      scheduleIdleExit();
+      const config = loadConfigFile(currentConfigPath());
+      const isReadPage = url.pathname === '/v1/read-page';
+      const query = url.searchParams.get('q') ?? '';
+      const targetUrl = url.searchParams.get('url') ?? '';
+      if (isReadPage && targetUrl === '') {
+        inFlight -= 1;
+        res.writeHead(400, JSON_HEADERS);
+        res.end(JSON.stringify({ error: 'missing url' }));
+        return;
+      }
+      if (!isReadPage && query === '') {
+        inFlight -= 1;
+        res.writeHead(400, JSON_HEADERS);
+        res.end(JSON.stringify({ error: 'missing q' }));
+        return;
+      }
+      const options = isReadPage
+        ? {
+            url: targetUrl,
+            allowPrivateNetwork: allowsPrivateNetwork(config),
+            config,
+          }
+        : {
+            query,
+            sources: url.searchParams.get('source') ?? 'web',
+            maxResults: Number(url.searchParams.get('max') ?? '') || undefined,
+            allowPrivateNetwork: allowsPrivateNetwork(config),
+            config,
+          };
+      void search(options as Parameters<typeof search>[0])
+        .then((result) => {
+          if (result.results.some((entry) => entry.status !== 'unavailable')) hits += 1;
+          res.writeHead(200, JSON_HEADERS);
+          res.end(JSON.stringify(result));
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          res.writeHead(500, JSON_HEADERS);
+          res.end(JSON.stringify({ error: message }));
+        })
+        .finally(() => {
+          inFlight -= 1;
+          scheduleIdleExit();
+        });
+      return;
+    }
+
     if (url.pathname === '/search') {
       const query = url.searchParams.get('q') ?? '';
       inFlight += 1;
@@ -287,21 +342,26 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
   });
 
   server.listen(options.port, '127.0.0.1', () => {
-      // 就绪后写运行时文件，退出时删除（见 close）。
-      try {
-        fs.mkdirSync(path.dirname(runtimePath()), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(
-          runtimePath(),
-          `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), version: __APP_VERSION__ }, null, 2)}\n`,
-        );
-      } catch {
-        // 运行时文件是诊断用的，写不了不影响服务本身。
-      }
-    scheduleIdleExit();
     // 端口 0 时内核会分配一个真实端口，必须从 address() 取回，
     // 否则调用方拿着 0 去连接会 EADDRNOTAVAIL。
     const address = server.address();
     const boundPort = typeof address === 'object' && address !== null ? address.port : options.port;
+
+    // 就绪后写运行时文件，退出时删除（见 close）。
+    //
+    // **必须带端口**：宿主侧的客户端（Claude Code 用 `$.http.fetch`）只有
+    // 读了这里才知道该连哪。固定端口写死的话，一旦端口被占就没法降级到
+    // 一个空闲端口。
+    try {
+      fs.mkdirSync(path.dirname(runtimePath()), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        runtimePath(),
+        `${JSON.stringify({ port: boundPort, pid: process.pid, startedAt: new Date().toISOString(), version: __APP_VERSION__, token: options.token }, null, 2)}\n`,
+      );
+    } catch {
+      // 运行时文件是诊断用的，写不了不影响服务本身。
+    }
+    scheduleIdleExit();
     ready.resolve({ server, port: boundPort, localHits: () => hits, close });
   });
   return ready.promise;
