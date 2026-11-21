@@ -417,8 +417,12 @@ describe('doctor: aggregate and MCP sections', () => {
       },
       env: BARE_ENV,
     });
-    expect(report.mcp.servers).toHaveLength(3);
+    // 4 而不是 3：默认集合里的 context7 也会被算进来（用户没写它）。
+    expect(report.mcp.servers).toHaveLength(4);
     expect(report.mcp.servers.find((s) => s.key === 'grep')?.url).toBe('https://mcp.grep.app');
+    expect(report.mcp.servers.find((s) => s.key === 'context7')?.url).toBe(
+      'https://mcp.context7.com/mcp',
+    );
     // 键名会成为工具名的一部分，所以不合法的键等于一个永远注册不上的工具。
     expect(report.mcp.servers.find((s) => s.key === 'bad.key')?.problem).toContain(
       'A-Za-z0-9_-',
@@ -430,8 +434,18 @@ describe('doctor: aggregate and MCP sections', () => {
     expect(text).toContain('live connection results appear in the plugin log');
   });
 
-  it('says so plainly when no MCP server is configured', () => {
+  it('falls back to the default MCP set when the user configured none', () => {
+    // 用户什么都没写时不是「没有 MCP」——默认集合（context7/grep）会被注册。
     const report = runDoctor({ config: {}, env: BARE_ENV });
+    expect(report.mcp.servers.map((s) => s.key).sort()).toEqual(['context7', 'grep']);
+    expect(formatDoctorReport(report)).toContain('MCP');
+  });
+
+  it('says so plainly when every default MCP server is turned off', () => {
+    const report = runDoctor({
+      config: { mcp: { context7: { enabled: false }, grep: { enabled: false } } },
+      env: BARE_ENV,
+    });
     expect(report.mcp.servers).toEqual([]);
     expect(formatDoctorReport(report)).toContain('no servers configured');
   });

@@ -9,6 +9,7 @@ import {
   engineSettings,
   initConfigFile,
   loadConfigFile,
+  effectiveMcp,
   loadLayeredConfig,
   mergeConfig,
   migrateLegacyConfig,
@@ -683,5 +684,39 @@ describe('loadLayeredConfig', () => {
     fs.mkdirSync(path.dirname(broken), { recursive: true });
     fs.writeFileSync(broken, '{broken');
     expect(() => loadLayeredConfig({ home, cwd, hostName: 'claudeCode' })).toThrow('Failed to parse');
+  });
+});
+
+describe('effectiveMcp', () => {
+  it('用户没写 mcp 时返回默认集合', () => {
+    const result = effectiveMcp({});
+    expect(Object.keys(result)).toEqual(['context7', 'grep']);
+    expect(result.context7?.url).toBe('https://mcp.context7.com/mcp');
+    expect(result.grep?.url).toBe('https://mcp.grep.app');
+  });
+
+  it('用户写了同名时用户值胜出', () => {
+    const result = effectiveMcp({ mcp: { context7: { url: 'https://自己的实例/mcp' } } });
+    expect(result.context7?.url).toBe('https://自己的实例/mcp');
+    // 没写的字段仍从默认继承。
+    expect(result.context7?.transport).toBe('streamable-http');
+    // 不影响另一项。
+    expect(result.grep?.url).toBe('https://mcp.grep.app');
+  });
+
+  it('enabled: false 关掉默认项', () => {
+    const result = effectiveMcp({ mcp: { grep: { enabled: false } } });
+    expect(Object.keys(result)).toEqual(['context7']);
+  });
+
+  it('用户自己加的 server 也带上，不被默认集合挤掉', () => {
+    const result = effectiveMcp({ mcp: { myServer: { transport: 'stdio', command: 'my-mcp' } } });
+    expect(Object.keys(result).sort()).toEqual(['context7', 'grep', 'myServer']);
+    expect(result.myServer?.command).toBe('my-mcp');
+  });
+
+  it('用户自己的 server 写 enabled: false 也不注册', () => {
+    const result = effectiveMcp({ mcp: { myServer: { enabled: false, url: 'https://x' } } });
+    expect(result.myServer).toBeUndefined();
   });
 });

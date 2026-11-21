@@ -662,6 +662,59 @@ export function loadLayeredConfig(options: {
   return { config: merged, layers };
 }
 
+/**
+ * 默认 MCP 集合：缺则注册，有则不碰。
+ *
+ * 为什么是代码常量而不是写进 `CONFIG_TEMPLATE`：写进用户文件里的默认值会
+ * 静默压过将来的默认值变更（端点迁移时用户那份旧值永远赢）。放代码里，
+ * 默认值升级时用户自动跟随；用户想改或想关，在 `mcp` 段写一行即可。
+ */
+export const DEFAULT_MCP = {
+  context7: {
+    transport: 'streamable-http',
+    url: 'https://mcp.context7.com/mcp',
+  },
+  grep: {
+    transport: 'streamable-http',
+    url: 'https://mcp.grep.app',
+  },
+} as const satisfies Record<string, Record<string, unknown>>;
+
+/**
+ * 把默认 MCP 与用户配置合并，得到实际要注册的集合。
+ *
+ * 三条规则：
+ * - 用户没写 → 用默认（端点升级时自动跟随）
+ * - 用户写了同名 → 用户值整体胜出（可以换端点，也可以只写一部分字段）
+ * - 用户写 `{ enabled: false }` → 关掉它，从结果里剔除
+ *
+ * 最后一条是「有则不碰」的另一面：默认集合不是不可关闭的。
+ */
+export function effectiveMcp(config: ModsearchConfig): Record<string, Record<string, unknown>> {
+  const configured = isPlainObject(config.mcp) ? (config.mcp as Record<string, unknown>) : {};
+  const out: Record<string, Record<string, unknown>> = {};
+
+  for (const [name, defaults] of Object.entries(DEFAULT_MCP)) {
+    const override = configured[name];
+    if (isPlainObject(override) && override.enabled === false) {
+      // 显式关闭：不注册。
+      continue;
+    }
+    out[name] = isPlainObject(override) ? { ...defaults, ...override } : { ...defaults };
+  }
+
+  // 用户自己加的、不在默认集合里的 server 也要带上——默认集合只是「补缺」，
+  // 不是白名单。
+  for (const [name, value] of Object.entries(configured)) {
+    if (Object.hasOwn(out, name)) continue;
+    if (!isPlainObject(value)) continue;
+    if (value.enabled === false) continue;
+    out[name] = value;
+  }
+
+  return out;
+}
+
 /** 用户指定的引擎，如果有的话。 */
 export function chosenEngine(config: ModsearchConfig): string | undefined {
   return config.engine?.trim() || undefined;

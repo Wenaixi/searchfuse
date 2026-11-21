@@ -13,6 +13,7 @@ import {
   cooldownEnabled,
   currentConfigPath,
   engineSettings,
+  effectiveMcp,
   exposeOf,
   isPlainObject,
   loadConfigFile,
@@ -571,7 +572,10 @@ function diagnoseAggregate(
  * 工具名的一部分，所以一个不合法的键等于一个永远注册不上的工具。
  */
 function diagnoseMcp(config: ModsearchConfig): DoctorReport['mcp'] {
-  const servers = isPlainObject(config.mcp) ? (config.mcp as Record<string, unknown>) : {};
+  // 用 effectiveMcp 而不是直接读 config.mcp：默认集合（context7/grep）
+  // 是代码里的常量，doctor 必须看到它们，否则会报告「没有 MCP」而实际
+  // 三个宿主都会注册。
+  const servers: Record<string, unknown> = effectiveMcp(config);
   const out: DoctorReport['mcp']['servers'] = [];
   for (const [key, raw] of Object.entries(servers)) {
     if (!isPlainObject(raw)) {
