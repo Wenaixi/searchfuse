@@ -27,7 +27,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnHidden } from './spawnHidden.js';
 
-const CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+// 三宿主共用的子进程入口。dsh 与 Claude Code 都 spawn 它，聚合实现
+// 只有 src/search.ts 一份。此处曾指向 dist/main.js（完整 CLI），但那个
+// 入口还带着 commander 的参数解析与 doctor/config 等子命令，搜索并不需要。
+const CLI_PATH = fileURLToPath(new URL('../dist/kernel.js', import.meta.url));
 // 由仓库里的一个测试与 src/schema.ts 保持同步；插件文件无法导入 TS 源码，
 // 且要保持完全零依赖（只用 node 内置模块）。
 const SEARCH_OUTPUT_SCHEMA = JSON.parse(
