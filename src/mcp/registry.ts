@@ -66,6 +66,14 @@ export interface McpServerReport {
   tools: string[];
   /** 该服务端为何什么都没贡献（当它确实没贡献时）。 */
   error?: string;
+  /**
+   * 被跳过、但不算失败的条目（例如宿主已有同名工具）。
+   *
+   * 与 `error` 分开的原因：调用方按 `error !== undefined` 判断「要不要重试」，
+   * 而「宿主已占用某个工具名」是稳定的既成事实——重试只会每 30 秒重复一次
+   * 同样的跳过。跳过必须可观测，但不能触发重试。
+   */
+  skipped?: string[];
 }
 
 export interface RegisterMcpOptions {
@@ -198,7 +206,9 @@ export async function registerMcpServers(
       const overrideKey = `${serverKey}/${tool.name}`;
       const name = options.toolNames?.[overrideKey] ?? publicToolName(serverKey, tool.name);
       if (claimed.has(name)) {
-        report.error = `tool name "${name}" is already taken; skipped`;
+        // 「已占用」是稳定事实，不是可重试的故障：记进 skipped 而非 error，
+        // 否则调用方会每 30 秒重试一次同样的跳过。
+        (report.skipped ??= []).push(`"${name}" is already taken`);
         continue;
       }
       // 宿主里可能已经有同名工具（例如别的插件也接了同一个 MCP 服务端）。
@@ -213,7 +223,7 @@ export async function registerMcpServers(
         }
       })();
       if (alreadyInHost) {
-        report.error = `tool name "${name}" is already registered by the host; skipped`;
+        (report.skipped ??= []).push(`"${name}" is already registered by the host`);
         continue;
       }
       claimed.add(name);

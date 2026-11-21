@@ -1259,6 +1259,11 @@ function registerMcpTools(ctx) {
       if (report.error) {
         console.error(`[searchfuse] mcp ${report.serverKey}: ${report.error}`);
       }
+      // 跳过只记一条信息，不进重试判定：宿主已有同名工具是稳定事实，
+      // 每 30 秒重试一次同样的跳过没有任何意义。
+      for (const note of report.skipped ?? []) {
+        console.error(`[searchfuse] mcp ${report.serverKey}: tool ${note}; skipped`);
+      }
     }
     // 有服务端没连上：安排一次稍后的重试。
     //

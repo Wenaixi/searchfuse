@@ -217,7 +217,9 @@ describe('registerMcpServers', () => {
         reservedNames: ['mcp__srv__x'],
       });
       expect(ctx.registered).toEqual([]);
-      expect(result.reports[0]?.error).toMatch(/already taken/);
+      expect(result.reports[0]?.skipped?.join(" ")).toMatch(/already taken/);
+      // 「跳过」不是失败：不能触发每 30 秒一次的重试循环。
+      expect(result.reports[0]?.error).toBeUndefined();
       await result.closeAll();
     } finally {
       await server.close();
@@ -242,7 +244,8 @@ describe('registerMcpServers', () => {
       });
       // 冲突的那个被跳过，同服务器的另一个仍然注册成功。
       expect(ctx.registered.map((r) => r.name)).toEqual(['mcp__srv__free']);
-      expect(result.reports[0]?.error).toMatch(/already registered by the host/);
+      expect(result.reports[0]?.skipped?.join(" ")).toMatch(/already registered by the host/);
+      expect(result.reports[0]?.error).toBeUndefined();
       await result.closeAll();
     } finally {
       await server.close();
