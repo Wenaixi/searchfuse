@@ -1,13 +1,26 @@
 # searchfuse 三宿主架构设计（dsh + Claude Code + omp）
 
 > 状态：**pending approval**
-> 日期：2026-11-21（v6，经五轮 Architect + Critic 评审）
+> 日期：2026-11-21（v7，经六轮 Architect + Critic 评审）
 > 仓库：`E:\newCC\aaa-dsh-go\dsh-modsearch`（`@wenaixi/searchfuse`）
 > 取代：`2026-11-20-searchfuse-dual-host-design.md`
 
 ## 〇、修订摘要（三轮评审）
 
 v2 经第二轮 Architect 复审裁决 **CONDITIONAL**；v3 经第三轮 Critic 复审裁决 **REVISE**（五条阻塞项）。本节记录全部修正，第三轮的用 `V4-*` 标注。
+
+### v7 修正（第六轮终审的 8 条放行条件）
+
+| # | v6 的缺陷 | v7 处置 |
+|---|---|---|
+| V7-1 | S3① 断言 `attempts` 非空，但 `rrf` 路径硬编码 `attempts: []`（`src/search.ts:479`、`:511`），默认配置即 `rrf` → 验收恒红 | 改为「`--engine` 钉死链式或 `aggregate.mode: chain` 时断言」 |
+| V7-2 | v6 重排 §5.1 时删掉了 `runtime.json` 的定义，S1⑦ 断言一个无产者的产物 | 恢复定义：`~/.searchfuse/runtime.json`，由 `src/serve/lifecycle.ts` 写入/删除 |
+| V7-3 | `servePath` / `--ensure` 全文无定义；扩展「裸复制」后无法定位 `dist/serve.js` | 改为**渲染**：`hosts sync` 把绝对路径替换进模板；§十二 增加 `serve --ensure`（幂等拉起） |
+| V7-4 | §5.1 镜像写入未约束「只改一个键」，与 §6.3 的粒度要求不对称 | 明写「解析→改键→回写，禁止整份覆盖」；omp enable 分支补 `searxng.token` 写入 |
+| V7-5 | S4⑤ 的 `hosts sync --disable` 与 §十二 的三动词对不上 | 改为 `hosts enable/disable <name> && hosts sync` |
+| V7-6 | §十七 仍写「9 同 9 异 4 独有」；Follow-ups 仍用「服务日志」；§十二 说 entry「两项」 | 逐个改正（3 独有 / `/__stats` / 三项含 `config-schema`） |
+| V7-7 | omp 示例的 `type(...)` 是裸符号（真实是 `pi.zod`/`pi.typebox`/`pi.arktype`）；`execute` 参数顺序错 | 改为 `pi.zod.object(...)` + `execute(toolCallId, params)` |
+| V7-8 | `localHits` 未定义存活期 → 跨进程时 S5② 仍有假绿通道 | 定义为进程内计数、不落盘；S5② 的 baseline 与复测必须同一进程 |
 
 ### v6 修正（第五轮终审的 3 条放行条件）
 
@@ -128,6 +141,7 @@ searchfuse/
 │  ├─ config.ts                  # 配置读写（真身）
 │  ├─ doctor.ts                  # 统一诊断入口
 │  ├─ kernel.ts                  # 【新增】导出 runSearch 的 ESM 入口
+│  ├─ config-schema.ts           # 【新增】两个写入方共用的白名单（→ dist/config-schema.js）
 │  └─ serve/                     # 【新增】SearXNG 壳（仅 omp 用）
 │     ├─ server.ts               # HTTP
 │     ├─ lifecycle.ts            # 固定端口 + 在途计数
@@ -283,8 +297,8 @@ v4 给出三条启动路径，且**默认不空闲退出**：
 **端口被占用 → 服务不启动**，`searchfuse doctor` 报告，omp 侧表现为回退到公网（见 §6.3 的实测事实）。
 
 - `searchfuse hosts sync` 职责（v6 补 Claude Code 开关的写入方）：
-  - omp：写 `searxng.endpoint` + `modelRoles.web`；`enabled=false` 时写回 `web/public` 并清空 `searxng.endpoint`/`token`/`basicUsername`/`basicPassword`
-  - **Claude Code：读 `~/.searchfuse/config.json` 的 `hosts.claudeCode.enabled`，镜像写入 `~/.claude/settings.json` 的 `searchfuseHosts: { claudeCode: { enabled: <bool> } }`**。写前备份 `settings.json`。理由：宿主二进制明确「插件不得写 settings 文件，只能 `$.settings.read`」，所以镜像必须由插件之外的 CLI 完成
+  - omp enable：写 `searxng.endpoint` + `modelRoles.web` + **`searxng.token`（取自 `~/.searchfuse/serve-token`）**，写前清 `basicUsername`/`basicPassword`（Basic 优先会遮蔽 Bearer）；omp disable：写回 `web/public` 并清空 `searxng.endpoint`/`token`/`basicUsername`/`basicPassword`
+  - **Claude Code：读 `~/.searchfuse/config.json` 的 `hosts.claudeCode.enabled`，镜像写入 `~/.claude/settings.json` 的 `searchfuseHosts: { claudeCode: { enabled: <bool> } }`**。写前备份 `settings.json`；**只改 `searchfuseHosts` 这一个键，其余原样保留**（解析→改键→回写，禁止整份覆盖，否则会抹掉用户的 `permissions`/`hooks`/`enabledPlugins`）。理由：宿主二进制明确「插件不得写 settings 文件，只能 `$.settings.read`」，所以镜像必须由插件之外的 CLI 完成
   - Claude Code 的 MCP 声明
   - omp 扩展：把 `omp/extension.ts` 复制到 `~/.omp/agent/extensions/`
 
@@ -296,7 +310,7 @@ v4 给出三条启动路径，且**默认不空闲退出**：
 
 - 启动时生成随机 token，写入 `~/.searchfuse/serve-token`（0600）
 - **除 `/healthz` 外的全部端点**校验 `Authorization: Bearer <token>`（`/healthz` 免鉴权，见 §5.3）
-- **token 轮换的处理（v6 补）**：服务重启会换 token；`hosts sync` 只在安装时写一次，重启后 omp 会拿旧 token 撞 401 然后**静默回公网**。处置：服务启动时若检测到 omp 配置指向自己且 token 已变，打印一行提示指向 `searchfuse hosts sync`；`doctor` 报告 token 不一致。**不自动改写 omp 配置**（越界），但必须有明确信号。
+- **token 轮换的处理（v6 补）**：服务重启会换 token；`hosts sync` 只在安装时写一次，重启后 omp 会拿旧 token 撞 401 然后**静默回公网**。处置：服务启动时若检测到 omp 配置指向自己且 token 已变，**打印可直接复制执行的修复命令原文**（`searchfuse hosts sync`）；`doctor` 输出同样的命令而不只是「指向它」。**不自动改写 omp 配置**（越界），但必须有可操作的信号。
 - omp 用原生 `searxng.token`（`searxng.ts:143` 确认发 `Authorization: Bearer`）
 - **Basic auth 优先级高于 Bearer**（`:121`）：`hosts sync` 写配置前必须先清除 `searxng.basicUsername`/`basicPassword`，否则 401
 - `/v1/read-page` 在**服务侧**执行私网拦截
@@ -312,7 +326,11 @@ v4 给出三条启动路径，且**默认不空闲退出**：
 | `/__stats` | `{ localHits: number }`（v6 补表） | S5 验收 | Bearer |
 | `/healthz` | 文本 `OK` | `hosts sync`/`doctor` 就绪探测 | **免鉴权**（v6：否则探活需先读 token，把「起了但 401」误判为「没起」） |
 
-**`localHits` 的口径（v6 定义）**：**`/search` 成功应答的次数**（HTTP 200 且结果非空）。不含 `/v1/*`，不含失败请求。S5①/② 的区分力全压在这个定义上。
+**`localHits` 的口径与存活期（v7 定义）**：
+
+- **算什么**：`/search` 成功应答的次数（HTTP 200 且结果非空）。不含 `/v1/*`，不含失败请求。
+- **存多久**：**进程内计数，随服务重启归零，不落盘**。理由：它是测试/诊断用计数器，不是业务状态；落盘会引入一个新的状态文件与清理义务。
+- **对 S5 的约束**：S5② 的 baseline 与复测**必须在同一个服务进程内完成**，否则「计数归零」与「服务新起」无法区分，该条会退回假绿。
 
 **`/config` 的必需字段（v3 补 T12）**：omp 在设置 `searxng.engines` 时会请求它并读 `config.engines[]`，每项需 `name` 与可选 `shortcut`（见 `searxng.ts:167-195`）。缺这个字段时 omp 不会失败（`/config` 失败返回 null 后原样透传引擎名），但快捷名解析会失效。
 
@@ -473,19 +491,25 @@ import { spawn } from 'node:child_process'
 export default function (pi: ExtensionAPI) {
   pi.on('session_start', async () => {   // 下划线，不是 session.start
     // 拉服务：用 node:child_process，扩展里没有 $、没有 process.spawn
-    spawn(process.execPath, [servePath, '--ensure'], { detached: true, stdio: 'ignore' }).unref()
+    // servePath 由 hosts sync 渲染成绝对路径后写进扩展文件首行常量
+    // （模板占位替换，不是裸复制——裸复制后扩展与 dist/ 已无相对关系）
+    spawn(process.execPath, [SERVE_PATH, '--ensure'], { detached: true, stdio: 'ignore' }).unref()
   })
   pi.registerTool({
     name: 'x_search', label: 'X Search', description: '…',
-    parameters: type({ query: 'string' }),
-    execute: async (args) => { /* … */ },
+    // 真实签名：pi.zod / pi.typebox / pi.arktype 三选一，没有裸 type()
+    parameters: pi.zod.object({ query: pi.zod.string() }),
+    // 真实 execute 签名：首参是 toolCallId，params 在第二位
+    execute: async (toolCallId: string, params: { query: string }) => { /* … */ },
   })
 }
 ```
 
 依据：`dist/types/extensibility/extensions/types.d.ts:872` 的事件名是 `session_start`；`:459` 的 `ToolDefinition` 形状是 `{ name, label, description, parameters, execute }`；`ExtensionContext` 只有 `cwd`/`sessionManager`/`invokeTool`，**没有 `$`**；本机唯一的真实扩展 `~/.omp/agent/extensions/pebrel.ts` 用的就是 `node:child_process`。
 
-扩展文件放在 `~/.omp/agent/extensions/`，由 `searchfuse hosts sync` 从本包的 `omp/extension.ts` 复制。
+扩展文件由 `searchfuse hosts sync` 从本包的 `omp/extension.ts` **渲染**（模板占位替换，不是裸复制）写到 `~/.omp/agent/extensions/`，替换两处：`SERVE_PATH`（`dist/serve.js` 的绝对路径）、`TOKEN_PATH`（`~/.searchfuse/serve-token` 的绝对路径）。
+
+扩展调 `/v1/x-search`、`/v1/read-page` 时读 `TOKEN_PATH` 拼 `Authorization: Bearer`；读不到 token 时这两个工具返回明确错误并**不影响搜索**（搜索走原生 provider，不经过扩展）。
 
 ## 七、命名差异（接受，不强求统一）
 
@@ -521,10 +545,10 @@ v1 的验收可被 40 行桩骗过，v2 的 S4 经实测也无效——`claude p
 
 | 阶段 | 交付 | 验收（必须能红） |
 |---|---|---|
-| S1 | `src/serve/` + `src/kernel.ts` | ① 无 token 请求 → 401；② 在途请求未完成时 `idleExit` 不触发（2 秒慢引擎 + 5 秒 idle，断言进程仍活）；③ `/search` 含 `unresponsive_engines`；④ `/config` 返回 `engines[].name`；⑤ **`spawn dist/kernel.js --query x` 得到可解析的 `RunSearchResult`**（含 `results` 与 `meta.durationSeconds`）；⑥ **`GET /__stats` 返回 `{ localHits }`**；⑦ **`runtime.json` 含 `{ pid, startedAt, version }`** |
+| S1 | `src/serve/` + `src/kernel.ts` | ① 无 token 请求 → 401；② 在途请求未完成时 `idleExit` 不触发（2 秒慢引擎 + 5 秒 idle，断言进程仍活）；③ `/search` 含 `unresponsive_engines`；④ `/config` 返回 `engines[].name`；⑤ **`spawn dist/kernel.js --query x` 得到可解析的 `RunSearchResult`**（含 `results` 与 `meta.durationSeconds`）；⑥ **`GET /__stats` 返回 `{ localHits }`**；⑦ **`~/.searchfuse/runtime.json` 含 `{ pid, startedAt, version }`**（由 `src/serve/lifecycle.ts` 在服务就绪后写入、退出时删除） |
 | S2 | 配置 schema + 迁移 + 白名单 | ① **卡片保存后再 `config set`**，`hosts` 与 `serve` 仍在；② 两份分叉配置迁移后旧 key 出现在新文件且生成 `.bak`；③ 新值不被覆盖；④ **`dist/config-schema.js` 存在且被两个写入方 import**（v5：否则 dsh 那侧够不到 TS 源码） |
-| S3 | dsh 接 kernel | ① 真机 `web_search` 的 kernel stdout 里 `results[].attempts` 非空（**v5：指定载体，不是「日志」**）；② 服务未启动时也正常（dsh 不依赖服务） |
-| S4 | Claude Code Mod | ① **`claude plugin validate claude`（不加 `--strict`）退出码 0，且 stdout 含 `Validating hooks` 与 `calls:` 段**（`Validating hooks` 不出现 = 没读到 hooks 模块，此时恒绿）；② **真实触发 `tool.call`**：`claude -p "..." --plugin-dir claude`，断言结果来自 searchfuse——**已实测该机制可用**；③ `WebSearchOutput` 形状断言，`tool_use_id` 取自 hook 的 `e`；④ hook 抛错时 `next` 被调用**恰好一次**；⑤ **`hosts sync` 后 `$.settings.read({key:'searchfuseHosts'})` 能读到 `claudeCode.enabled === true`，`hosts sync --disable` 后为 `false`**（v6：否则开关无人写，hook 恒走 `next(e)`） |
+| S3 | dsh 接 kernel | ① **`--engine <name>` 钉死链式（或 `aggregate.mode: chain`）时 `results[].attempts` 非空**；默认 `rrf` 路径下 `attempts` **恒为 `[]`**（实测 `src/search.ts:479`、`:511`），所以不能无条件断言它；② 服务未启动时也正常（dsh 不依赖服务） |
+| S4 | Claude Code Mod | ① **`claude plugin validate claude`（不加 `--strict`）退出码 0，且 stdout 含 `Validating hooks` 与 `calls:` 段**（`Validating hooks` 不出现 = 没读到 hooks 模块，此时恒绿）；② **真实触发 `tool.call`**：`claude -p "..." --plugin-dir claude`，断言结果来自 searchfuse——**已实测该机制可用**；③ `WebSearchOutput` 形状断言，`tool_use_id` 取自 hook 的 `e`；④ hook 抛错时 `next` 被调用**恰好一次**；⑤ **`searchfuse hosts enable claudeCode && searchfuse hosts sync` 后 `$.settings.read({key:'searchfuseHosts'})` 能读到 `claudeCode.enabled === true`；`searchfuse hosts disable claudeCode && searchfuse hosts sync` 后为 `false`**（v7：命令名与 §十二 的三个动词对齐） |
 | S5 | omp 接入 | ① 不带 `--model` 时 `omp search` 命中本机：**`/__stats` 的 `localHits` 增 1**；② 服务未启动时：**`localHits` 不变、`omp` 退出码 0、输出条数 ≥ 10**（三个条件同时成立才证明「它退到公网了」；v4 只断言计数为 0，在未接入时也成立，无区分力）；③ `hosts sync`（enable）后 `searxng.endpoint` 与 `modelRoles.web` 都已写入；④ **`hosts sync`（disable）后 `modelRoles.web == "web/public"`、`searxng.endpoint` 为空、`basicUsername`/`basicPassword` 已清** |
 | S6 | parity 矩阵 | `npm run parity:final` 通过：每格测试名文件真实存在且出现在文件里（脚本已实测） |
 | S7 | npm 发布 | `npm pack --dry-run` 含 `claude/`（含 `hooks/hooks.json`）、**`omp/extension.ts`**、`dsh/` |
@@ -539,10 +563,12 @@ v1 的验收可被 40 行桩骗过，v2 的 S4 经实测也无效——`claude p
 
 新增需接入 commander：
 
-- `serve`：启动服务（`--daemon` 常驻）
+- `serve`：启动服务
+  - `serve --ensure`：**幂等拉起**——已在跑（`/healthz` 通）则 exit 0，否则启动；omp 扩展与 `hosts sync` 都用它
+  - `serve --daemon`：常驻（不随空闲/父进程退出）
 - `hosts`：`enable <name>` / `disable <name>` / `sync`（写各家配置并探活）
 
-`vite.config.ts` 的 entry 必须加两项：`kernel`（导出 `runSearch`）与 `serve`（现只有 `main`/`mcp-protocol`/`mcp-registry`）。
+`vite.config.ts` 的 entry 必须加**三项**：`kernel`（导出 `runSearch`）、`serve`、`config-schema`（现只有 `main`/`mcp-protocol`/`mcp-registry`）。
 
 ## 十三、Pre-mortem（v1 完全缺失，Critic 缺口 7）
 
@@ -591,7 +617,7 @@ S2 → S1 → S3 → S4 → S5 → S6 → S7。S2 必须在 S1 之前完成，�
 
 **Decision**：三宿主共用**一份实现**（`src/` → `dist/kernel.js`），但**不共用运行时**。dsh 与 Claude Code 各自 `spawn` kernel；omp 走本地 HTTP 服务（SearXNG 壳）。
 
-**Drivers**：① omp 无自定义 provider（`SearchProviderId` 封闭枚举，已证）；② 现有 `claude/engine/` 已分叉 22 文件 1996 行（9 同 9 异 4 独有）；③ 用户要求「一份代码 N 宿主」；④ `undici` 与 Node 内置使 Mod 沙箱无法直接复用 `src/`。
+**Drivers**：① omp 无自定义 provider（`SearchProviderId` 封闭枚举，已证）；② 现有 `claude/engine/` 已分叉 22 文件 1996 行（9 同 / 10 分叉 / 3 独有）；③ 用户要求「一份代码 N 宿主」；④ `undici` 与 Node 内置使 Mod 沙箱无法直接复用 `src/`。
 
 **Alternatives considered**：
 - A（每宿主独立实现）：无单点，但已在 `claude/` 产生分叉
@@ -602,4 +628,4 @@ S2 → S1 → S3 → S4 → S5 → S6 → S7。S2 必须在 S1 之前完成，�
 
 **Consequences**：`claude/engine/` 22 文件 1996 行删除；新增 `dist/kernel.js` entry；omp 的服务不可达时**退到公网**（宿主行为，静默）；服务仍需鉴权（单消费者、单 token）；dsh/Claude 每次搜索多一次进程启动（约 214 ms，与现状一致）；`serve.idleExitSeconds` 默认 0。
 
-**Follow-ups**：S1 落地后测 `idleExit` 与在途请求竞态；S5 落地后用服务日志计数验证 omp 主路径真的命中本地；S4 落地后用 `claude -p --plugin-dir` 证明 hooks 真的被执行。
+**Follow-ups**：S1 落地后测 `idleExit` 与在途请求竞态；S5 落地后用 `/__stats` 的 `localHits` 验证 omp 主路径真的命中本地；S4 落地后用 `claude -p --plugin-dir` 证明 hooks 真的被执行。
