@@ -1325,7 +1325,9 @@ describe('dsh settings card route', () => {
           networks: Record<string, unknown>;
           engines: Record<string, unknown>;
         };
-        expect(searxng.embedded).toBe(false);
+        // 文件里没写 embedded，而默认是开启：下发的必须是 true。
+        // 旧断言写的是 false，那正是「卡片显示关闭、运行时却可用」的来源。
+        expect(searxng.embedded).toBe(true);
         expect(Object.keys(searxng.networks)).toEqual(['via_tor']);
         expect(searxng.engines).toEqual({ brave: { network: 'via_tor' } });
       },
@@ -1349,6 +1351,128 @@ describe('dsh settings card route', () => {
         'all://': ['http://p1:8080', 'http://p2:8080'],
       });
     });
+  });
+
+  it('applies a batch of upstream rules without erasing unshown fields', async () => {
+    // 新 UI 一次提交多个引擎的改动（而不是一次一个）。批量路径与单条路径
+    // 必须共享同一份「先复制再覆盖」的保护。
+    await withConfig(
+      {
+        engine: '',
+        searxng: {
+          // 网络必须真实定义，否则校验会先一步拒掉（这本身是对的）。
+          networks: { via_tor: { proxies: { 'all://': 'socks5h://127.0.0.1:9050' } } },
+          engines: {
+            google: { network: 'via_tor', using_tor_proxy: true },
+            brave: {},
+          },
+        },
+      },
+      async (handler, file) => {
+        const { status } = await callRoute(
+          handler,
+          postOf({
+            searxngRules: {
+              google: { enabled: false },
+              brave: { proxy: 'http://127.0.0.1:7890' },
+            },
+          }),
+        );
+        expect(status).toBe(200);
+        const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        // google 的 network 与 tor 必须原样保留，只多一个 disabled。
+        expect(saved.searxng.engines.google).toEqual({
+          network: 'via_tor',
+          using_tor_proxy: true,
+          disabled: true,
+        });
+        expect(saved.searxng.engines.brave.proxies).toEqual({
+          'all://': 'http://127.0.0.1:7890',
+        });
+      },
+    );
+  });
+
+  it('writes the external SearXNG endpoint and clears it again', async () => {
+    await withConfig({ engine: '' }, async (handler, file) => {
+      await callRoute(
+        handler,
+        postOf({ searxngExternalURL: 'https://searx.example.com' }),
+      );
+      let saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(saved.engines.searxng.baseURL).toBe('https://searx.example.com');
+
+      // 空串 = 回到随包实例：地址必须被删掉，而不是写一个空值。
+      await callRoute(handler, postOf({ searxngExternalURL: '' }));
+      saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(Object.hasOwn(saved.engines.searxng || {}, 'baseURL')).toBe(false);
+    });
+  });
+
+  it('rejects an external URL that is not http(s)', async () => {
+    await withConfig({ engine: '' }, async (handler, file) => {
+      const before = fs.readFileSync(file, 'utf-8');
+      const { status, body } = await callRoute(
+        handler,
+        postOf({ searxngExternalURL: 'searx.example.com' }),
+      );
+      expect(status).toBe(400);
+      expect(String(body.error)).toMatch(/invalid SearXNG base URL/);
+      expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    });
+  });
+
+  it('keeps upstream rule fields the card never shows', async () => {
+    // 防数据丢失红线：卡片只暴露 enabled/proxies，但配置文件里可能还有
+    // network / using_tor_proxy。一次只改开关的保存绝不能把它们擦掉。
+    await withConfig(
+      {
+        engine: '',
+        searxng: {
+          networks: { via_tor: { proxies: { 'all://': 'socks5h://127.0.0.1:9050' } } },
+          engines: { google: { network: 'via_tor', using_tor_proxy: true } },
+        },
+      },
+      async (handler, file) => {
+        // 只提交「禁用 google」这一件事，不提 network / tor。
+        const { status } = await callRoute(
+          handler,
+          postOf({ searxngEngine: 'google', searxngEngineDisabled: true }),
+        );
+        expect(status).toBe(200);
+        const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        expect(saved.searxng.engines.google).toEqual({
+          network: 'via_tor',
+          using_tor_proxy: true,
+          disabled: true,
+        });
+      },
+    );
+  });
+
+  it('keeps top-level settings the card does not render', async () => {
+    // 同样的红线，换到顶层：aggregate / cooldown / hosts / serve 都不在卡片上，
+    // 但保存任何一处都不能把它们抹掉。
+    await withConfig(
+      {
+        engine: '',
+        aggregate: { mode: 'chain', deadlineMs: 90000 },
+        cooldown: 'off',
+        allowPrivateNetwork: true,
+        hosts: { omp: { enabled: false } },
+        serve: { port: 7799 },
+      },
+      async (handler, file) => {
+        const { status } = await callRoute(handler, postOf({ searxngEmbedded: true }));
+        expect(status).toBe(200);
+        const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        expect(saved.aggregate).toEqual({ mode: 'chain', deadlineMs: 90000 });
+        expect(saved.cooldown).toBe('off');
+        expect(saved.allowPrivateNetwork).toBe(true);
+        expect(saved.hosts).toEqual({ omp: { enabled: false } });
+        expect(saved.serve).toEqual({ port: 7799 });
+      },
+    );
   });
 
   it('rejects an engine that references a network nobody defined', async () => {
@@ -1378,13 +1502,25 @@ describe('dsh settings card route', () => {
     });
   });
 
-  it('toggles the bundled instance and removes the key when switched off', async () => {
+  it('writes an explicit false when the bundled instance is switched off', async () => {
     await withConfig({ engine: '', searxng: { embedded: true } }, async (handler, file) => {
       await callRoute(handler, postOf({ searxngEmbedded: false }));
       const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      // 关闭写的是「删掉这个键」，而不是 `embedded: false`：后者会让
-      // 「文件里有没有这个开关」变得不可区分，而 isAvailable 正是看这个。
-      expect(Object.hasOwn(saved.searxng, 'embedded')).toBe(false);
+      // 关闭写的是字面 false，而不是删掉这个键。
+      //
+      // src/config.ts 把「没有这个键」读作开启（`!== false`）。删键与写 false
+      // 在默认值相反时才等价；这里默认是开，删键会让「关闭」变成「开启」，
+      // 于是按钮点得动、文件也变了、行为却没变。
+      expect(saved.searxng.embedded).toBe(false);
+    });
+  });
+
+  it('reads an absent embedded key as on, matching the engine default', async () => {
+    // 空白配置（文件里没有 searxng 段）下，下发给卡片的值必须是开，
+    // 否则设置页与外发行为不一致。
+    await withConfig({ engine: '' }, async (handler) => {
+      const { body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
+      expect(body.searxng.embedded).toBe(true);
     });
   });
 

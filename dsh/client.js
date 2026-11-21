@@ -391,15 +391,24 @@ window.__ModuleLoader__.load({
     /**
      * 从摘要推出当前 SearXNG 模式。
      *
-     * 优先看外部地址：配了 baseURL 就是外部实例（这是既有的优先级）。
-     * 否则看 embedded 开关是否为真（默认是开）。都没有就是关闭。
+     * 与后端 `engineSettings()` 的判据保持一致：**未写 embedded 等于开启**。
+     * 三态互斥，判据按优先级：
+     *   1. 配了 baseURL → 外部实例（后端也是这条优先）；
+     *   2. searxng 段存在且 embedded === false → 显式关闭；
+     *   3. 其余（段缺席，或 embedded 为 true）→ 内置实例。
+     *
+     * 曾经的实现把「段存在」当成内置，于是文件里显式写 false 时界面仍显示
+     * 开着；又把「段缺席」判成关闭，与后端默认相反。两种错都指向同一件事：
+     * 卡片必须在「用户看到什么」与「运行时真的做什么」之间保持一致。
      */
     function searxngModeOf(summary) {
       var base = (summary?.engines?.searxng?.baseURL || '').trim();
       if (base !== '') return 'external';
-      if (summary?.searxng?.embedded === true) return 'embedded';
-      // searxng 段整个缺席时，默认按「内置」——这也是后端 isAvailable 的默认。
-      return summary?.searxng === undefined ? 'off' : 'embedded';
+      var searxng = summary?.searxng;
+      if (searxng !== undefined && searxng !== null && searxng.embedded === false) {
+        return 'off';
+      }
+      return 'embedded';
     }
 
     // 引擎切换或新的摘要到达时的下一份草稿。那些字段属于新选中的引擎，
@@ -442,14 +451,15 @@ window.__ModuleLoader__.load({
         mcpUrl: '',
         mcpProxy: '',
         mcpEnabled: true,
-        // SearXNG 上游：随包实例开关、默认代理、逐引擎规则。
-        searxngEmbedded: Boolean(summary && summary.searxng && summary.searxng.embedded),
         // SearXNG 的运行模式是三态互斥，不再是「内置开关 + 外部地址」两个
         // 各自独立的输入：同时开着内置又填了外部地址，是一个说不清谁优先
         // 的非法状态。这里把它收敛成一个选择。
         //   'off'     —— 不参与
         //   'embedded'—— 用随包实例
         //   'external'—— 用用户给的外部实例
+        //
+        // 它是 SearXNG 实例选择的**唯一真源**。早先还并存一个布尔字段
+        // `searxngEmbedded`，两处各存一份状态，保存时按哪个算就成了运气。
         searxngMode: searxngModeOf(summary),
         // 外部实例的地址与代理（草稿值，空表示不改动文件）。
         searxngExternalURL: (summary?.engines?.searxng?.baseURL || ''),
@@ -612,27 +622,34 @@ window.__ModuleLoader__.load({
         }
       }
 
-      // SearXNG：随包实例开关只要与当前值不同就提交。它不是一个「预填值」，
-      // 而是一个布尔，所以「不同」就是用户真的动过。
       // SearXNG：三态模式 + 外部地址 + 默认代理 + 上游引擎批量改动。
       //
-      // 只提交真的变过的部分：``external`` 模式下 baseURL 与代理是必填的
-      // 一对，``embedded`` 模式下则只保留随包实例的开关。
+      // 三态在文件里的写法必须落成明确的值，因为后端把「没有这个键」读作
+      // 开启：
+      //   off      → embedded: false          （显式关闭，而不是删键）
+      //   embedded → embedded: true
+      //   external → embedded: false + baseURL（外部优先，内置必须让位）
+      // 只提交真的变过的部分，理由与其余字段一致。
       var searxngCurrent = (summary && summary.searxng) || {};
       var currentMode = searxngModeOf(summary);
       var externalCurrent = (summary?.engines?.searxng?.baseURL || '');
 
       if (typeof draft.searxngMode === 'string' && draft.searxngMode !== currentMode) {
         if (draft.searxngMode === 'external') {
-          // 切到外部实例：关掉随包开关，并带上地址（若用户已填）。
+          // 切到外部实例：内置让位，并带上地址（若用户已填）。
           payload.searxngEmbedded = false;
           if (draft.searxngExternalURL !== '') {
             payload.searxngExternalURL = draft.searxngExternalURL;
             payload.searxngExternalProxy = draft.searxngExternalProxy;
           }
+        } else if (draft.searxngMode === 'off') {
+          // 切到关闭：写显式 false。删键会被后端读回「默认开启」。
+          payload.searxngEmbedded = false;
+          payload.searxngExternalURL = '';
+          payload.searxngExternalProxy = '';
         } else {
-          // 切到内置或关闭：地址清空，随包开关按模式决定。
-          payload.searxngEmbedded = draft.searxngMode === 'embedded';
+          // 切到内置：写显式 true，并清掉外部地址让它不再优先。
+          payload.searxngEmbedded = true;
           payload.searxngExternalURL = '';
           payload.searxngExternalProxy = '';
         }
@@ -1662,7 +1679,6 @@ window.__ModuleLoader__.load({
                 next.editTarget = name;
                 // 保留用户已做的勾选与 SearXNG 草稿。
                 next.enabled = Object.assign({}, draft.enabled);
-                next.searxngEmbedded = draft.searxngEmbedded;
                 next.searxngMode = draft.searxngMode;
                 next.searxngExternalURL = draft.searxngExternalURL;
                 next.searxngExternalProxy = draft.searxngExternalProxy;

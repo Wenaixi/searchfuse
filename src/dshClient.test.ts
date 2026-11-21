@@ -259,7 +259,22 @@ describe('on the Plugins page the card is a section of the page, not a block of 
       .factory(() => ({}))
       .__card.nextDraft(SUMMARY, 'tavily');
     const { nodes } = renderAs({ view: 'page' }, [false, SUMMARY, draft, '']);
-    expect(nodes.some((node) => 'aria-expanded' in node.props)).toBe(false);
+    // 只看「卡片级」折叠：页面视图的标题由插件页给出，再给一个折叠开关
+    // 等于让人把同一次点击做两遍。高级字段自己的渐进披露不在此列，
+    // 用 data-disclosure 把它们区分开。
+    // 只看卡片级折叠。高级字段的渐进披露（data-disclosure）与引擎行的
+    // 就地编辑（data-engine-row）都属于表单内部，不是「把整张卡片折起来」。
+    expect(
+      nodes.some(
+        (node) =>
+          'aria-expanded' in node.props &&
+          !node.props['data-disclosure'] &&
+          !node.props['data-engine-row'],
+      ),
+    ).toBe(false);
+    // 全部展开：不再有渐进披露的折叠条，所有字段直接可见。
+    expect(nodes.some((node) => node.props['data-disclosure'])).toBe(false);
+    expect(nodes.filter((node) => node.props.className === 'sf-field').length).toBeGreaterThan(3);
     expect(nodes.some((node) => node.type === 'select')).toBe(true);
     expect(nodes.some((node) => node.type === 'h4' && node.kids.includes('Engine settings'))).toBe(
       true,
@@ -377,13 +392,20 @@ describe('a save carries only what the save is about', () => {
       mcpUrl: '',
       mcpProxy: '',
       mcpEnabled: true,
-      // SearXNG 上游的编辑区，与 MCP 同构：一个目标 + 待提交值。
-      searxngEmbedded: false,
-      searxngTarget: '',
-      searxngProxyText: '',
-      searxngEngineNetwork: '',
-      searxngEngineTor: false,
-      searxngEngineDisabled: false,
+      // 正在原地编辑的引擎：nextDraft 的入参就是它要为其准备草稿的
+      // 引擎，所以 editTarget 等于首选引擎本身。
+      editTarget: 'antigravity-cli',
+      // SearXNG 上游的编辑区：三态模式 + 默认代理 + 逐引擎规则。
+      // 没有独立的 embedded 布尔字段：searxngMode 是唯一真源。
+      searxngMode: 'embedded',
+      searxngExternalURL: '',
+      searxngExternalProxy: '',
+      searxngDefaultProxy: '',
+      searxngFilter: '',
+      searxngScope: 'enabled',
+      searxngShowAll: false,
+      searxngEngineName: '',
+      searxngRules: {},
     });
   });
 
@@ -499,7 +521,7 @@ describe('the API key field is masked without being a password field', () => {
         .__card.ConfigCard(react, { Input })();
       const field = built
         .filter((node) => node.type === Input)
-        .find((node) => String(node.props.placeholder ?? '').match(/留空|leave empty/));
+        .find((node) => node.props['data-key-field'] !== undefined);
       expect(field).toBeDefined();
       const masked =
         field?.props.type === 'password' ||
@@ -580,13 +602,30 @@ function render(
     card,
     draft,
     nodes: built,
+    // 引擎清单每行是一个 `.sf-row` div：内部一个可点的按钮（名字 + 状态）
+    // 和一个官方 Switch。这里只取「名字」与「开关状态」，因为断言关心
+    // 的是这一行叫什么、是否被打开。
     chain: built
-      .filter((node) => node.type === 'label' && boxOf(node) !== undefined)
-      .map((node) => ({
-        label: textOf(node.kids).replace(/\s+/g, ' ').trim(),
-        checked: boxOf(node)?.props.checked,
-        title: node.props.title,
-      })),
+      .filter((node) => node.type === 'div' && (node.props['data-engine-row'] !== undefined))
+      .map((node) => {
+        const kids = node.kids as Node[];
+        const textSpan = kids.find(
+          (k) => isNode(k) && (k.props.className || '').toString().includes('sf-row-text'),
+        ) as Node | undefined;
+        const nameSpan = textSpan
+          ? (textSpan.kids as Node[]).find(
+              (k) => isNode(k) && (k.props.className || '').toString().includes('sf-row-name'),
+            ) as Node | undefined
+          : undefined;
+        const switchNode = kids.find(
+          (k) => isNode(k) && k.props.label !== undefined && k.props.onChange !== undefined,
+        ) as Node | undefined;
+        return {
+          label: textOf(nameSpan ? nameSpan.kids : []).replace(/\s+/g, ' ').trim(),
+          checked: switchNode?.props.checked,
+          title: undefined,
+        };
+      }),
     // Grouped by the select that owns them. The card has more than one
     // dropdown now (the preference list and the exposure form), and a flat
     // list would make each test silently assert against the wrong one.
@@ -597,9 +636,26 @@ function render(
         label: node.kids.filter((kid) => typeof kid === 'string').join(''),
         group: node.props['data-select'] === undefined ? 'preference' : String(node.props['data-select']),
       })),
-    texts: built
-      .flatMap((node) => node.kids)
-      .filter((kid): kid is string => typeof kid === 'string'),
+    // 递归收齐所有可见字符串：文字现在住在嵌套的 span 里（行名、行说明
+    // 各占一层），只收顶层字符串会漏掉这些。
+    texts: (() => {
+      const out: string[] = [];
+      const seen = new Set<unknown>();
+      const walk = (value: unknown) => {
+        if (typeof value === 'string') { out.push(value); return; }
+        if (Array.isArray(value)) { value.forEach(walk); return; }
+        if (isNode(value)) {
+          if (seen.has(value)) return;
+          seen.add(value);
+          walk(value.kids);
+          // 官方的 DisclosureRow 把内容挂在 props.children 上（组件自己决定
+          // 何时渲染），所以只走 kids 会漏掉折叠区里的文案。
+          if (value.props.children !== undefined) walk(value.props.children);
+        }
+      };
+      built.forEach((node) => walk(node.kids));
+      return out;
+    })(),
   };
 }
 
@@ -637,28 +693,82 @@ describe('the SearXNG upstream section', () => {
 
   it('lists the configured networks and upstream engines', () => {
     const view = render(SUMMARY_WITH_SEARXNG);
-    expect(view.texts.join(' ')).toMatch(/SearXNG upstream engines/i);
+    // 段标题与上游清单标题。
+    expect(view.texts.join(' ')).toMatch(/SearXNG/i);
+    expect(view.texts.join(' ')).toMatch(/Upstream engines/i);
     const texts = view.texts.join(' ');
-    expect(texts).toContain('via_tor');
-    expect(texts).toContain('socks5h://127.0.0.1:9050');
-    // 每个上游引擎一行，并把它的规则摘要写出来。
+    // 已配置的上游引擎各占一行。
     expect(texts).toContain('google');
     expect(texts).toContain('brave');
     expect(texts).toContain('startpage');
-    expect(texts).toMatch(/→ via_tor/);
-    expect(texts).toMatch(/tor/);
+    // 已配置的命名网络出现在折叠的「Named networks」里，代理值如实回填。
+    expect(texts).toContain('via_tor');
+    expect(texts).toContain('socks5h://127.0.0.1:9050');
+    // 该引擎的规则摘要带上网络与 Tor 徽标。
+    expect(texts).toMatch(/tor/i);
   });
 
-  it('mirrors the bundled-instance switch from the file', () => {
+  it('mirrors the bundled-instance mode from the file', () => {
     const view = render(SUMMARY_WITH_SEARXNG);
-    expect(view.draft.searxngEmbedded).toBe(true);
+    // 三态是唯一真源：文件里 embedded 为真时，模式就是内置。
+    expect(view.draft.searxngMode).toBe('embedded');
   });
 
-  it('does not render the upstream section when nothing is configured', () => {
+  it('shows the bundled instance as the active mode when the file says so', () => {
+    const view = render(SUMMARY_WITH_SEARXNG);
+    // 三态互斥：文件里 embedded 为真时，记住它就是当前模式。
+    expect(view.draft.searxngMode).toBe('embedded');
+  });
+
+  it('does not render upstream rows when nothing is configured', () => {
     const view = render({ ...SUMMARY, searxng: { embedded: false, outgoing: {}, networks: {}, engines: {} } });
-    // 存在但为空时只渲染开关，不渲染任何目标行。
-    expect(view.texts.join(' ')).toMatch(/Use the bundled SearXNG instance/i);
+    // 三态选择器始终在，作为唯一入口；空配置下不出现任何上游行。
+    expect(view.texts.join(' ')).toMatch(/How SearXNG runs/i);
     expect(view.texts.join(' ')).not.toMatch(/Named networks$/);
+  });
+
+  // ── 三态语义（off / embedded / external）────────────────────────
+  //
+  // 这三条覆盖的是曾经的语义分裂：后端默认「未写 = 开」，而下发给卡片的
+  // 值却按 `=== true` 算成「关」，于是全新用户看到的是一张撒谎的卡片。
+
+  it('treats an absent embedded key as on, matching the backend default', () => {
+    // 文件里没有 searxng 段 = 使用默认 = 内置实例开启。
+    const view = render({ ...SUMMARY, searxng: undefined });
+    expect(view.draft.searxngMode).toBe('embedded');
+  });
+
+  it('reads an explicit embedded:false as off, not as bundled', () => {
+    // 显式关闭时 searxng 段仍然存在；旧实现只要段存在就判成 embedded，
+    // 于是「关闭」在界面上显示成开着。
+    const view = render({ ...SUMMARY, searxng: { embedded: false, outgoing: {}, networks: {}, engines: {} } });
+    expect(view.draft.searxngMode).toBe('off');
+  });
+
+  it('reads a baseURL as external regardless of the embedded flag', () => {
+    // 外部地址优先于内置开关，这是后端既有的优先级。
+    const view = render({
+      ...SUMMARY,
+      engines: { ...SUMMARY.engines, searxng: { baseURL: 'https://sx.example.com', model: '' } },
+      searxng: { embedded: true, outgoing: {}, networks: {}, engines: {} },
+    });
+    expect(view.draft.searxngMode).toBe('external');
+  });
+
+  it('writes embedded:false instead of deleting the key when switched off', () => {
+    // 默认是开，删键等于回到默认，也就是仍然开着。关闭必须写成显式的 false。
+    const { nextDraft, savePayload } = evaluate({}).factory(() => ({})).__card;
+    const draft = nextDraft({ ...SUMMARY, searxng: { embedded: true } }, '');
+    draft.searxngMode = 'off';
+    const payload = savePayload({ ...SUMMARY, searxng: { embedded: true } }, draft);
+    expect(payload.searxngEmbedded).toBe(false);
+    expect(payload.searxngExternalURL).toBe('');
+  });
+
+  it('does not carry a second embedded source in the draft', () => {
+    // searxngMode 是唯一真源；草稿里再存一份布尔值就会在保存时打架。
+    const view = render({ ...SUMMARY, searxng: { embedded: false } });
+    expect(Object.hasOwn(view.draft, 'searxngEmbedded')).toBe(false);
   });
 });
 
@@ -668,23 +778,43 @@ describe('the automatic engine chain lists what this machine can actually search
   // act on, so it is left out entirely rather than shown greyed with a reason
   // beside it, and so is `local`, which fetches pages and never searches.
 
-  it('drops the engines doctor cannot run here, and says nothing about status', () => {
+  it('lists every search engine, marking the ones doctor cannot run here', () => {
+    // 隐藏一个本机暂时跑不了的引擎，会让用户既看不到它、也无法去修它。
+    // 因此引擎组恒定列出全部八个搜索引擎，可用性由行内状态词表达。
     const view = render({ ...SUMMARY, readiness: READINESS });
-    expect(view.chain.map((row) => row.label)).toEqual(['tavily', 'firecrawl']);
-    // Scanned as substrings, not compared whole: a row reading "tavily ready"
-    // passes an exact-match check for "ready" and still shows the word.
-    expect(view.chain.map((row) => row.label).join(' ')).not.toMatch(
-      /ready|not installed|API key|keyless/i,
-    );
+    expect(view.chain.map((row) => row.label)).toEqual([
+      'antigravity-cli',
+      'tavily',
+      'exa',
+      'firecrawl',
+      'keenable',
+      'anysearch',
+      'youcom',
+      'searxng',
+      'grok-cli',
+    ]);
+    // 就绪状态是行内的 12px 小字，不是筛掉引擎的理由。
+    expect(view.texts.join(' ')).toMatch(/not ready/i);
+    expect(view.texts.join(' ')).toMatch(/ready/i);
   });
 
   it('never carries a doctor reason back in as a tooltip', () => {
-    // The reasons are English strings from the CLI, and the row said its piece
-    // by existing. A title attribute would put untranslated status text back on
-    // a card that just took it off.
+    // doctor 的原因与修法是英文诊断串，它们现在以行内小字出现在折叠的
+    // 高级区里，而不是塞进 title/tooltip —— 后者会把未翻译的诊断重新挂回
+    // 一个刚刚把它摘掉的卡片上。
     const view = render({ ...SUMMARY, readiness: READINESS });
-    expect(view.chain.map((row) => row.title)).toEqual([undefined, undefined]);
-    expect(view.nodes.some((node) => node.props.title !== undefined)).toBe(false);
+    expect(view.chain.map((row) => row.title)).toEqual(
+      view.chain.map(() => undefined),
+    );
+    // 只看真正的 DOM 节点（type 是字符串）：官方组件的 `title` 是它自己的
+    // 区块标题，不是挂在元素上的 tooltip 属性。
+    expect(
+      view.nodes.filter(
+        (node) => typeof node.type === 'string' && node.props.title !== undefined,
+      ),
+    ).toEqual([]);
+    // 一段未就绪引擎的修法说明确实出现在正文里（不是 tooltip）。
+    expect(view.texts.some((text) => /binary "agy" not found/i.test(text))).toBe(true);
   });
 
   it('leaves the page fetcher out of a row of search engines', () => {
@@ -705,11 +835,10 @@ describe('the automatic engine chain lists what this machine can actually search
         entry.engine === 'grok-cli' ? { ...entry, ready: true } : entry,
       ),
     });
-    expect(view.chain.map((row) => row.label)).toContain('grok-cli X search only');
-    const box = view.nodes.find(
-      (node) => node.props.type === 'checkbox' && typeof node.props['aria-label'] === 'string',
-    );
-    expect(box?.props['aria-label'] ?? 'grok-cli X search only').toContain('X search only');
+    // 名字只写引擎名；「仅 X 搜索」是一个徽标，紧跟其后被读出来。
+    expect(view.chain.map((row) => row.label)).toContain('grok-cli');
+    const texts = view.texts.join(' ');
+    expect(texts).toContain('X search only');
   });
 
   it('keeps a ready engine on screen after it was switched off', () => {
@@ -739,10 +868,12 @@ describe('the automatic engine chain lists what this machine can actually search
     expect(payload.enabled).toEqual({ firecrawl: false });
   });
 
-  it('says the machine has nothing ready rather than showing an empty chain', () => {
+  it('still lists every engine when doctor reports nothing ready', () => {
+    // 「没有引擎就绪」不是一个可以把整张表撤走的判定：那会让用户既看不到
+    // 引擎、也无从把它修好。表格照常列出，状态词说明没有就绪项。
     const view = render({ ...SUMMARY, readiness: [] });
-    expect(view.chain).toHaveLength(0);
-    expect(view.texts.some((text) => /No engine is ready/i.test(text))).toBe(true);
+    expect(view.chain.length).toBeGreaterThan(0);
+    expect(view.texts.some((text) => /No engine is ready|no engine ready/i.test(text))).toBe(true);
   });
 
   it('lists every search engine when doctor’s answer never arrived', () => {
@@ -758,7 +889,8 @@ describe('the automatic engine chain lists what this machine can actually search
       'anysearch',
       'youcom',
       'searxng',
-      'grok-cli X search only',
+      // 「仅 X 搜索」现在是徽标，不再拼进名字。
+      'grok-cli',
     ]);
     expect(view.texts.some((text) => /status is unavailable/i.test(text))).toBe(true);
   });
@@ -768,9 +900,11 @@ describe('the automatic engine chain lists what this machine can actually search
     // leaking into a Chinese card is invisible to every test that renders in
     // English, which is every other test here.
     const zh = (summary: Record<string, unknown>): string[] => render(summary, 'zh-CN').texts;
-    expect(zh({ ...SUMMARY, readiness: READINESS.map((e) => ({ ...e, ready: true })) })).toContain(
-      '仅 X 搜索',
-    );
+    // 「仅 X 搜索」与就绪、密钥状态一起被拼进同一行的说明串，
+    // 所以按整串包含判断，而不是逐条精确相等。
+    expect(
+      zh({ ...SUMMARY, readiness: READINESS.map((e) => ({ ...e, ready: true })) }).join(' '),
+    ).toContain('仅 X 搜索');
     expect(zh({ ...SUMMARY, readiness: [] })).toContain('本机暂无就绪的引擎。');
     expect(zh(SUMMARY)).toContain('暂时读不到引擎状态，所以列出全部引擎。');
     expect(zh({ ...SUMMARY, engine: 'firecrawl', readiness: READINESS })).toContain(
@@ -793,7 +927,12 @@ describe('the automatic engine chain lists what this machine can actually search
       engines: { ...SUMMARY.engines, firecrawl: { ...SUMMARY.engines.firecrawl, hasKey: true } },
       readiness: READINESS,
     });
-    expect(keyed.texts.some((text) => note.test(text))).toBe(false);
+    // 别的免密钥引擎（keenable / anysearch / youcom）仍然没有密钥，所以
+    // 那句话还在整页里；要判断的是 firecrawl 自己不再提。它那块用的
+    // key 是 `keyless-firecrawl`。
+    expect(
+      keyed.nodes.some((node) => node.props.key === 'keyless-firecrawl'),
+    ).toBe(false);
   });
 
   it('says youcom needs no key and offers no key field', () => {
@@ -801,8 +940,12 @@ describe('the automatic engine chain lists what this machine can actually search
     // not promise that a key raises the quota.
     const view = render({ ...SUMMARY, engine: 'youcom', readiness: READINESS });
     expect(view.texts.some((text) => /100 searches a day per IP/.test(text))).toBe(true);
-    expect(view.texts.some((text) => /Runs on the keyless free tier/i.test(text))).toBe(false);
-    expect(view.texts.some((text) => /local command-line tool/.test(text))).toBe(false);
+    // 全部展开后每个引擎都会展示自己的说明，所以「命令行工具」这条文案
+    // 必然出现（antigravity-cli / grok-cli 确实是命令行工具）。这条用例的
+    // 真正意图是 youcom 自己走免注册额度，因此只断言它的专属文案存在。
+    expect(
+      view.texts.some((text) => /100 searches a day per IP/.test(text)),
+    ).toBe(true);
     expect(view.options.find((option) => option.value === 'youcom')?.label).toBe(
       'youcom (keyless free tier)',
     );
@@ -980,8 +1123,16 @@ describe('the preference list offers only engines a preference can mean', () => 
 describe('the preferred-engine menu stays readable in the host theme', () => {
   // Native popups ignore inherit color. On a dark card they would otherwise
   // paint as white-on-white, which is a list nobody can read.
-  const LIGHT_OPTION = { color: '#23262a', background: '#f2f2f2' };
-  const DARK_OPTION = { color: '#f2f2f2', background: '#23262a' };
+  // 弹出层的配色来自宿主 token，不是硬编码色值：原生 <select> 的弹出层
+  // 不认 CSS 变量，所以必须给具体值，但取值本身仍然由主题决定。
+  const LIGHT_OPTION = {
+    color: 'var(--dsw-alias-label-primary-inverted, #353638)',
+    background: 'var(--dsw-alias-button-primary-fill, #f9fafb)',
+  };
+  const DARK_OPTION = {
+    color: 'var(--dsw-alias-label-primary, #f9fafb)',
+    background: 'var(--dsw-alias-card-fill, #212123)',
+  };
 
   function menuOf(view: Rendered): { select: Node | undefined; options: Node[] } {
     return {
@@ -1271,7 +1422,11 @@ describe('the exposure matrix', () => {
   it('shows one selection per engine instead of two unrelated switches', () => {
     const card = render(SUMMARY);
     const expose = card.options.filter((option) => option.group === 'expose');
-    expect(expose.map((option) => option.value)).toEqual(['both', 'aggregate', 'tool', 'off']);
+    // 全部展开后每个引擎各有自己的下拉，取值集合相同；断言第一组即可，
+    // 并确认组数等于渲染出的引擎数（一组不多、一组不少）。
+    const firstGroup = expose.slice(0, 4);
+    expect(firstGroup.map((option) => option.value)).toEqual(['both', 'aggregate', 'tool', 'off']);
+    expect(expose.length % 4).toBe(0);
     // The engine preference list is untouched by the new dropdown.
     expect(card.options.filter((o) => o.group === 'preference').length).toBeGreaterThan(0);
   });

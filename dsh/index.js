@@ -1007,8 +1007,13 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
     mcp,
     // SearXNG 的抓取配置。卡片要能逐引擎配代理，所以这里原样交出去，
     // 保存时由 applyCardSettings 校验并写回。
+    //
+    // `embedded` 必须与 src/config.ts 的 `engineSettings()` 用同一个判据
+    // （`!== false`）：文件里没写这个键就等于开启。曾经这里写的是
+    // `=== true`，于是全新用户打开卡片看到「关闭」，而运行时内置实例
+    // 明明可用 —— 一张撒谎的设置页比没有设置页更糟。
     searxng: {
-      embedded: config.searxng?.embedded === true,
+      embedded: config.searxng?.embedded !== false,
       outgoing: isPlainObject(config.searxng?.outgoing) ? config.searxng.outgoing : {},
       networks: isPlainObject(config.searxng?.networks) ? config.searxng.networks : {},
       engines: isPlainObject(config.searxng?.engines) ? config.searxng.engines : {},
@@ -1265,10 +1270,16 @@ function applyCardSettings(patch) {
       throw new Error('the "searxng" section of the config file is not an object');
     }
     var searxngBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    // 两个布尔值都写显式值，不删键。
+    //
+    // src/config.ts 把「没有 embedded 键」读作开启，而旧实现遇到 `false`
+    // 时删掉了这个键，于是「关闭」在写盘后等价于「开启」—— 按钮点得动、
+    // 文件也变了、行为却没变。删键与写 false 只有在默认值相反时才有分，
+    // 这里默认是开，所以 false 必须落成字面 false。
     if (patch.searxngEmbedded === true) {
       searxngBase.embedded = true;
     } else {
-      delete searxngBase.embedded;
+      searxngBase.embedded = false;
     }
     config.searxng = searxngBase;
   }

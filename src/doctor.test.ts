@@ -117,6 +117,9 @@ describe('doctor: search engines', () => {
           keenable: { enabled: false },
           anysearch: { enabled: false },
           youcom: { enabled: false },
+          // 随包 SearXNG 默认开启；这条用例要的是「无人能服务搜索」，
+          // 所以一并关掉，否则它会成为一个可用的候选。
+          searxng: { enabled: false },
         },
       },
       env: BARE_ENV,

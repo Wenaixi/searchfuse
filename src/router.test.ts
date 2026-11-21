@@ -70,6 +70,8 @@ describe('engine chains per role', () => {
       'keenable',
       'anysearch',
       'youcom',
+      // 随包 SearXNG 默认开启，因此排在无密钥引擎之后参与融合。
+      'searxng',
       'tavily',
     ]);
   });
@@ -81,6 +83,7 @@ describe('engine chains per role', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'tavily',
       'exa',
     ]);
@@ -95,6 +98,7 @@ describe('engine chains per role', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'tavily',
       'exa',
     ]);
@@ -120,6 +124,7 @@ describe('engine chains per role', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
     ]);
   });
 
@@ -129,6 +134,7 @@ describe('engine chains per role', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
     ]);
   });
 
@@ -142,6 +148,8 @@ describe('engine chains per role', () => {
         keenable: { enabled: false },
         anysearch: { enabled: false },
         youcom: { enabled: false },
+        // 随包 SearXNG 默认开启，这条用例要的是「空链」，所以一并关掉。
+        searxng: { enabled: false },
         tavily: { apiKey: ', ,' },
         exa: { apiKey: ',,' },
       },
@@ -371,6 +379,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'exa',
       'tavily',
     ]);
@@ -391,6 +400,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'tavily',
       'exa',
     ]);
@@ -402,6 +412,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'exa',
       'tavily',
     ]);
@@ -422,6 +433,9 @@ describe('cooldown reorders the chain without changing the base order', () => {
     // 留在链首，其余冷却引擎按基础顺序跟在后面。
     expect(names(chain)).toEqual([
       'anysearch',
+      // searxng 不在冷却表里（随包实例没有配额可耗尽），因此与 anysearch
+      // 一起留在非冷却组，排在所有冷却引擎之前。
+      'searxng',
       'firecrawl',
       'keenable',
       'youcom',
@@ -467,6 +481,7 @@ describe('cooldown reorders the chain without changing the base order', () => {
       'keenable',
       'anysearch',
       'youcom',
+      'searxng',
       'tavily',
       'exa',
     ]);
