@@ -100,7 +100,13 @@ export interface McpRegistrationResult {
  * 是两种不同的修法。
  */
 export async function registerMcpServers(
-  ctx: { tools: { register: (definition: unknown) => unknown } },
+  ctx: {
+    tools: {
+      register: (definition: unknown) => unknown
+      /** 宿主已有的工具视图：用来在注册前检测同名占用。 */
+      get?: (name: string) => unknown
+    }
+  },
   options: RegisterMcpOptions,
 ): Promise<McpRegistrationResult> {
   const reserved = new Set(options.reservedNames ?? []);
@@ -195,45 +201,69 @@ export async function registerMcpServers(
         report.error = `tool name "${name}" is already taken; skipped`;
         continue;
       }
+      // 宿主里可能已经有同名工具（例如别的插件也接了同一个 MCP 服务端）。
+      // 只看本模块自己的 claimed 集合是不够的：register 在宿主层撞名会抛，
+      // 而下面的 try/catch 会把整趟注册判失败，导致**所有** MCP 工具集体失效。
+      // 先查一次宿主视图，已存在就只跳过这一个工具，并如实记进报告。
+      const alreadyInHost = (() => {
+        try {
+          return typeof ctx.tools?.get === 'function' ? ctx.tools.get(name) !== undefined : false;
+        } catch {
+          return false;
+        }
+      })();
+      if (alreadyInHost) {
+        report.error = `tool name "${name}" is already registered by the host; skipped`;
+        continue;
+      }
       claimed.add(name);
       const toolConnection = connection;
-      const registered = ctx.tools.register({
-        name,
-        description:
-          tool.description ?? `Tool ${tool.name} provided by the MCP server "${serverKey}".`,
-        parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<
-          string,
-          unknown
-        >,
-        output: {
-          schema: MCP_OUTPUT_SCHEMA,
-          render: (_args: unknown, value: unknown) => [
-            {
-              type: 'text',
-              text:
-                extractText((value as { content?: unknown } | undefined)?.content) ||
-                '(no content)',
-            },
-          ],
-        },
-        // 扇出的搜索引擎是并发跑的；一个声明自己不安全的 MCP 工具
-        // 会排在其他所有调用后面串行执行。
-        isConcurrencySafe: () => true,
-        async execute(args: unknown, exec: { signal?: AbortSignal }) {
-          // 信号往下传，而不是在这里只看一眼就算数：只看一眼只能拦住还没
-          // 出发的调用，拦不住已经在飞的请求。传下去之后，用户点停止，
-          // fetch 会自己中止，服务端那边也就不会继续算下去。
-          return toolConnection.callTool(
-            tool.name,
-            (args ?? {}) as Record<string, unknown>,
-            exec?.signal,
-          );
-        },
-      });
-      if (typeof registered === 'function') {
-        disposeTools_.push(registered as () => void);
+      // 逐个工具 try/catch：一个工具注册失败不该连累同服务器或其它服务器的
+      // 其它工具。真正需要放弃的只有连接本身。
+      try {
+        const registered = ctx.tools.register({
+          name,
+          description:
+            tool.description ?? `Tool ${tool.name} provided by the MCP server "${serverKey}".`,
+          parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<
+            string,
+            unknown
+          >,
+          output: {
+            schema: MCP_OUTPUT_SCHEMA,
+            render: (_args: unknown, value: unknown) => [
+              {
+                type: 'text',
+                text:
+                  extractText((value as { content?: unknown } | undefined)?.content) ||
+                  '(no content)',
+              },
+            ],
+          },
+          // 扇出的搜索引擎是并发跑的；一个声明自己不安全的 MCP 工具
+          // 会排在其他所有调用后面串行执行。
+          isConcurrencySafe: () => true,
+          async execute(args: unknown, exec: { signal?: AbortSignal }) {
+            // 信号往下传，而不是在这里只看一眼就算数：只看一眼只能拦住还没
+            // 出发的调用，拦不住已经在飞的请求。传下去之后，用户点停止，
+            // fetch 会自己中止，服务端那边也就不会继续算下去。
+            return toolConnection.callTool(
+              tool.name,
+              (args ?? {}) as Record<string, unknown>,
+              exec?.signal,
+            );
+          },
+        });
+        if (typeof registered === 'function') {
+          disposeTools_.push(registered as () => void);
+        }
+        report.tools.push(name);
+      } catch (error) {
+        // 保留 claimed 里的名字：同服务器内后续同名工具仍应被视为已占用。
+        report.error = `tool name "${name}" could not be registered: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
       }
-      report.tools.push(name);
     }
     report.connected = true;
     // 连接会保持打开：刚注册的工具每次使用都会调用它，在这里拆除会话

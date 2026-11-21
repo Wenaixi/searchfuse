@@ -67,7 +67,11 @@ async function toolsServer(tools: Array<Record<string, unknown>>) {
 
 interface FakeCtx {
   registered: Array<{ name: string; description: string; parameters: unknown; output: unknown }>;
-  tools: { register: (definition: unknown) => unknown };
+  tools: {
+    register: (definition: unknown) => unknown
+    /** 可选：模拟宿主里已有同名工具（真实 ToolsService 上存在此方法）。 */
+    get?: (name: string) => unknown
+  };
 }
 
 function fakeCtx(): FakeCtx {
@@ -214,6 +218,58 @@ describe('registerMcpServers', () => {
       });
       expect(ctx.registered).toEqual([]);
       expect(result.reports[0]?.error).toMatch(/already taken/);
+      await result.closeAll();
+    } finally {
+      await server.close();
+    }
+  });
+
+  // 真实宿主里可能已经有同名工具（例如另一个插件接了同一个 MCP 服务端）。
+  // 只看本模块的 claimed 集合不够：register 在宿主层撞名会抛，而外层 try/catch
+  // 会把整趟注册判失败，让所有 MCP 工具集体失效。
+  it('skips a tool the host reports as present, keeping the sibling tools', async () => {
+    const ctx = fakeCtx();
+    const hostOwned = 'mcp__srv__taken';
+    // 模拟宿主视图里已经有这个工具名
+    ctx.tools.get = (name: string) => (name === hostOwned ? { name } : undefined);
+    const server = await toolsServer([
+      { name: 'taken', inputSchema: { type: 'object' } },
+      { name: 'free', inputSchema: { type: 'object' } },
+    ]);
+    try {
+      const result = await registerMcpServers(ctx, {
+        servers: { srv: { transport: 'streamable-http', url: server.url } },
+      });
+      // 冲突的那个被跳过，同服务器的另一个仍然注册成功。
+      expect(ctx.registered.map((r) => r.name)).toEqual(['mcp__srv__free']);
+      expect(result.reports[0]?.error).toMatch(/already registered by the host/);
+      await result.closeAll();
+    } finally {
+      await server.close();
+    }
+  });
+
+  // 逐工具 try/catch 的意义：宿主 register 抛错时只丢这一个工具，
+  // 而不是让 registerMcpServers 整体 reject、所有服务器一起失效。
+  it('keeps sibling tools when the host register throws for one name', async () => {
+    const ctx = fakeCtx();
+    const boom = 'mcp__srv__boom';
+    ctx.tools.register = (definition: unknown) => {
+      const name = (definition as { name: string }).name;
+      if (name === boom) throw new Error('host refused this name');
+      ctx.registered.push(definition as FakeCtx['registered'][number]);
+      return () => undefined;
+    };
+    const server = await toolsServer([
+      { name: 'boom', inputSchema: { type: 'object' } },
+      { name: 'ok', inputSchema: { type: 'object' } },
+    ]);
+    try {
+      const result = await registerMcpServers(ctx, {
+        servers: { srv: { transport: 'streamable-http', url: server.url } },
+      });
+      expect(ctx.registered.map((r) => r.name)).toEqual(['mcp__srv__ok']);
+      expect(result.reports[0]?.error).toMatch(/could not be registered/);
       await result.closeAll();
     } finally {
       await server.close();
