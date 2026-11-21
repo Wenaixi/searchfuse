@@ -179,15 +179,19 @@ export function syncOmp(wiring: OmpWiring | undefined, file = ompConfigPath()): 
 }
 
 /**
- * 装 omp 扩展：把模板里的两个绝对路径替换掉，写到 omp 的扩展目录。
+ * 装 omp 扩展：把模板里的绝对路径替换掉，写到 omp 的扩展目录。
  *
  * 为什么是渲染而不是复制：扩展被复制到 `~/.omp/agent/extensions/` 之后，
- * 它与本包的 `dist/` 已无相对关系，必须把绝对路径写进去才能拉起服务。
+ * 它与本包的 `dist/` 已无相对关系，必须把绝对路径写进去才能拉起 kernel。
+ *
+ * `kernelPath` 用 kernel.js 而不是 serve.js：三家共享同一个聚合入口，
+ * 而 omp 侧靠扩展 spawn 它——不走 HTTP，于是随机端口不再是个问题。
  */
-export function installOmpExtension(source: string, distServePath: string, tokenPath: string): string {
-  const rendered = source
-    .replaceAll('__SEARCHFUSE_SERVE_PATH__', distServePath)
-    .replaceAll('__SEARCHFUSE_TOKEN_PATH__', tokenPath);
+export function installOmpExtension(source: string, kernelPath: string): string {
+  // Windows 路径里有反斜杠：直接拼进单引号字符串会让 `\n` 变成真的换行。
+  // 先转义成 JSON 字符串再剥掉外层引号，得到一段可安全嵌进源码的字面量。
+  const escaped = JSON.stringify(kernelPath).slice(1, -1);
+  const rendered = source.replaceAll('__SEARCHFUSE_KERNEL_PATH__', escaped);
   const dir = ompExtensionsDir();
   fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, 'searchfuse.ts');

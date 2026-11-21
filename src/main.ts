@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   CONFIG_PATH,
   initConfigFile,
@@ -19,6 +20,7 @@ import { effectiveMcp } from './config.ts';
 import { formatDoctorReport, runDoctor } from './doctor.ts';
 import {
   claudeSettingsPath,
+  installOmpExtension,
   ompConfigPath,
   reportClaudeMcp,
   syncClaudeSettings,
@@ -323,20 +325,39 @@ hosts
       const config = loadConfigFile();
       const lines: string[] = [];
 
-      // omp：走本地服务时写 endpoint + token + modelRoles.web。
+      // omp：**不再写 searxng.endpoint**——搜索改由扩展同名覆盖内置工具完成。
+      // 这里只清理历史遗留的 HTTP 接入（endpoint/token/Basic），因为
+      // `searxng.endpoint` 是静态配置，跟随机端口天然冲突。
       const ompEnabled = config.hosts?.omp?.enabled !== false;
       if (options.dryRun) {
         lines.push(`omp: ${ompEnabled ? 'enable' : 'disable'} (${ompConfigPath()})`);
       } else {
-        const port = config.serve?.port ?? 7799;
-        const result = ompEnabled
-          ? syncOmp({ endpoint: `http://127.0.0.1:${port}`, token: readServeToken(), webRole: 'web/searxng' })
-          : syncOmp(undefined);
+        const result = syncOmp(undefined);
         lines.push(
-          `omp: ${ompEnabled ? 'enabled' : 'disabled'}` +
-            (result.changed ? '' : ' (no change)') +
+          `omp: ${ompEnabled ? 'enabled' : 'disabled'} (HTTP wiring cleared)` +
+            (result.changed ? '' : ', no change') +
             (result.backup ? ` [backup: ${path.basename(result.backup)}]` : ''),
         );
+      }
+
+      // omp 扩展：同名覆盖内置 web_search。它 spawn kernel.js，
+      // 所以不需要 HTTP 服务，也就绕开了「静态 endpoint vs 随机端口」的冲突。
+      if (options.dryRun) {
+        lines.push('omp extension: would install (shadow builtin web_search)');
+      } else {
+        // 用运行时字符串拼接，不让 vite 把模板内联成 data URL——
+        // 它看到 `new URL(..., import.meta.url)` 会当作静态资源打包，
+        // 结果 fileURLToPath 收到一个 "data:text/javascript;base64,..." 并报错。
+        const selfDir = path.dirname(fileURLToPath(import.meta.url));
+        const templatePath = path.join(selfDir, '..', 'omp', 'extension.ts');
+        try {
+          const template = fs.readFileSync(templatePath, 'utf-8');
+          const kernelPath = path.join(selfDir, 'kernel.js');
+          const installed = installOmpExtension(template, kernelPath);
+          lines.push(`omp extension: installed (${path.basename(installed)})`);
+        } catch (error) {
+          lines.push(`omp extension: skipped (${error instanceof Error ? error.message : String(error)})`);
+        }
       }
 
       // Claude Code：镜像开关到它的 settings（插件自己写不进去）。
@@ -447,20 +468,6 @@ function hostConfigKey(name: string): string {
   return name === 'claude-code' ? 'claudeCode' : name;
 }
 
-/** 读服务 token；没有就报错，因为写进 omp 配置的必须是真值。 */
-function readServeToken(): string {
-  const tokenPath = path.join(os.homedir(), '.searchfuse', 'serve-token');
-  try {
-    const token = fs.readFileSync(tokenPath, 'utf-8').trim();
-    if (token === '') throw new Error(`${tokenPath} is empty`);
-    return token;
-  } catch (error) {
-    throw new Error(
-      `Cannot read the serve token at ${tokenPath}. Run \`searchfuse serve --ensure\` first ` +
-        `(${error instanceof Error ? error.message : String(error)})`,
-    );
-  }
-}
 
 // 改名后第一次运行时，把旧目录里的配置、冷却状态与缓存搬过来。幂等，
 // 旧目录还在，出问题能回退。放在解析命令之前，于是每条命令都享受它，
