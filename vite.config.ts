@@ -30,6 +30,8 @@ export default defineConfig({
         // 白名单键清单必须能从这里读，否则两个写入方（CLI 的白名单重建、
         // 卡片的整份回写）会各说各话。
         'config-schema': resolve(__dirname, 'src/config-schema.ts'),
+        // 三宿主共同的子进程入口：dsh 与 Claude Code 都 spawn 它。
+        kernel: resolve(__dirname, 'src/kernel.ts'),
       },
       formats: ['es'],
     },
