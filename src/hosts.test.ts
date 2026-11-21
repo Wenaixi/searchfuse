@@ -4,8 +4,10 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   setYamlScalar,
+  reportClaudeMcp,
   syncClaudeSettings,
   syncOmp,
+  syncOmpMcp,
 } from './hosts.ts';
 
 /** 造一个临时文件，用完删掉。 */
@@ -153,5 +155,65 @@ describe('syncClaudeSettings', () => {
   it('拒绝覆盖无法解析的 settings 文件', () => {
     const file = tempFile('settings.json', '{ this is not json');
     expect(() => syncClaudeSettings(true, file)).toThrow('refusing to overwrite');
+  });
+});
+
+describe('syncOmpMcp', () => {
+  it('只补 omp 里缺的 server，不覆盖已有的', () => {
+    const file = tempFile(
+      'mcp.json',
+      JSON.stringify({
+        mcpServers: { context7: { type: 'http', url: 'https://user-set-url' } },
+        disabledServers: ['jshook'],
+      }),
+    );
+    const result = syncOmpMcp({ mcp: { context7: { transport: 'streamable-http', url: 'https://ours' }, grep: { transport: 'streamable-http', url: 'https://mcp.grep.app' } } }, file);
+
+    expect(result.added).toEqual(['grep']);
+    const out = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    // 用户自己的 context7 原样保留，没被我们的值覆盖。
+    expect(out.mcpServers.context7.url).toBe('https://user-set-url');
+    expect(out.mcpServers.grep).toEqual({ type: 'http', url: 'https://mcp.grep.app' });
+    // disabledServers 不动。
+    expect(out.disabledServers).toEqual(['jshook']);
+  });
+
+  it('没有要补的就不写文件', () => {
+    const file = tempFile('mcp.json', JSON.stringify({ mcpServers: { grep: { type: 'http', url: 'https://x' } } }));
+    const result = syncOmpMcp({ mcp: { grep: { transport: 'streamable-http', url: 'https://mcp.grep.app' } } }, file);
+    expect(result.added).toEqual([]);
+    expect(result.changed).toBe(false);
+  });
+
+  it('把 stdio 与 http 两种 transport 都翻译对', () => {
+    const file = tempFile('mcp.json', '{}');
+    syncOmpMcp(
+      {
+        mcp: {
+          a: { transport: 'stdio', command: 'npx', args: ['-y', 'pkg'] },
+          b: { transport: 'streamable-http', url: 'https://b.example' },
+        },
+      },
+      file,
+    );
+    const out = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    expect(out.mcpServers.a).toEqual({ type: 'stdio', command: 'npx', args: ['-y', 'pkg'] });
+    expect(out.mcpServers.b).toEqual({ type: 'http', url: 'https://b.example' });
+  });
+});
+
+describe('reportClaudeMcp', () => {
+  it('列出 Claude Code 已装的 server，只读不写', () => {
+    const file = tempFile('.claude.json', JSON.stringify({ mcpServers: { exa: {}, context7: {} } }));
+    const before = fs.readFileSync(file, 'utf-8');
+    const names = reportClaudeMcp(file);
+    expect(names).toEqual(['exa', 'context7']);
+    // 只读：文件没被改。
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+
+  it('没有 mcpServers 时返回空数组', () => {
+    const file = tempFile('.claude.json', '{}');
+    expect(reportClaudeMcp(file)).toEqual([]);
   });
 });

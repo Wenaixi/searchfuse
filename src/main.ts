@@ -4,6 +4,7 @@ declare const __APP_VERSION__: string;
 
 import { Command } from 'commander';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   CONFIG_PATH,
@@ -15,9 +16,18 @@ import {
 } from './config.ts';
 import { buildCooldownController, clearAllCooldowns, currentStatePath } from './cooldown.ts';
 import { formatDoctorReport, runDoctor } from './doctor.ts';
+import {
+  claudeSettingsPath,
+  ompConfigPath,
+  reportClaudeMcp,
+  syncClaudeSettings,
+  syncOmp,
+  syncOmpMcp,
+} from './hosts.ts';
 import { findEngine, listEngines } from './providers/index.ts';
 import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
+import { ensureServeToken, startServe } from './serve.ts';
 import { readSecret } from './util/secretInput.ts';
 
 if (process.env.MODSEARCH_NESTED) {
@@ -256,6 +266,168 @@ state
       process.exit(1);
     }
   });
+
+program
+  .command('serve')
+  .description('Run the local SearXNG-compatible service that omp connects to')
+  .option('--ensure', 'Start only if not already running; exit 0 if healthy')
+  .option('--daemon', 'Run until killed (no idle exit)')
+  .option('--port <n>', 'Port to listen on (default: config serve.port or 7799)')
+  .action(async (options: { ensure?: boolean; daemon?: boolean; port?: string }) => {
+    const config = loadConfigFile();
+    const port = options.port !== undefined ? Number(options.port) : (config.serve?.port ?? 7799);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      process.stderr.write(`Error: invalid port "${options.port ?? config.serve?.port}"\n`);
+      process.exit(2);
+    }
+
+    if (options.ensure) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+        if (res.ok) {
+          process.stdout.write(`Already running on 127.0.0.1:${port}.\n`);
+          process.exit(0);
+        }
+      } catch {
+        // 不通：往下启动。
+      }
+    }
+
+    const token = ensureServeToken();
+    try {
+      const handle = await startServe({
+        port,
+        token,
+        idleExitSeconds: options.daemon ? 0 : (config.serve?.idleExitSeconds ?? 0),
+      });
+      process.stdout.write(`Listening on http://127.0.0.1:${handle.port}\n`);
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+  });
+
+const hosts = program
+  .command('hosts')
+  .description('Wire searchfuse into dsh / Claude Code / omp, or unwire it');
+
+hosts
+  .command('sync')
+  .description('Write each host configuration from ~/.searchfuse/config.json')
+  .option('--dry-run', 'Show what would change without writing')
+  .action((options: { dryRun?: boolean }) => {
+    try {
+      const config = loadConfigFile();
+      const lines: string[] = [];
+
+      // omp：走本地服务时写 endpoint + token + modelRoles.web。
+      const ompEnabled = config.hosts?.omp?.enabled !== false;
+      if (options.dryRun) {
+        lines.push(`omp: ${ompEnabled ? 'enable' : 'disable'} (${ompConfigPath()})`);
+      } else {
+        const port = config.serve?.port ?? 7799;
+        const result = ompEnabled
+          ? syncOmp({ endpoint: `http://127.0.0.1:${port}`, token: readServeToken(), webRole: 'web/searxng' })
+          : syncOmp(undefined);
+        lines.push(
+          `omp: ${ompEnabled ? 'enabled' : 'disabled'}` +
+            (result.changed ? '' : ' (no change)') +
+            (result.backup ? ` [backup: ${path.basename(result.backup)}]` : ''),
+        );
+      }
+
+      // Claude Code：镜像开关到它的 settings（插件自己写不进去）。
+      const claudeEnabled = config.hosts?.claudeCode?.enabled !== false;
+      if (options.dryRun) {
+        lines.push(`claudeCode: ${claudeEnabled ? 'enable' : 'disable'} (${claudeSettingsPath()})`);
+      } else {
+        const result = syncClaudeSettings(claudeEnabled);
+        lines.push(
+          `claudeCode: ${claudeEnabled ? 'enabled' : 'disabled'}` +
+            (result.changed ? '' : ' (no change)') +
+            (result.backup ? ` [backup: ${path.basename(result.backup)}]` : ''),
+        );
+      }
+
+      // MCP：只补 omp 里缺的，不覆盖它已有的；Claude Code 侧只读报告。
+      if (options.dryRun) {
+        lines.push('mcp: would add missing servers to ~/.omp/agent/mcp.json');
+      } else {
+        const mcp = syncOmpMcp(config as unknown as Record<string, unknown>);
+        lines.push(
+          mcp.added.length > 0
+            ? `mcp: added to omp: ${mcp.added.join(', ')}` +
+                (mcp.backup ? ` [backup: ${path.basename(mcp.backup)}]` : '')
+            : 'mcp: omp already has all configured servers (no change)',
+        );
+        // Claude Code 的 MCP 由它自己管；omp 会自动从 ~/.claude.json 导入。
+        // 这里只报告，让用户知道那些已经在用。
+        const claudeMcp = reportClaudeMcp();
+        if (claudeMcp.length > 0) {
+          lines.push(`mcp: already installed in Claude Code: ${claudeMcp.join(', ')}`);
+        }
+      }
+
+      process.stdout.write(`${lines.join('\n')}\n`);
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+  });
+
+const HOST_NAMES = ['dsh', 'claudeCode', 'omp'] as const;
+
+hosts
+  .command('enable <host>')
+  .description(`Mark a host as enabled: ${HOST_NAMES.join(' | ')}`)
+  .action((name: string) => {
+    try {
+      if (!HOST_NAMES.includes(name as (typeof HOST_NAMES)[number])) {
+        throw new Error(`Unknown host "${name}". Known: ${HOST_NAMES.join(', ')}`);
+      }
+      setConfigValue('hosts.' + hostConfigKey(name), 'true');
+      process.stdout.write(`Enabled ${name}. Run \`searchfuse hosts sync\` to apply.\n`);
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+  });
+
+hosts
+  .command('disable <host>')
+  .description(`Mark a host as disabled: ${HOST_NAMES.join(' | ')}`)
+  .action((name: string) => {
+    try {
+      if (!HOST_NAMES.includes(name as (typeof HOST_NAMES)[number])) {
+        throw new Error(`Unknown host "${name}". Known: ${HOST_NAMES.join(', ')}`);
+      }
+      setConfigValue('hosts.' + hostConfigKey(name), 'false');
+      process.stdout.write(`Disabled ${name}. Run \`searchfuse hosts sync\` to apply.\n`);
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+  });
+
+/** 配置里的键名与命令行名字可能不同（`claude-code` → `claudeCode`）。 */
+function hostConfigKey(name: string): string {
+  return name === 'claude-code' ? 'claudeCode' : name;
+}
+
+/** 读服务 token；没有就报错，因为写进 omp 配置的必须是真值。 */
+function readServeToken(): string {
+  const tokenPath = path.join(os.homedir(), '.searchfuse', 'serve-token');
+  try {
+    const token = fs.readFileSync(tokenPath, 'utf-8').trim();
+    if (token === '') throw new Error(`${tokenPath} is empty`);
+    return token;
+  } catch (error) {
+    throw new Error(
+      `Cannot read the serve token at ${tokenPath}. Run \`searchfuse serve --ensure\` first ` +
+        `(${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+}
 
 // 改名后第一次运行时，把旧目录里的配置、冷却状态与缓存搬过来。幂等，
 // 旧目录还在，出问题能回退。放在解析命令之前，于是每条命令都享受它，

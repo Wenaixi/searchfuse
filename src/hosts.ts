@@ -252,3 +252,133 @@ export function syncClaudeSettings(enabled: boolean, file = claudeSettingsPath()
 export function claudeSettingsPath(): string {
   return path.join(os.homedir(), '.claude', 'settings.json');
 }
+
+/** omp 的 MCP 配置文件。它从这里读，也兼容 `.mcp.json`。 */
+export function ompMcpPath(): string {
+  return path.join(os.homedir(), '.omp', 'agent', 'mcp.json');
+}
+
+/** MCP server 的配置形状，按 omp 的 `mcp.json` 来说。 */
+interface McpServerEntry {
+  type?: 'stdio' | 'http' | 'sse';
+  command?: string;
+  args?: string[];
+  url?: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+}
+
+/** 把 searchfuse 配置里的 `mcp` 段翻译成 omp 的 server 形状。 */
+function toOmpServer(config: Record<string, unknown>): McpServerEntry | undefined {
+  const transport = typeof config.transport === 'string' ? config.transport : undefined;
+  const url = typeof config.url === 'string' ? config.url : undefined;
+  if (transport === 'stdio' && typeof config.command === 'string') {
+    const args = Array.isArray(config.args)
+      ? config.args.filter((arg): arg is string => typeof arg === 'string')
+      : [];
+    return args.length > 0
+      ? { type: 'stdio', command: config.command, args }
+      : { type: 'stdio', command: config.command };
+  }
+  if (url !== undefined && (transport === 'streamable-http' || transport === 'http')) {
+    const headers =
+      typeof config.headers === 'object' && config.headers !== null && !Array.isArray(config.headers)
+        ? (config.headers as Record<string, string>)
+        : undefined;
+    return headers === undefined ? { type: 'http', url } : { type: 'http', url, headers };
+  }
+  if (url !== undefined && transport === 'sse') {
+    return { type: 'sse', url };
+  }
+  return undefined;
+}
+
+/** 读一个 JSON 文件；不存在或解析失败都返回 undefined（不当作空覆盖）。 */
+function readJsonFile(file: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 把 searchfuse 的 MCP 配置同步进 omp。
+ *
+ * **只补缺，不覆盖**：
+ * - omp 的 `mcp.json` 里已有的 server 一律不动（用户可能已经自己调过）
+ * - 只补 omp 里没有、而 searchfuse 配置里有的那些
+ * - `disabledServers` 原样保留
+ *
+ * 这样「已安装的话会自动处理」——用户装的不会被我们的默认值踩掉。
+ */
+export function syncOmpMcp(searchfuseConfig: Record<string, unknown>, file = ompMcpPath()): {
+  added: string[];
+  changed: boolean;
+  backup?: string;
+} {
+  const existing = readJsonFile(file) ?? {};
+  const existingServers =
+    typeof existing.mcpServers === 'object' && existing.mcpServers !== null && !Array.isArray(existing.mcpServers)
+      ? (existing.mcpServers as Record<string, unknown>)
+      : {};
+
+  const sourceMcp =
+    typeof searchfuseConfig.mcp === 'object' && searchfuseConfig.mcp !== null && !Array.isArray(searchfuseConfig.mcp)
+      ? (searchfuseConfig.mcp as Record<string, unknown>)
+      : {};
+
+  const added: string[] = [];
+  const nextServers: Record<string, unknown> = { ...existingServers };
+  for (const [name, rawConfig] of Object.entries(sourceMcp)) {
+    // 已有就跳过：不覆盖用户自己的设置。
+    if (Object.hasOwn(nextServers, name)) continue;
+    if (typeof rawConfig !== 'object' || rawConfig === null || Array.isArray(rawConfig)) continue;
+    const server = toOmpServer(rawConfig as Record<string, unknown>);
+    if (server === undefined) continue;
+    nextServers[name] = server;
+    added.push(name);
+  }
+
+  if (added.length === 0) {
+    return { added: [], changed: false };
+  }
+
+  const next = `${JSON.stringify({ ...existing, mcpServers: nextServers }, null, 2)}\n`;
+  const decision = decideWrite(file, next);
+  if (decision.changed) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, next, 'utf-8');
+  }
+  return decision.backup === undefined
+    ? { added, changed: decision.changed }
+    : { added, changed: decision.changed, backup: decision.backup };
+}
+
+/**
+ * 报告 Claude Code 侧**已经装着**的 MCP server。
+ *
+ * 为什么不往里写：Claude Code 的 MCP 有自己的配置层级（`~/.claude.json`
+ * 的 `mcpServers`），用户可能已经装好并调过。插件的 `plugin.json` 里再声明
+ * 一遍同名 server 会造成「两个同名、谁生效」的歧义。所以这里只读不写，
+ * 由 `hosts sync` 打印出来告诉用户「这些已经在用」。
+ *
+ * omp 会自动从 `~/.claude.json` 导入（宿主源码 `claude-paths.ts` 确认），
+ * 所以 Claude 侧装了的，omp 那边也能拿到。
+ */
+export function reportClaudeMcp(claudeJsonPath = claudeUserConfigPath()): string[] {
+  const raw = readJsonFile(claudeJsonPath);
+  if (raw === undefined) return [];
+  const servers = raw.mcpServers;
+  if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) return [];
+  return Object.keys(servers);
+}
+
+/** Claude Code 的用户配置文件（MCP 与全局状态都在这里）。 */
+export function claudeUserConfigPath(): string {
+  return path.join(os.homedir(), '.claude.json');
+}
