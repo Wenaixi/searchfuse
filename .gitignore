@@ -45,6 +45,8 @@ test-output
 .issues/
 
 .claude/settings.local.json
+# 项目记忆库，含本机路径与个人偏好，不进仓库
+CLAUDE.md
 
 docs/marketing/
 docs/marketing2/
