@@ -1,0 +1,157 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  setYamlScalar,
+  syncClaudeSettings,
+  syncOmp,
+} from './hosts.ts';
+
+/** 造一个临时文件，用完删掉。 */
+function tempFile(name: string, contents: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-hosts-'));
+  created.push(dir);
+  const file = path.join(dir, name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, contents, 'utf-8');
+  return file;
+}
+
+const created: string[] = [];
+afterEach(() => {
+  for (const dir of created.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('setYamlScalar', () => {
+  it('给已存在的段插入新键，保留原内容与缩进', () => {
+    const src = ['# 我的配置', 'modelRoles:', '  smol: a', '  default: b', 'theme:', '  dark: x'].join('\n');
+    const out = setYamlScalar(src, 'modelRoles', 'web', 'web/searxng');
+    expect(out).toContain('  web: web/searxng');
+    expect(out).toContain('# 我的配置');
+    expect(out).toContain('  dark: x');
+    // 插在 modelRoles 段内，不是文件末尾。
+    const lines = out.split('\n');
+    const idx = lines.indexOf('  web: web/searxng');
+    expect(lines[idx - 1]).toBe('  default: b');
+    expect(lines[idx + 1]).toBe('theme:');
+  });
+
+  it('段不存在时整段追加', () => {
+    const out = setYamlScalar('theme:\n  dark: x', 'searxng', 'endpoint', 'http://127.0.0.1:7799');
+    expect(out).toContain('searxng:');
+    expect(out).toContain('  endpoint: http://127.0.0.1:7799');
+    // 原有段不动。
+    expect(out).toContain('  dark: x');
+  });
+
+  it('键已存在时原地替换，不重复插入', () => {
+    const src = 'modelRoles:\n  web: web/public\n  smol: a';
+    const out = setYamlScalar(src, 'modelRoles', 'web', 'web/searxng');
+    expect(out.match(/web:/g)?.length).toBe(1);
+    expect(out).toContain('  web: web/searxng');
+    expect(out).not.toContain('web/public');
+  });
+
+  it('值为 undefined 时删掉那一行', () => {
+    const src = 'searxng:\n  endpoint: http://127.0.0.1:7799\n  token: abc\ntheme:\n  dark: x';
+    const out = setYamlScalar(src, 'searxng', 'token', undefined);
+    expect(out).not.toContain('token:');
+    expect(out).toContain('  endpoint: http://127.0.0.1:7799');
+    expect(out).toContain('  dark: x');
+  });
+
+  it('段内注释不会被当成子键的结束标志', () => {
+    const src = 'modelRoles:\n  smol: a\n  # 这一行是注释\n  vision: b\nretry:\n  maxRetries: 3';
+    const out = setYamlScalar(src, 'modelRoles', 'web', 'web/searxng');
+    expect(out).toContain('  # 这一行是注释');
+    expect(out).toContain('  vision: b');
+    expect(out).toContain('  web: web/searxng');
+    expect(out).toContain('retry:');
+  });
+});
+
+describe('syncOmp', () => {
+  it('enable 时写入三个键并清掉 Basic 凭据', () => {
+    const file = tempFile(
+      'config.yml',
+      ['searxng:', '  basicUsername: me', '  basicPassword: pw', 'theme:', '  dark: x'].join('\n'),
+    );
+    syncOmp({ endpoint: 'http://127.0.0.1:7799', token: 'tok', webRole: 'web/searxng' }, file);
+    const out = fs.readFileSync(file, 'utf-8');
+    expect(out).toContain('endpoint: http://127.0.0.1:7799');
+    expect(out).toContain('token: tok');
+    expect(out).not.toContain('basicUsername:');
+    expect(out).not.toContain('basicPassword:');
+    expect(out).toContain('web: web/searxng');
+    // 无关内容保留。
+    expect(out).toContain('  dark: x');
+  });
+
+  it('disable 时清掉接入键并把 web 写回公网', () => {
+    const file = tempFile(
+      'config.yml',
+      [
+        'searxng:',
+        '  endpoint: http://127.0.0.1:7799',
+        '  token: tok',
+        'modelRoles:',
+        '  web: web/searxng',
+        '  smol: a',
+      ].join('\n'),
+    );
+    syncOmp(undefined, file);
+    const out = fs.readFileSync(file, 'utf-8');
+    expect(out).not.toContain('endpoint:');
+    expect(out).not.toContain('token:');
+    expect(out).toContain('  web: web/public');
+    expect(out).toContain('  smol: a');
+  });
+
+  it('未改动时不写文件也不留备份', () => {
+    const file = tempFile('config.yml', '');
+    const first = syncOmp(undefined, file);
+    // 空文件 disable：不产生任何 searxng 段，只是追加了 modelRoles.web。
+    expect(first.changed).toBe(true);
+    const second = syncOmp(undefined, file);
+    expect(second.changed).toBe(false);
+  });
+
+  it('改动前留下带时间戳的备份', () => {
+    const file = tempFile('config.yml', 'searxng:\n  endpoint: http://old\ntheme:\n  dark: x');
+    const result = syncOmp({ endpoint: 'http://127.0.0.1:7799', token: 't', webRole: 'web/searxng' }, file);
+    expect(result.backup).toBeDefined();
+    const backup = JSON.parse(JSON.stringify(result.backup));
+    expect(fs.readFileSync(backup, 'utf-8')).toContain('http://old');
+  });
+});
+
+describe('syncClaudeSettings', () => {
+  it('只改 searchfuseHosts 这一个键，其余原样保留', () => {
+    const file = tempFile(
+      'settings.json',
+      JSON.stringify({ permissions: { allow: ['Bash'] }, hooks: { x: 1 }, searchfuseHosts: { omp: { enabled: true } } }, null, 2),
+    );
+    syncClaudeSettings(true, file);
+    const out = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    expect(out.searchfuseHosts.claudeCode.enabled).toBe(true);
+    // 用户的其他配置一个都没丢。
+    expect(out.permissions).toEqual({ allow: ['Bash'] });
+    expect(out.hooks).toEqual({ x: 1 });
+    expect(out.searchfuseHosts.omp).toEqual({ enabled: true });
+  });
+
+  it('已经是目标值时不写也不留备份', () => {
+    const file = tempFile('settings.json', JSON.stringify({ searchfuseHosts: { claudeCode: { enabled: true } } }, null, 2));
+    const result = syncClaudeSettings(true, file);
+    expect(result.changed).toBe(false);
+    expect(result.backup).toBeUndefined();
+  });
+
+  it('拒绝覆盖无法解析的 settings 文件', () => {
+    const file = tempFile('settings.json', '{ this is not json');
+    expect(() => syncClaudeSettings(true, file)).toThrow('refusing to overwrite');
+  });
+});
