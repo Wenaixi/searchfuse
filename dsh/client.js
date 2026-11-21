@@ -55,6 +55,16 @@ window.__ModuleLoader__.load({
         // 免密钥这个默认说法放在列表里，也就是用户选引擎的地方。
         keylessSuffix: ' (keyless free tier)',
         pickToConfigure: 'Pick an engine above to configure its key and endpoint.',
+        mcpSection: 'MCP servers',
+        mcpHint:
+          'Context7 and grep are registered by default. Set a proxy per server if one needs to reach the network differently from the rest.',
+        mcpDefault: 'default',
+        mcpUrl: 'Server URL',
+        mcpProxy: 'Proxy',
+        mcpProxyHint:
+          'Empty keeps the machine proxy. "direct" or "none" bypasses it for this server alone.',
+        mcpPickToConfigure: 'Pick an MCP server above to edit its URL or proxy.',
+        mcpEnabled: 'Enabled',
         engine: 'Preferred engine',
         apiKey: 'API key',
         apiKeyHint:
@@ -114,6 +124,15 @@ window.__ModuleLoader__.load({
         automatic: '自动（按故障转移顺序）',
         keylessSuffix: '（免注册免费）',
         pickToConfigure: '在上面选一个引擎，才能配置它的密钥和地址。',
+        mcpSection: 'MCP 服务',
+        mcpHint:
+          'context7 与 grep 默认注册。某个服务需要走不同的网络路径时，可以单独给它配代理。',
+        mcpDefault: '默认',
+        mcpUrl: '服务地址',
+        mcpProxy: '代理',
+        mcpProxyHint: '留空跟随系统代理；填 "direct" 或 "none" 表示这个服务单独直连。',
+        mcpPickToConfigure: '在上面选一个 MCP 服务，才能编辑它的地址或代理。',
+        mcpEnabled: '启用',
         engine: '首选引擎',
         apiKey: 'API 密钥',
         apiKeyHint: '多个密钥用英文逗号分隔。鉴权、限流或配额失败时会自动轮换到下一个密钥。',
@@ -278,7 +297,31 @@ window.__ModuleLoader__.load({
               ENGINES.map((name) => [name, summary.engines?.[name]?.enabled !== false]),
             ),
         ),
+        // MCP 的编辑区：`mcpTarget` 是当前展开的 server，其余是该 server
+        // 的待提交值。空字段表示「不改动文件」，与代理字段的契约一致。
+        mcpTarget: '',
+        mcpUrl: '',
+        mcpProxy: '',
+        mcpEnabled: true,
       };
+    }
+
+    /** 展开某个 MCP server 的编辑区，把它的当前值填进去。 */
+    function selectMcp(summary, draft, name) {
+      var next = Object.assign({}, draft, { mcpTarget: name });
+      if (name === '') {
+        next.mcpUrl = '';
+        next.mcpProxy = '';
+        next.mcpEnabled = true;
+        return next;
+      }
+      var server = (summary.mcp || {})[name] || {};
+      next.mcpUrl = server.url || '';
+      // 与引擎字段同一份契约：空表示「不改动文件」，否则预填值会让每一次
+      // 保存都重写一遍文件。所以这里也留空，让用户只在真的要改时填写。
+      next.mcpProxy = '';
+      next.mcpEnabled = server.enabled !== false;
+      return next;
     }
 
     /**
@@ -368,6 +411,35 @@ window.__ModuleLoader__.load({
           payload.toolName = draft.toolName;
         }
       }
+
+      // MCP：一次只提交一个 server。代理字段用三态字符串：
+      //   ''       → 不发（不改动）
+      //   'direct' → 发 direct（后端存 null）
+      //   URL      → 发该 URL
+      // URL 也只在「与现有值不同」时才发，理由同代理字段：预填值不该
+      // 让一次无关的保存重写文件。
+      if (draft.mcpTarget !== '') {
+        var mcpServer = (summary.mcp || {})[draft.mcpTarget] || {};
+        var mcpEdited = false;
+        if (draft.mcpProxy !== '') {
+          payload.mcpProxy = draft.mcpProxy;
+          mcpEdited = true;
+        }
+        var mcpUrlChanged = draft.mcpUrl !== (mcpServer.url || '');
+        if (mcpUrlChanged) {
+          payload.mcpUrl = draft.mcpUrl;
+          mcpEdited = true;
+        }
+        var mcpEnabledChanged = draft.mcpEnabled !== (mcpServer.enabled !== false);
+        if (mcpEnabledChanged) {
+          payload.mcpEnabled = draft.mcpEnabled;
+          mcpEdited = true;
+        }
+        if (mcpEdited) {
+          payload.mcpTarget = draft.mcpTarget;
+        }
+      }
+
       return payload;
     }
 
@@ -1119,6 +1191,109 @@ window.__ModuleLoader__.load({
           }
         }
 
+        // MCP 区块：与引擎并列的独立一节。它的存在理由是「某个 MCP 服务
+        // 需要走自己的代理」——不给它单独入口，用户就只能改机器全局代理，
+        // 而那会连搜索引擎一起带走。
+        var mcpBlock = null;
+        var mcpServers = (summary && summary.mcp) || {};
+        var mcpNames = Object.keys(mcpServers);
+        if (mcpNames.length > 0) {
+          var mcpRows = mcpNames.map((name) => {
+            var server = mcpServers[name];
+            var isOpen = draft.mcpTarget === name;
+            return h(
+              'div',
+              { key: 'mcp-' + name, style: { marginBottom: '8px' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => draftState[1](selectMcp(summary, draft, isOpen ? '' : name)),
+                  style: {
+                    appearance: 'none',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '4px 0',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    font: 'inherit',
+                    textAlign: 'left',
+                    width: '100%',
+                    display: 'flex',
+                    gap: '8px',
+                    alignItems: 'baseline',
+                  },
+                },
+                h('span', { style: { fontWeight: 500 } }, name),
+                server.isDefault
+                  ? h('span', { style: { fontSize: '12px', opacity: 0.6 } }, '(' + t.mcpDefault + ')')
+                  : null,
+                h(
+                  'span',
+                  { style: { fontSize: '12px', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis' } },
+                  server.enabled === false ? '· disabled' : server.url || '',
+                ),
+              ),
+              isOpen
+                ? h(
+                    'div',
+                    { style: { paddingLeft: '12px', marginTop: '4px' } },
+                    h('label', { style: { display: 'block', fontSize: '12px', marginBottom: '2px' } }, t.mcpUrl),
+                    h('input', {
+                      type: 'text',
+                      value: draft.mcpUrl,
+                      placeholder: server.url || '',
+                      onChange: (event) => draftState[1](Object.assign({}, draft, { mcpUrl: event.target.value })),
+                      style: { width: '100%', boxSizing: 'border-box', marginBottom: '6px' },
+                    }),
+                    h('label', { style: { display: 'block', fontSize: '12px', marginBottom: '2px' } }, t.mcpProxy),
+                    h('input', {
+                      type: 'text',
+                      value: draft.mcpProxy,
+                      placeholder: t.mcpProxyHint,
+                      onChange: (event) => draftState[1](Object.assign({}, draft, { mcpProxy: event.target.value })),
+                      style: { width: '100%', boxSizing: 'border-box' },
+                    }),
+                    h(
+                      'div',
+                      { style: { fontSize: '12px', opacity: 0.6, marginTop: '2px' } },
+                      t.mcpProxyHint,
+                    ),
+                    h(
+                      'label',
+                      { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '12px' } },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: draft.mcpEnabled,
+                        onChange: (event) =>
+                          draftState[1](Object.assign({}, draft, { mcpEnabled: event.target.checked })),
+                      }),
+                      t.mcpEnabled,
+                    ),
+                  )
+                : null,
+            );
+          });
+
+          mcpBlock = h(
+            'div',
+            { style: { marginTop: '16px' } },
+            h(
+              'h4',
+              {
+                style: { margin: '0 0 4px', fontSize: '14px', lineHeight: '20px', fontWeight: 500 },
+              },
+              t.mcpSection,
+            ),
+            h(
+              'div',
+              { style: { fontSize: '12px', opacity: 0.7, marginBottom: '8px' } },
+              t.mcpHint,
+            ),
+            mcpRows,
+          );
+        }
+
         if (view === 'page') {
           // 尺寸做成页面自带的小节标题那样，让这份表单读起来像 bundle
           // 页面又多了一节。
@@ -1133,6 +1308,7 @@ window.__ModuleLoader__.load({
               t.section,
             ),
             body,
+            mcpBlock,
           );
         }
 

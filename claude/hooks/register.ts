@@ -45,7 +45,25 @@ interface HostDollar {
       signal?: unknown;
     }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   };
+  tool: {
+    /**
+     * 注册一个工具。宿主会强制全名为 `mcp__<plugin>__<name>`（实测），
+     * 所以传 `web_search` 得到的是 `mcp__searchfuse__web_search`。
+     */
+    register(spec: {
+      name: string;
+      description: string;
+      inputSchema?: Record<string, unknown>;
+      isDeferred?: boolean;
+    }): Promise<unknown>;
+  };
 }
+
+/** 我们的工具在宿主里的全名。 */
+const TOOL_NAME = 'mcp__searchfuse__web_search';
+
+/** 被移除的内置工具名。 */
+const BUILTIN_SEARCH = 'WebSearch';
 
 /** 事件载荷：`tool.call` 上 `e` 的字段直接摊在顶层（实测确认）。 */
 interface ToolCallEvent {
@@ -65,12 +83,23 @@ interface Registration {
   catch(handler: ($: HostDollar, e: ToolCallEvent, next: HostNext) => unknown): void;
 }
 
-/** `on(event, matcher, handler)` 的最小形状。 */
-type HostOn = (
-  event: string,
-  matcher: Record<string, unknown>,
-  handler: ($: HostDollar, e: ToolCallEvent, next: HostNext) => Promise<unknown>,
-) => Registration;
+/** 事件载荷：除了 tool.call，其它事件我们只关心 `value` 之类的通用字段。 */
+type AnyEvent = Record<string, unknown>;
+
+/**
+ * `on(...)` 的最小形状。
+ *
+ * 宿主的 matcher 是可选的（`on('tool.call', { tool }, hook)` 与
+ * `on('session.start', hook)` 都合法），所以这里给出重载形态而不是一个
+ * 接受 `undefined` 的宽松签名——后者会让调用点看不出「哪个事件带 matcher」。
+ */
+interface HostOn {
+  (event: string, matcher: Record<string, unknown>, handler: HandlerOf): Registration;
+  (event: string, handler: HandlerOf): Registration;
+}
+
+/** 一个 hook 的形状。`e` 因事件而异，用宽类型让它能被每个调用点收窄。 */
+type HandlerOf = ($: HostDollar, e: AnyEvent, next: HostNext) => Promise<unknown>;
 
 /** 宿主原生 `WebSearchOutput` 的一条命中。 */
 interface SearchHit {
@@ -84,6 +113,43 @@ interface NativeSearchOutput {
   query: string;
   results: Array<{ tool_use_id: string; content: SearchHit[] }>;
   durationSeconds: number;
+}
+
+/**
+ * 跑一次 kernel，返回原始 stdout；失败返回 undefined。
+ *
+ * 三个工具（web_search / x_search / read_page）共用这一条通道，区别只在
+ * 附加参数。集中一处的好处是超时、取消、退出码的判定只有一份——
+ * 三份各写一遍迟早会在某一个工具上漏掉 `signal`。
+ */
+async function runKernelFor(
+  $: HostDollar,
+  next: HostNext,
+  extraArgs: string[],
+): Promise<string | undefined> {
+  let run: { exitCode: number; stdout: string };
+  try {
+    run = await $.process.run({
+      argv: [
+        // 宿主 `types: []` 没有 Node 类型，直接写 process 会 TS2591。
+        (globalThis as unknown as { process: { execPath: string } }).process.execPath,
+        KERNEL_PATH,
+        ...extraArgs,
+      ],
+      timeoutMs: SEARCH_TIMEOUT_MS,
+      signal: next.signal,
+    });
+  } catch {
+    return undefined;
+  }
+  if (run.exitCode !== 0) return undefined;
+  return run.stdout;
+}
+
+/** 从事件里安全取一个字符串字段；不是字符串时返回空串。 */
+function stringField(event: AnyEvent, field: string): string {
+  const value = event[field];
+  return typeof value === 'string' ? value : '';
 }
 
 /** 只读的 JSON 访问：把 `unknown` 收窄成一个可安全点读的记录。 */
@@ -158,47 +224,101 @@ async function isHostEnabled($: HostDollar, next: HostNext): Promise<boolean> {
   }
 }
 
+/** `tool.list` 的返回形状：`next(e)` 给的是 `{ value: [{ name, description, ... }] }`（实测）。 */
+interface ToolListResult {
+  value: Array<{ name: string; [field: string]: unknown }>;
+}
+
 export function register(on: HostOn, _options: unknown): void {
-  on('tool.call', { tool: 'WebSearch' }, async ($, e, next) => {
+  // 1. 移除内置搜索工具 —— 模型只看到我们这一个，不存在「两个都能搜」的歧义。
+  on('tool.list', undefined as unknown as Record<string, unknown>, async ($, e, next) => {
+    const list = (await next(e)) as ToolListResult | undefined;
+    if (!list || !Array.isArray(list.value)) return next(e);
+    // 宿主关闭接管的配置下不动：用户要的就是原生行为。
+    if (!(await isHostEnabled($, next))) return list;
+    return { ...list, value: list.value.filter((tool) => tool.name !== BUILTIN_SEARCH) };
+  })
+    .catch((_$, _e, next) => next(_e));
+
+  // 2. 注册我们的搜索工具。宿主会补上 `mcp__searchfuse__` 前缀。
+  on('session.start', async ($, e, next) => {
+    try {
+      await $.tool.register({
+        name: 'web_search',
+        description: '搜索网页。多个搜索引擎并发查询并按相关性融合，返回带标题、链接与摘要的列表。',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: '要搜索的内容' } },
+          required: ['query'],
+        },
+        // false：让它出现在顶层工具列表，而不是藏进 tool search 后面。
+        isDeferred: false,
+      });
+      // x_search：X/Twitter 语料。dsh 有、omp 有，这里补上同一个能力。
+      await $.tool.register({
+        name: 'x_search',
+        description: '搜索 X（Twitter）上的帖子。与网页搜索分开走语料链路，返回帖子与其上下文。',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: '要搜索的内容' } },
+          required: ['query'],
+        },
+        isDeferred: false,
+      });
+      // read_page：抓取并消化一个页面（正文摘出来，而不是原始 HTML）。
+      await $.tool.register({
+        name: 'read_page',
+        description: '读取一个网页并返回它的正文摘要与链接。传 URL。',
+        inputSchema: {
+          type: 'object',
+          properties: { url: { type: 'string', description: '要读取的页面地址' } },
+          required: ['url'],
+        },
+        isDeferred: false,
+      });
+    } catch {
+      // 注册失败不该让会话起不来：没有我们的工具时，用户还能用别的办法。
+    }
+    return next(e);
+  })
+    .catch((_$, _e, next) => next(_e));
+
+  // x_search 的调用处理。名字与注册时的短名对应，宿主补前缀。
+  on('tool.call', { tool: 'mcp__searchfuse__x_search' }, async ($, e, next) => {
+    if (!(await isHostEnabled($, next))) return next(e);
+    const run = await runKernelFor($, next, ['--query', stringField(e, 'query'), '--source', 'x']);
+    if (run === undefined) return { result: 'X 搜索失败（本地聚合器不可用）。' };
+    return { result: run };
+  }).catch((_$, _e, next) => next(_e));
+
+  // read_page 的调用处理：走 --url。
+  on('tool.call', { tool: 'mcp__searchfuse__read_page' }, async ($, e, next) => {
+    if (!(await isHostEnabled($, next))) return next(e);
+    const run = await runKernelFor($, next, ['--url', stringField(e, 'url')]);
+    if (run === undefined) return { result: '页面读取失败（本地聚合器不可用）。' };
+    return { result: run };
+  }).catch((_$, _e, next) => next(_e));
+
+  on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
     if (!(await isHostEnabled($, next))) {
       return next(e);
     }
 
-    let run: { exitCode: number; stdout: string };
-    try {
-      run = await $.process.run({
-        // `process` 走 globalThis：宿主 `types: []`，直接写 `process` 会 TS2591。
-        argv: [
-          // 经 `unknown` 再断言：host 的 `types: []` 没有 Node 类型，直接写
-          // `process` 会 TS2591；而 `typeof globalThis` 与目标形状不重叠。
-          (globalThis as unknown as { process: { execPath: string } }).process.execPath,
-          KERNEL_PATH,
-          '--query',
-          e.query ?? '',
-          '--source',
-          'web',
-        ],
-        timeoutMs: SEARCH_TIMEOUT_MS,
-        signal: next.signal,
-      });
-    } catch {
-      // 起不来或超时：交回宿主。
-      return next(e);
-    }
-
-    if (run.exitCode !== 0) {
-      // 没有结果不是错误——宿主原生实现可能找得到。
-      return next(e);
+    const stdout = await runKernelFor($, next, ['--query', stringField(e, 'query'), '--source', 'web']);
+    if (stdout === undefined) {
+      // 原生工具已被移除，没有「回退」可言。把原因交给模型，
+      // 让它换个办法（比如直接读已知 URL）而不是原地重试。
+      return { result: '搜索失败（本地聚合器不可用或返回非零退出码）。' };
     }
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(run.stdout);
+      parsed = JSON.parse(stdout);
     } catch {
       return next(e);
     }
 
-    const result = toNativeShape(parsed, e.query ?? '', e.tool_use_id ?? 'searchfuse');
+    const result = toNativeShape(parsed, stringField(e, 'query'), stringField(e, 'tool_use_id') || 'searchfuse');
     if (!result) {
       return next(e);
     }

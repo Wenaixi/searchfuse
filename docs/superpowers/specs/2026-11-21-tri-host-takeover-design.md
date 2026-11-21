@@ -26,7 +26,7 @@
 | **omp 覆盖实现**：`toolRegistry.set(name, liveTool)` + `setToolBuiltIn(name, false)` | `sdk.ts:4490-4498` |
 | **omp 禁用内置**：`web_search.enabled: false` | `tools/index.ts:749` |
 | **MCP 工具名强制 `mcp__<server>_<tool>`**，不能叫 `web_search` | `mcp/tool-bridge.ts:421` |
-| **Claude Code `tool.list` 钩子可移除工具** | 二进制原文 `tool.list hooks removed this tool`（**返回形状未实测**，M3 开工前必须先验证） |
+| **Claude Code `tool.list` 钩子可移除工具** | 二进制原文 `tool.list hooks removed this tool` + **实测返回形状**：`next(e)` 返回 `{ value: [...] }`，`value` 是工具对象数组（每项含 `name`/`description`）（v2 已修） |
 | **Claude Code 的 `$.fs.read` 能读仓库外任意文件** | 实测：读 `~/.searchfuse/config.json` 返回 `READ_OK` |
 | **Claude Code 的 `$.registerTool` 不接受任意名** | 强制 `mcp__<plugin>__<name>` |
 | **omp `searxng.endpoint` 是静态配置，配置文件优先于环境变量** | `web/settings.ts:37` `fallback: "blank"` |
@@ -103,10 +103,10 @@
 
 ```ts
 // 1. 移除内置 WebSearch —— 模型看不到它
-//    ⚠️ 未验证：`next(e)` 返回什么形状、能否过滤，M3 的第一步是实测这个
+//    实测形状：next(e) 返回 { value: [{ name, description, ... }] }
 on('tool.list', async ($, e, next) => {
-  const list = await next(e)   // 形状待确认
-  return { ...list, tools: list.tools.filter(t => t.name !== 'WebSearch') }
+  const list = await next(e)
+  return { ...list, value: list.value.filter((t) => t.name !== 'WebSearch') }
 }).catch(($, e, next) => next(e))
 
 // 2. 注册我们的 —— 名字是 mcp__searchfuse__web_search（宿主强制前缀）
@@ -264,7 +264,7 @@ const DEFAULT_MCP = {
 
 | 风险 | 处置 |
 |---|---|
-| **M3 的 `tool.list` 过滤形状未验证**——若返回的不是可过滤的数组，Claude 侧就无法移除内置 `WebSearch`，该阶段需改方案 | M3 开工前先跑探针确认；若不可行，退回「`tool.call` 拦截 + 改名注册」 |
+| `tool.list` 的过滤依赖未文档化的内部形状（`{ value: [...] }`） | 已在 v2 实测；若宿主升级改变形状，`tool.list` 过滤会静默失效——加一条测试断言「`WebSearch` 不在最终列表里」 |
 | Claude 工具改名后模型可能不适应 | 描述里写清「这是搜索工具」；`tool.list` 已移除原名，不存在歧义 |
 | omp 扩展同名覆盖依赖宿主内部行为 | 已实测验证（`SHADOW_PROBE_HIT`）；若宿主升级破坏，`omp` 侧可退回 `web_search.enabled: false` + 注册新名 |
 | 默认 MCP 端点将来失效 | 用户在 `~/.searchfuse/config.json` 一处修改即可 |

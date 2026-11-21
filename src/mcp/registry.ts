@@ -13,6 +13,7 @@
 //    变更时替换它的工具：整条 fiber 级的拆除对这种粒度来说太粗了。
 import type { McpServerConfig, McpToolSpec } from './protocol.ts';
 import { McpConnection as Connection, isServerNameValid, publicToolName } from './protocol.ts';
+import { formatErrorWithCause } from '../util/errorCause.ts';
 
 /**
  * DSH 工具运行时接受的输出形状。
@@ -171,7 +172,10 @@ export async function registerMcpServers(
         return {
           ok: false,
           serverKey,
-          error: error instanceof Error ? error.message : String(error),
+          // 用带 cause 的格式化：裸 fetch 抛的是 "fetch failed"，真正的
+          // 原因（ENOTFOUND / ECONNREFUSED / TLS）藏在 cause 里。只取 message
+          // 会让「连不上」永远看不出是 DNS 还是代理还是证书。
+          error: formatErrorWithCause(error),
         };
       }
     }),

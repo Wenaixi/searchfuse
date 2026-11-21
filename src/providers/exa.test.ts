@@ -4,6 +4,10 @@ import { resolveEngine } from './index.ts';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // stubGlobal 改的是全局 fetch，restoreAllMocks 不会还原它；不显式解除
+  // 会让后面跑到的测试继承一个「永不返回 body」的 fetch，症状是它们
+  // 卡在超时或读到 undefined 的 init。
+  vi.unstubAllGlobals();
 });
 
 /** Mock the global fetch with a JSON response, capturing the request. */

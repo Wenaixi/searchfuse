@@ -371,6 +371,12 @@ describe('a save carries only what the save is about', () => {
         'grok-cli': true,
         local: true,
       },
+      // MCP 的编辑区：draft 现在也带着它，默认不指向任何 server。
+      // 这是「保存能同时改 MCP」的必然结果——卡片只有一个 draft。
+      mcpTarget: '',
+      mcpUrl: '',
+      mcpProxy: '',
+      mcpEnabled: true,
     });
   });
 

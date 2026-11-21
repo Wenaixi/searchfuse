@@ -789,6 +789,39 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
       keySource: envKey ? 'env' : fileKey ? 'file' : null,
     };
   }
+  // MCP server：卡片要能单独给每一个配代理。默认集合（context7/grep）
+  // 即使文件里没写也要列出来——用户正是要给它们配代理才需要这张表。
+  var mcp = {};
+  var configuredMcp = isPlainObject(config.mcp) ? config.mcp : {};
+  var defaultMcp = {
+    context7: { transport: 'streamable-http', url: 'https://mcp.context7.com/mcp' },
+    grep: { transport: 'streamable-http', url: 'https://mcp.grep.app' },
+  };
+  var mcpNames = Object.keys(defaultMcp);
+  for (var extra of Object.keys(configuredMcp)) {
+    if (!mcpNames.includes(extra)) mcpNames.push(extra);
+  }
+  for (var name of mcpNames) {
+    var fromFile = isPlainObject(configuredMcp[name]) ? configuredMcp[name] : {};
+    var fromDefault = defaultMcp[name] || {};
+    var enabled = fromFile.enabled !== false;
+    mcp[name] = {
+      url: typeof fromFile.url === 'string' && fromFile.url !== '' ? fromFile.url : fromDefault.url || '',
+      transport: typeof fromFile.transport === 'string' ? fromFile.transport : 'streamable-http',
+      // 三态代理：'' = 跟随环境变量，'direct' = 直连，URL = 用该代理。
+      // 空串与「没配」必须区分，所以文件里的 null 报成 'direct'。
+      proxy:
+        fromFile.proxy === null
+          ? 'direct'
+          : typeof fromFile.proxy === 'string'
+            ? fromFile.proxy
+            : '',
+      enabled,
+      // 文件里没写这一项：卡片要标「默认」，并知道保存时是新建还是改已有的。
+      isDefault: Object.hasOwn(configuredMcp, name) === false,
+    };
+  }
+
   return {
     // 三种状态分开：钉在某个引擎上、由它的某个别名钉住（按规范名报告），
     // 或者根本没有钉住，也就是由引擎链按可用性挑选。
@@ -797,6 +830,7 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
     keyed: KEYED_ENGINES,
     endpoints: ENDPOINT_ENGINES,
     models: MODEL_ENGINES,
+    mcp,
   };
 }
 
@@ -958,6 +992,86 @@ function applyCardSettings(patch) {
       config.engines[target] = { ...config.engines[target], enabled: false };
     }
   }
+
+  // MCP server 的编辑：一个 patch 只碰一个 server，由 `mcpTarget` 点名。
+  // 与引擎一样，缺失意味着这次保存没碰 MCP。
+  if (patch?.mcpTarget !== undefined) {
+    var mcpName = typeof patch.mcpTarget === 'string' ? patch.mcpTarget.trim() : '';
+    if (mcpName === '') {
+      throw new Error('mcpTarget must be a non-empty server name');
+    }
+    // server 名会成为工具名的一部分，合法字符集与 MCP 配置层一致。
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(mcpName)) {
+      throw new Error(`invalid MCP server name: ${mcpName} (use A-Za-z0-9_- up to 32)`);
+    }
+    if (config.mcp !== undefined && !isPlainObject(config.mcp)) {
+      throw new Error('the "mcp" section of the config file is not an object');
+    }
+    const existing = isPlainObject(config.mcp) && isPlainObject(config.mcp[mcpName]) ? config.mcp[mcpName] : {};
+
+    var next = { ...existing };
+
+    if (patch.mcpUrl !== undefined) {
+      var url = typeof patch.mcpUrl === 'string' ? patch.mcpUrl.trim() : '';
+      if (url !== '') {
+        let parsed;
+        try {
+          parsed = new URL(url);
+        } catch {
+          throw new Error(`invalid MCP url: ${url}`);
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          throw new Error(`invalid MCP url: ${url} (use http or https)`);
+        }
+      }
+      if (url === '') {
+        // 空串：如果这是默认项且原本没有文件条目，就不必写一个空 url。
+        Reflect.deleteProperty(next, 'url');
+      } else {
+        next.url = url;
+      }
+    }
+
+    if (patch.mcpTransport !== undefined) {
+      var transport = typeof patch.mcpTransport === 'string' ? patch.mcpTransport.trim() : '';
+      if (transport !== '' && transport !== 'streamable-http') {
+        throw new Error(`unsupported MCP transport: ${transport} (only streamable-http)`);
+      }
+      if (transport === '') Reflect.deleteProperty(next, 'transport');
+      else next.transport = transport;
+    }
+
+    // 代理三态。这里是「文件里存什么」的决定点：
+    //   ''       → 删掉 proxy（跟随环境变量）
+    //   'direct' → 存 null（显式直连）
+    //   其它     → 必须是合法 http(s) URL
+    if (patch.mcpProxy !== undefined) {
+      var rawProxy = typeof patch.mcpProxy === 'string' ? patch.mcpProxy.trim() : '';
+      if (rawProxy === '') {
+        Reflect.deleteProperty(next, 'proxy');
+      } else if (rawProxy === 'direct' || rawProxy === 'none') {
+        next.proxy = null;
+      } else {
+        let parsedProxy;
+        try {
+          parsedProxy = new URL(rawProxy);
+        } catch {
+          throw new Error(`invalid MCP proxy: ${rawProxy}`);
+        }
+        if (parsedProxy.protocol !== 'http:' && parsedProxy.protocol !== 'https:') {
+          throw new Error(`invalid MCP proxy: ${rawProxy} (use http or https)`);
+        }
+        next.proxy = rawProxy;
+      }
+    }
+
+    if (patch.mcpEnabled !== undefined) {
+      next.enabled = patch.mcpEnabled !== false;
+    }
+
+    config.mcp = { ...(isPlainObject(config.mcp) ? config.mcp : {}), [mcpName]: next };
+  }
+
   writeConfigFile(config);
 }
 

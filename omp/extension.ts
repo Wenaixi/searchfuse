@@ -52,7 +52,12 @@ interface KernelHit {
 }
 
 /** 跑一次 kernel，拿回结构化结果。失败返回 undefined，由调用方回退。 */
-function runKernel(query: string, signal: AbortSignal | undefined): Promise<string | undefined> {
+/**
+ * 跑一次 kernel。`args` 是附加参数（`--query ...` / `--url ...` 等）。
+ *
+ * 三个工具共用这一条通道：超时、取消、退出码的判定只写一份。
+ */
+function runKernel(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value: string | undefined): void => {
@@ -69,7 +74,7 @@ function runKernel(query: string, signal: AbortSignal | undefined): Promise<stri
 
     let child;
     try {
-      child = spawn(nodeBinary, [KERNEL_PATH, '--query', query, '--source', 'web'], {
+      child = spawn(nodeBinary, [KERNEL_PATH, ...args], {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch {
@@ -173,12 +178,51 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await runKernel(params.query, signal);
+      const raw = await runKernel(['--query', params.query, '--source', 'web'], signal);
       if (raw === undefined) {
         return {
           content: [{ type: 'text', text: '搜索暂时不可用（超时或无法启动本地聚合器）。' }],
           isError: true,
         };
+      }
+      return toToolResult(raw);
+    },
+  });
+
+  // x_search：X/Twitter 语料。与 web_search 同名不同源，dsh 与 Claude 侧
+  // 都有同一个能力，这里补齐以免 omp 成为唯一缺它的宿主。
+  pi.registerTool({
+    name: 'x_search',
+    label: 'X Search',
+    description: '搜索 X（Twitter）上的帖子。与网页搜索分开走语料链路。',
+    parameters: pi.zod.object({
+      query: pi.zod.string().describe('要搜索的内容'),
+    }),
+    loadMode: 'essential',
+    approval: 'read',
+    execute: async (_toolCallId, params, signal) => {
+      const raw = await runKernel(['--query', params.query, '--source', 'x'], signal);
+      if (raw === undefined) {
+        return { content: [{ type: 'text', text: 'X 搜索暂时不可用。' }], isError: true };
+      }
+      return toToolResult(raw);
+    },
+  });
+
+  // read_page：抓取并消化一个页面（正文摘出来，不是原始 HTML）。
+  pi.registerTool({
+    name: 'read_page',
+    label: 'Read Page',
+    description: '读取一个网页并返回它的正文摘要与链接。',
+    parameters: pi.zod.object({
+      url: pi.zod.string().describe('要读取的页面地址'),
+    }),
+    loadMode: 'essential',
+    approval: 'read',
+    execute: async (_toolCallId, params, signal) => {
+      const raw = await runKernel(['--url', params.url], signal);
+      if (raw === undefined) {
+        return { content: [{ type: 'text', text: '页面读取暂时不可用。' }], isError: true };
       }
       return toToolResult(raw);
     },

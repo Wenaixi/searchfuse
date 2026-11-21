@@ -13,6 +13,8 @@
 //   服务端返回无 body 的 404，唯一的补救是重新握手。
 // - 协商完成后必须发送 `MCP-Protocol-Version`。
 import { createHash } from 'node:crypto';
+import { EnvHttpProxyAgent, type Dispatcher } from 'undici';
+import { resolveProxyForUrl } from '../util/proxy.ts';
 
 export interface McpServerConfig {
   transport: 'streamable-http';
@@ -21,6 +23,16 @@ export interface McpServerConfig {
   /** 附加的请求头，例如 Context7 的 API 密钥。 */
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /**
+   * 这个 server 的代理。语义与引擎的 `proxy` 完全一致：
+   * - `undefined`：跟随机器上的 http_proxy / https_proxy / no_proxy
+   * - `null`：直连（卡片里写 `direct`）
+   * - URL：只用这个代理
+   *
+   * 为什么要单独一项：MCP 端点常年在外网，而用户的搜索代理和 MCP 代理
+   * 未必是同一个；引擎侧已经支持按项配置，MCP 侧没理由被迫吃全局。
+   */
+  proxy?: string | null;
 }
 
 export interface McpToolSpec {
@@ -141,6 +153,38 @@ export class McpConnection {
     return this.config.url;
   }
 
+  /**
+   * 所有出站请求的唯一入口：按 `config.proxy` 决定走不走代理。
+   *
+   * 为什么必须集中一处：这个文件里有四个 fetch 调用点（请求、通知、
+   * 握手、删会话）。漏掉任何一个都会让「配了代理却仍直连」以最难查的
+   * 形式出现——大部分调用正常，只有某一种操作失败。
+   *
+   * 三路语义与引擎侧一致（见 `util/explicitProxy.ts`）：
+   * - `undefined`：按机器上的 proxy 环境变量解析
+   * - `null`：直连，且绝不查环境变量
+   * - URL：只用这一个代理
+   */
+  private async proxyFetch(url: string, init: RequestInit & { signal?: AbortSignal }): Promise<Response> {
+    const explicit = this.config.proxy;
+    const proxyUrl =
+      explicit === undefined ? resolveProxyForUrl(new URL(url), process.env) : explicit === null ? null : explicit;
+
+    if (proxyUrl === null) {
+      // 显式直连或环境里没有代理：不要挂 dispatcher，否则会把
+      // 一台本该直连的机器绕进代理。
+      return fetch(url, init);
+    }
+
+    // 给代理一个空的 noProxy：上面已经解析过，这里必须无条件使用它。
+    //
+    // 注意不要在这里 close：`await fetch(...)` 只等到响应头，body 还要读，
+    // 而 close 会拆掉承载 body 的连接池，于是调用方拿到一个已经开始死的
+    // 响应——症状是 "fetch failed" 而不是代理错误，极难查。
+    const dispatcher = new EnvHttpProxyAgent({ httpProxy: proxyUrl, httpsProxy: proxyUrl, noProxy: '' });
+    return fetch(url, { ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher });
+  }
+
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -181,7 +225,7 @@ export class McpConnection {
     allowReconnect = true,
     external?: AbortSignal,
   ): Promise<JsonRpcMessage> {
-    const response = await fetch(this.config.url, {
+    const response = await this.proxyFetch(this.config.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify(body),
@@ -232,7 +276,7 @@ export class McpConnection {
   }
 
   private async notify(method: string): Promise<void> {
-    await fetch(this.config.url, {
+    await this.proxyFetch(this.config.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ jsonrpc: '2.0', method }),
@@ -246,7 +290,7 @@ export class McpConnection {
       return;
     }
     const initId = 1;
-    const response = await fetch(this.config.url, {
+    const response = await this.proxyFetch(this.config.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -353,7 +397,7 @@ export class McpConnection {
       return;
     }
     try {
-      await fetch(this.config.url, {
+      await this.proxyFetch(this.config.url, {
         method: 'DELETE',
         headers: { 'mcp-session-id': this.sessionId, ...this.config.headers },
         signal: AbortSignal.timeout(5_000),

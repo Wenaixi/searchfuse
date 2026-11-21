@@ -4,6 +4,9 @@ import { resolveEngine } from './index.ts';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // stubGlobal 改的是全局 fetch，restoreAllMocks 不还原它；
+  // 不显式解除会让后续测试继承一个坏的 fetch。
+  vi.unstubAllGlobals();
 });
 
 /** Mock the global fetch with a JSON response, capturing the request. */
