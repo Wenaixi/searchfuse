@@ -247,6 +247,11 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
             query,
             sources: url.searchParams.get('source') ?? 'web',
             maxResults: Number(url.searchParams.get('max') ?? '') || undefined,
+            // 客户端带过来的预算：插件按自己的宿主预算计算，配置里的
+            // aggregate.deadlineMs 也经这里下发。不传就退回服务端默认值，
+            // 于是这些设置不会变成哑设置。
+            timeoutMs: Number(url.searchParams.get('timeout') ?? '') || undefined,
+            deadlineMs: Number(url.searchParams.get('deadline') ?? '') || undefined,
             allowPrivateNetwork: allowsPrivateNetwork(config),
             config,
           };
@@ -329,11 +334,13 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
   const ready = Promise.withResolvers<ServeHandle>();
   server.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
+        // 只有用户显式固定端口时才会走到这里：默认的 0 由内核分配，
+        // 不存在「被占用」这回事。所以消息直接指向那个显式配置。
         ready.reject(
           new Error(
-            `Port ${options.port} is already in use. The service does not switch ports: ` +
-              'omp holds a static endpoint, so a moved port would silently break it. ' +
-              'Stop whatever holds the port, or run `searchfuse serve --port <other>` and update your host configs.',
+            `Port ${options.port} is already in use. Set serve.port to 0 (or omit it) to let the ` +
+              'system pick a free port, or choose a different number. Hosts read the actual ' +
+              'port from runtime.json, so a picked port needs no host reconfiguration.',
           ),
         );
         return;

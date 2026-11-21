@@ -83,6 +83,12 @@ export interface EngineSettings {
    */
   proxy?: string;
   /**
+   * 只对 searxng 有意义的派生字段：顶层 `searxng.embedded` 为 true 时由
+   * `engineSettings()` 填入。不要把它写进 `engines.searxng`——那不是配置
+   * 入口，写进去会被当成未知字段。
+   */
+  embedded?: boolean;
+  /**
    * 这个引擎如何参与融合搜索。两个键的默认值都是
    * `aggregate: true, tool: false`，这也是在这些设置出现之前写下的配置所得到的行为。
    *
@@ -101,6 +107,68 @@ export interface EngineSettings {
    * `<engine>_search`。两个引擎不能占用同一个名称，内置工具的保留名也会被拒绝。
    */
   toolName?: string;
+}
+
+/**
+ * 内置 SearXNG 实例的抓取配置。生成时写成 settings.yml，交给随包的实例。
+ *
+ * 这里的引擎名是 **SearXNG 自己的上游引擎**（google、brave…），与
+ * `engines` 段里我们直连的 tavily/exa 是两个命名空间，刻意不合并：
+ * 混在一起后 `engines.google.proxy` 会看起来像我们的配置，实际却写给
+ * SearXNG，配错时报出的 "unknown engine" 会把人引向错误的方向。
+ *
+ * 所有字段与官方 settings.yml 同名同义，用户可以照搬文档。
+ */
+export interface SearxngProxies {
+  http?: string | string[];
+  https?: string | string[];
+  'all://'?: string | string[];
+}
+
+export interface SearxngNetworkSettings {
+  /** 这个网络用的代理。同一协议下写多个时，SearXNG 按顺序轮询。 */
+  proxies?: SearxngProxies;
+}
+
+export interface SearxngEngineRule {
+  /** 引用 `networks` 里的名字。不存在时校验会报错。 */
+  network?: string;
+  /** 直接给这个引擎指定代理，优先于 `network`。 */
+  proxies?: SearxngProxies;
+  using_tor_proxy?: boolean;
+  disabled?: boolean;
+}
+
+export interface SearxngConfig {
+  /**
+   * 走代理时额外多等的秒数。
+   *
+   * 它属于 `outgoing` 这一整层，而不是某一条命名网络：SearXNG 的
+   * `Network.__init__` 不接受这个名字，写在 `networks.<name>` 下会直接
+   * 让实例启动失败（TypeError: unexpected keyword argument）。
+   */
+  extra_proxy_timeout?: number;
+  /**
+   * 是否启用随包实例。
+   *
+   * 默认关闭：那个实例是一个约 22 MiB 的原生产物，第一次启动要解压与建索引，
+   * 把它设成默认会让每台裸机的第一次搜索都去拉它。只有用户明确要「不配外部
+   * 实例也能搜」时才打开，此时 `engines.searxng.baseURL` 留空即可。
+   *
+   * 若同时配了 `baseURL`，以 `baseURL` 为准，这个开关不再起作用。
+   */
+  embedded?: boolean;
+  /**
+   * SearXNG 内部所有上游引擎的默认代理。
+   *
+   * 这不是 searchfuse 的全局代理：`engines.<name>.proxy` 管的是我们直连的
+   * 那几个引擎，这一段管的是随包实例自己去抓网页时走哪儿。两者互不覆盖。
+   */
+  outgoing?: SearxngProxies;
+  /** 命名网络，供 `engines.<name>.network` 引用。 */
+  networks?: Record<string, SearxngNetworkSettings>;
+  /** 逐个上游引擎的规则。没提到的引擎沿用 SearXNG 默认。 */
+  engines?: Record<string, SearxngEngineRule>;
 }
 
 export interface ModsearchConfig {
@@ -144,11 +212,22 @@ export interface ModsearchConfig {
    * 不经过这个服务。
    */
   serve?: {
-    /** 首选端口。被占用时不漂移，直接让需要它的宿主降级。 */
+    /**
+     * 首选端口。默认 0：由操作系统挑一个当前空闲的端口，实际端口写进
+     * `~/.searchfuse/runtime.json`，所有宿主都从那里读回。
+     *
+     * 不默认固定 7799 的理由：固定端口一旦被别的进程占住，新实例会启动
+     * 失败，而旧实例还在响应该端口——前面就出现过「新进程打印 Listening、
+     * 客户端却打到旧进程」的假故障。随机端口把这种冲突变成不存在。
+     */
     port?: number;
     /** 空闲多少秒后退出。0（默认）表示不退出。 */
     idleExitSeconds?: number;
   };
+  /**
+   * 随包 SearXNG 实例的抓取配置。见 `SearxngConfig`。
+   */
+  searxng?: SearxngConfig;
 }
 
 /** 角色偏好收敛成单个字段之前，旧配置使用的形状。 */
@@ -779,6 +858,12 @@ export function engineSettings(
   const bindings = Object.hasOwn(ENV_BINDINGS, engineName) ? ENV_BINDINGS[engineName] : {};
 
   const settings: EngineSettings = { ...fromFile };
+  // 随包实例是顶层 `searxng.embedded` 的策略，不是某个引擎的密钥或端点，
+  // 所以它不在 engines 命名空间里；这里把它派生进 settings，好让只拿得到
+  // EngineSettings 的 isAvailable 能据实回答。
+  if (engineName === 'searxng' && config.searxng?.embedded === true) {
+    settings.embedded = true;
+  }
   // 一个「除非点名否则关闭」的引擎，只在文件没有表态时才采用该默认。
   // 有两样东西算作表态：这里显式给出的 enabled 值，以及它正是文件所钉住的
   // 首选引擎——钉住一个引擎然后又拒绝运行它，就是配置在自相矛盾。

@@ -33,6 +33,7 @@ import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, startServe } from './serve.ts';
 import { readSecret } from './util/secretInput.ts';
+import { registerSearxngCleanup } from './providers/searxngServer.ts';
 
 if (process.env.MODSEARCH_NESTED) {
   process.stderr.write(
@@ -271,36 +272,58 @@ state
     }
   });
 
+/** 读 `~/.searchfuse/runtime.json`；不存在或形状不对时返回 undefined。 */
+function readRuntimeFile(): { port: number } | undefined {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), '.searchfuse', 'runtime.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { port?: unknown };
+    if (typeof parsed.port !== 'number') return undefined;
+    return { port: parsed.port };
+  } catch {
+    return undefined;
+  }
+}
+
 program
   .command('serve')
   .description('Run the local SearXNG-compatible service that omp connects to')
   .option('--ensure', 'Start only if not already running; exit 0 if healthy')
   .option('--daemon', 'Run until killed (no idle exit)')
-  .option('--port <n>', 'Port to listen on (default: config serve.port or 7799)')
+  .option('--port <n>', 'Port to listen on (default: config serve.port, or 0 for any free port)')
   .action(async (options: { ensure?: boolean; daemon?: boolean; port?: string }) => {
     const config = loadConfigFile();
-    const port = options.port !== undefined ? Number(options.port) : (config.serve?.port ?? 7799);
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    // 0 是一个合法取值，表示「由内核挑一个空闲端口」，所以这里不能要求 port > 0。
+    const requested = options.port !== undefined ? Number(options.port) : (config.serve?.port ?? 0);
+    if (!Number.isInteger(requested) || requested < 0 || requested > 65535) {
       process.stderr.write(`Error: invalid port "${options.port ?? config.serve?.port}"\n`);
       process.exit(2);
     }
 
     if (options.ensure) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${port}/healthz`);
-        if (res.ok) {
-          process.stdout.write(`Already running on 127.0.0.1:${port}.\n`);
-          process.exit(0);
+      // 不能拿 requested 去探：端口可能由内核分配过，真正的值在 runtime.json。
+      // 用固定的默认端口去猜，端口一随机就会判成「没在跑」并起第二个实例，
+      // 两个实例抢同一份状态文件，谁都不对。
+      const running = readRuntimeFile();
+      if (running !== undefined) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${running.port}/healthz`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (res.ok) {
+            process.stdout.write(`Already running on 127.0.0.1:${running.port}.\n`);
+            process.exit(0);
+          }
+        } catch {
+          // 文件在但连不上：那是上一次没清理干净的残留，往下启动，
+          // 新实例就绪后会覆盖它。
         }
-      } catch {
-        // 不通：往下启动。
       }
     }
 
     const token = ensureServeToken();
     try {
       const handle = await startServe({
-        port,
+        port: requested,
         token,
         idleExitSeconds: options.daemon ? 0 : (config.serve?.idleExitSeconds ?? 0),
       });
@@ -479,6 +502,10 @@ function hostConfigKey(name: string): string {
 // 旧目录还在，出问题能回退。放在解析命令之前，于是每条命令都享受它，
 // 而 `doctor` 也会看到搬过来的配置。
 migrateLegacyDir();
+
+// 内置 SearXNG 是子进程，进程走的时候必须带走：否则 onefile launcher 会
+// 留下持久的 server 子进程占着端口。
+registerSearxngCleanup();
 
 // parseAsync：`config set` 里的隐藏提示路径需要等待用户输入。
 await program.parseAsync(process.argv, { from: 'node' });

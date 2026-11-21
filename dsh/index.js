@@ -51,6 +51,10 @@ const FETCH_OUTPUT_SCHEMA = JSON.parse(
 const OWN_TOOL_ENGINE_TIMEOUT_MS = 120_000;
 const OWN_TOOL_DEADLINE_MS = 180_000;
 const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
+// HTTP 请求的墙钟上限。服务端自己有整轮 deadline（默认 180 秒），这里比它
+// 多留一点余量，免得客户端先放弃、把一个仍在正常工作的轮次掐断。
+const SEARCH_TIMEOUT_MS = 240_000;
+const WAKE_TIMEOUT_MS = 15_000;
 // provider 路径运行在 tool-web 的预算之下（随包发布的搜索路由是 60 秒）：
 // 单个引擎给 40 秒，就能在 55 秒的一整轮里给一次快速回退留出余地。
 /**
@@ -454,26 +458,93 @@ function readServeRuntime() {
  * 为什么要两条：服务在跑时省掉一次 Node 启动（约 200ms）；服务不在时
  * 用户仍然能搜。只走一条就等于把可用性押在另一件事上。
  */
+/**
+ * 把一份 CLI 风格的参数表翻译成服务端路由。
+ *
+ * 短式（`-q`/`-u`）与长式（`--query`/`--url`）都认：插件自有工具用的是短式，
+ * 而 provider seam 走的是长式；按位置下标取参数则会读到 flag 本身。
+ */
+function toServeRequest(args) {
+  const flag = (...names) => {
+    for (const name of names) {
+      const index = args.indexOf(name);
+      if (index !== -1) return args[index + 1];
+    }
+    return undefined;
+  };
+  // 预算对搜索和读页都一样适用，所以先收好，两条路由各自带上。
+  const budgets = new URLSearchParams();
+  const timeout = flag('--timeout');
+  if (timeout !== undefined) budgets.set('timeout', timeout);
+  const deadline = flag('--deadline');
+  if (deadline !== undefined) budgets.set('deadline', deadline);
+  const withBudgets = (params) => {
+    for (const [key, value] of budgets) params.set(key, value);
+    return params;
+  };
+
+  const url = flag('-u', '--url');
+  if (url !== undefined) {
+    return { endpoint: '/v1/read-page', params: withBudgets(new URLSearchParams({ url })) };
+  }
+  const query = flag('-q', '--query');
+  if (query === undefined) return undefined;
+  const params = withBudgets(
+    new URLSearchParams({ q: query, source: flag('--source') ?? 'web' }),
+  );
+  const max = flag('--max-results');
+  if (max !== undefined) params.set('max', max);
+  return { endpoint: '/v1/search', params };
+}
+
 /** 调一次服务；拿到文本就返回，否则 undefined。 */
 async function tryServe(args, signal) {
   const runtime = readServeRuntime();
   if (runtime === undefined) return undefined;
-  const query = args[0];
-  const source = args[2] ?? 'web';
-  const max = args[8];
-  const params = new URLSearchParams({ q: query, source });
-  if (max !== undefined) params.set('max', max);
+  const request = toServeRequest(args);
+  if (request === undefined) return undefined;
+  // 一次聚合可能要几十秒，所以给足时间；但必须有上限，否则服务卡住时
+  // 这次工具调用会永久挂起，只能靠宿主信号兜底。
+  const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+  const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   try {
-    const url = `http://127.0.0.1:${runtime.port}/v1/search?${params.toString()}`;
+    const url = `http://127.0.0.1:${runtime.port}${request.endpoint}?${request.params.toString()}`;
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${runtime.token}`, accept: 'application/json' },
-      ...(signal ? { signal } : {}),
+      signal: combined,
     });
-    if (response.ok) return await response.text();
-  } catch {
+    const body = await response.text();
+    if (response.ok) return body;
+    // 服务端 5xx 的正文里带着逐引擎的尝试轨迹（例如谁没登录、谁超时）。
+    // 把它原样抛出去，宿主的错误信息才说得出实际试过什么；若服务端回的是
+    // 空正文或非 JSON，就交给上层按「不可达」处理。
+    if (response.status >= 500 && body.trim() !== '') {
+      throw new Error(describeServeFailure(response.status, body));
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(SERVE_FAILURE_PREFIX)) {
+      throw error;
+    }
     // 连接被拒或超时：交给上层决定下一步。
   }
   return undefined;
+}
+
+/** 一句前缀，用来把「服务端的业务错误」与「连不上」区分开。 */
+const SERVE_FAILURE_PREFIX = 'searchfuse service error: ';
+
+/** 把服务端的错误正文转成宿主可读的消息。 */
+function describeServeFailure(status, body) {
+  let detail = body.trim();
+  try {
+    const parsed = JSON.parse(body);
+    if (isPlainObject(parsed) && typeof parsed.error === 'string') {
+      detail = parsed.error;
+    }
+  } catch {
+    // 不是 JSON：正文本身就是那句话。
+  }
+  return `${SERVE_FAILURE_PREFIX}${status} ${detail.slice(0, 600)}`;
 }
 
 /**
@@ -485,9 +556,13 @@ async function tryServe(args, signal) {
  * 返回是否**这次真的把它拉起来了**（供上层的重试判断）。
  */
 async function wakeServe(signal) {
+  // `cliPath()` 抛出的「构建缺失」是一个能直接照做的指示（重装），不能被
+  // 下面的 catch 吞成一句笼统的「不可达」。
   const cli = cliPath();
+  const timeout = AbortSignal.timeout(WAKE_TIMEOUT_MS);
+  const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   try {
-    const { code } = await run(process.execPath, [cli, 'serve', '--ensure'], signal, childEnv());
+    const { code } = await run(process.execPath, [cli, 'serve', '--ensure'], combined, childEnv());
     return code === 0;
   } catch {
     return false;
@@ -495,35 +570,32 @@ async function wakeServe(signal) {
 }
 
 /**
- * 取一次搜索结果。**三级回退**，顺序是刻意的：
+ * 取一次搜索结果。**两级**：HTTP -> 唤醒并重试。
  *
- * 1. HTTP    —— 服务在跑，最快（省一次 Node 启动）
- * 2. 唤醒+重试 —— 服务没跑，先拉起来再试（保活，用户无感）
- * 3. spawn   —— 服务起不来（端口占用、缺构建、权限），直接跑一次聚合器
+ * 没有第三级「搜完就 spawn 一个一次性 kernel」。那条路会绕过服务，
+ * 也让三宿主本来共享的缓存与冷却状态失去意义；而且它是一个并行的
+ * 第二实现——同一个查询在这里有两套代码路径，出问题时很难判断
+ * 到底走的哪一套。服务起不来就如实报错，把故障暴露出来，而不是
+ * 悄悄退化成另一种行为。
  *
- * 为什么第二级不是直接 spawn：服务活着时三家共享同一份缓存与冷却状态；
- * 每次绕过它单独 spawn 会让那份状态失去意义。唤醒比重跑更符合「共用
- * 一个服务」的初衷。
+ * 唤醒本身要起一个进程（`serve --ensure`），这是服务的入口，不是
+ * 兜底的重复实现。
  */
 async function fetchOrSpawn(args, signal) {
-  // 1. 直接试 HTTP。
   const first = await tryServe(args, signal);
   if (first !== undefined) return first;
 
-  // 2. 唤醒，然后再试一次。
   const woke = await wakeServe(signal);
   if (woke) {
     const second = await tryServe(args, signal);
     if (second !== undefined) return second;
   }
 
-  // 3. 兜底：跑一次子进程。
-  const cli = cliPath();
-  const { stdout, stderr, code } = await run(process.execPath, [cli, ...args], signal, childEnv());
-  if (code !== 0) {
-    throw new Error(`searchfuse failed (exit ${code}): ${(stderr || stdout).trim().slice(0, 500)}`);
-  }
-  return stdout;
+  throw new Error(
+    'searchfuse service is not reachable and could not be started. ' +
+      'Run `npx @wenaixi/searchfuse serve --ensure` in a terminal to see why, ' +
+      'then `npx @wenaixi/searchfuse doctor` to check the engine setup.',
+  );
 }
 
 async function runCli(args, signal) {
@@ -930,6 +1002,14 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
     endpoints: ENDPOINT_ENGINES,
     models: MODEL_ENGINES,
     mcp,
+    // SearXNG 的抓取配置。卡片要能逐引擎配代理，所以这里原样交出去，
+    // 保存时由 applyCardSettings 校验并写回。
+    searxng: {
+      embedded: config.searxng?.embedded === true,
+      outgoing: isPlainObject(config.searxng?.outgoing) ? config.searxng.outgoing : {},
+      networks: isPlainObject(config.searxng?.networks) ? config.searxng.networks : {},
+      engines: isPlainObject(config.searxng?.engines) ? config.searxng.engines : {},
+    },
   };
 }
 
@@ -1171,6 +1251,145 @@ function applyCardSettings(patch) {
     config.mcp = { ...(isPlainObject(config.mcp) ? config.mcp : {}), [mcpName]: next };
   }
 
+  // SearXNG 抓取配置。三种编辑互斥，用各自的键点名：
+  //   searxngEmbedded         —— 打开/关闭随包实例
+  //   searxngOutgoingProxies  —— 整段 outgoing.proxies（SearXNG 内部的默认轮询）
+  //   searxngNetwork          —— 一个命名网络的整段定义
+  //   searxngEngine           —— 一个上游引擎的规则
+  // 缺省意味着这次保存没碰它，与其余 patch 的语义一致。
+  if (patch?.searxngEmbedded !== undefined) {
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var searxngBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    if (patch.searxngEmbedded === true) {
+      searxngBase.embedded = true;
+    } else {
+      delete searxngBase.embedded;
+    }
+    config.searxng = searxngBase;
+  }
+
+  if (patch?.searxngOutgoingProxies !== undefined) {
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var outgoingSection = parseProxiesPatch(patch.searxngOutgoingProxies, 'searxng.outgoing.protocols');
+    var outgoingBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    if (Object.keys(outgoingSection).length === 0) {
+      delete outgoingBase.outgoing;
+    } else {
+      outgoingBase.outgoing = outgoingSection;
+    }
+    config.searxng = outgoingBase;
+  }
+
+  if (patch?.searxngExtraProxyTimeout !== undefined) {
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var extraBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    var rawExtra = patch.searxngExtraProxyTimeout;
+    if (rawExtra === null || rawExtra === '') {
+      delete extraBase.extra_proxy_timeout;
+    } else {
+      var extraSeconds = typeof rawExtra === 'number' ? rawExtra : Number(rawExtra);
+      if (!Number.isFinite(extraSeconds) || extraSeconds <= 0) {
+        throw new Error(
+          `invalid searxng.extra_proxy_timeout: ${String(rawExtra)} (use a positive number of seconds)`,
+        );
+      }
+      extraBase.extra_proxy_timeout = extraSeconds;
+    }
+    config.searxng = extraBase;
+  }
+
+  if (patch?.searxngNetwork !== undefined) {
+    var networkName = typeof patch.searxngNetwork === 'string' ? patch.searxngNetwork.trim() : '';
+    if (networkName === '') {
+      throw new Error('searxngNetwork must be a non-empty network name');
+    }
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(networkName)) {
+      throw new Error(`invalid network name: ${networkName} (use A-Za-z0-9_- up to 64)`);
+    }
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var networkBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    var networks = isPlainObject(networkBase.networks) ? { ...networkBase.networks } : {};
+    // null 表示删掉这条网络；删除一个被引擎引用的网络会在校验时暴露出来。
+    if (patch.searxngNetworkProxies === null) {
+      delete networks[networkName];
+    } else if (patch.searxngNetworkProxies !== undefined) {
+      var networkProxies = parseProxiesPatch(
+        patch.searxngNetworkProxies,
+        `searxng.networks.${networkName}.protocols`,
+      );
+      var existingNetwork = isPlainObject(networks[networkName]) ? networks[networkName] : {};
+      var nextNetwork = { ...existingNetwork };
+      if (Object.keys(networkProxies).length === 0) delete nextNetwork.proxies;
+      else nextNetwork.proxies = networkProxies;
+      networks[networkName] = nextNetwork;
+    }
+    if (Object.keys(networks).length === 0) delete networkBase.networks;
+    else networkBase.networks = networks;
+    config.searxng = networkBase;
+  }
+
+  if (patch?.searxngEngine !== undefined) {
+    var upstreamName = typeof patch.searxngEngine === 'string' ? patch.searxngEngine.trim() : '';
+    if (upstreamName === '') {
+      throw new Error('searxngEngine must be a non-empty engine name');
+    }
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var engineBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    var upstreamEngines = isPlainObject(engineBase.engines) ? { ...engineBase.engines } : {};
+    if (patch.searxngEngineRemove === true) {
+      delete upstreamEngines[upstreamName];
+    } else {
+      var existingRule = isPlainObject(upstreamEngines[upstreamName])
+        ? upstreamEngines[upstreamName]
+        : {};
+      var nextRule = { ...existingRule };
+      if (patch.searxngEngineNetwork !== undefined) {
+        var networkRef = typeof patch.searxngEngineNetwork === 'string'
+          ? patch.searxngEngineNetwork.trim()
+          : '';
+        if (networkRef === '') delete nextRule.network;
+        else nextRule.network = networkRef;
+      }
+      if (patch.searxngEngineProxies !== undefined) {
+        var ruleProxies = parseProxiesPatch(
+          patch.searxngEngineProxies,
+          `searxng.engines.${upstreamName}.protocols`,
+        );
+        if (Object.keys(ruleProxies).length === 0) delete nextRule.proxies;
+        else nextRule.proxies = ruleProxies;
+      }
+      if (patch.searxngEngineTor !== undefined) {
+        if (patch.searxngEngineTor) nextRule.using_tor_proxy = true;
+        else delete nextRule.using_tor_proxy;
+      }
+      if (patch.searxngEngineDisabled !== undefined) {
+        if (patch.searxngEngineDisabled) nextRule.disabled = true;
+        else delete nextRule.disabled;
+      }
+      upstreamEngines[upstreamName] = nextRule;
+    }
+    if (Object.keys(upstreamEngines).length === 0) delete engineBase.engines;
+    else engineBase.engines = upstreamEngines;
+    config.searxng = engineBase;
+  }
+
+  // 保存前把 searxng 段整体校验一遍：引擎引用一个不存在的网络，或者代理写错了
+  // 协议，在实例启动时才报错会让「保存成功」变成一句谎话。
+  const searxngError = validateSearxngSection(config.searxng);
+  if (searxngError !== null) {
+    throw new Error(searxngError);
+  }
+
   writeConfigFile(config);
 }
 
@@ -1294,6 +1513,134 @@ async function engineReadiness() {
  * 导入，因为本文件是手写的 JavaScript，够不到 TypeScript 源码；覆盖引擎清单
  * 的那个同步测试，就是让它们保持一致的样板。
  */
+/**
+ * 校验整段 `searxng`，返回第一条错误或 null。
+ *
+ * 这是 src/providers/searxngSettings.ts 里 validateSearxngConfig 的宿主侧
+ * 对应实现：插件文件不能 import TypeScript 源码，所以规则在这里复写一遍，
+ * 由 src/dshPlugin.test.ts 的锁步测试保证两边的错误消息与判定一致。
+ */
+function validateSearxngSection(section) {
+  if (!isPlainObject(section)) return null;
+  const outgoingError = validateProxiesShape(section.outgoing, 'searxng.outgoing');
+  if (outgoingError !== null) return outgoingError;
+
+  const networks = isPlainObject(section.networks) ? section.networks : {};
+  for (const [name, network] of Object.entries(networks)) {
+    if (name.trim() === '') return 'searxng.networks: a network name is empty';
+    const error = validateProxiesShape(network?.proxies, `searxng.networks.${name}.proxies`);
+    if (error !== null) return error;
+  }
+
+  // extra_proxy_timeout 属于 outgoing 整体：SearXNG 的 Network.__init__
+  // 不接受这个名字，写在某条网络下会让实例启动直接失败。
+  const extra = section.extra_proxy_timeout;
+  if (extra !== undefined) {
+    if (typeof extra !== 'number' || !Number.isFinite(extra) || extra <= 0) {
+      return 'searxng.extra_proxy_timeout must be a positive number';
+    }
+  }
+
+  const upstream = isPlainObject(section.engines) ? section.engines : {};
+  for (const [name, rule] of Object.entries(upstream)) {
+    if (name.trim() === '') return 'searxng.engines: an engine name is empty';
+    if (rule?.network !== undefined && !Object.hasOwn(networks, rule.network)) {
+      const known = Object.keys(networks);
+      return `searxng.engines.${name}.network "${rule.network}" is not defined in searxng.networks (known: ${
+        known.length > 0 ? known.join(', ') : 'none'
+      })`;
+    }
+    const error = validateProxiesShape(rule?.proxies, `searxng.engines.${name}.proxies`);
+    if (error !== null) return error;
+  }
+  return null;
+}
+
+/** 校验一个已经写进文件的 `proxies` 形状。 */
+function validateProxiesShape(proxies, where) {
+  if (proxies === undefined) return null;
+  if (!isPlainObject(proxies)) return `${where}: must be an object of protocols`;
+  for (const key of Object.keys(proxies)) {
+    if (key !== 'http' && key !== 'https' && key !== 'all://') {
+      return `${where}: unknown proxies key "${key}"; use http, https, or all://`;
+    }
+  }
+  for (const [key, raw] of Object.entries(proxies)) {
+    if (raw === undefined) continue;
+    const list = Array.isArray(raw) ? raw : [raw];
+    for (const proxy of list) {
+      if (typeof proxy !== 'string') return `${where}.${key}: proxy must be a string`;
+      try {
+        const parsed = new URL(proxy);
+        if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol)) {
+          return `${where}.${key}: invalid proxy "${proxy}"`;
+        }
+        if (parsed.hostname === '') return `${where}.${key}: invalid proxy "${proxy}"`;
+      } catch {
+        return `${where}.${key}: invalid proxy "${proxy}"`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 把卡片提交的一份 `{ http, https, all:// }` 规范成 SearXNG 认的代理表。
+ *
+ * 规则与 src/providers/searxngSettings.ts 的 validateProxies 完全一致：
+ * 键只有三种，值可以是单个 URL 或 URL 数组，每个 URL 自带 http(s)/socks5(h)
+ * 协议。两套规则必须同源，否则卡片能保存出一份实例读不进去的配置。
+ *
+ * `''` 或空对象表示「这一协议不要代理」；返回对象里不出现该键，渲染时也就
+ * 不会写出去。
+ */
+function parseProxiesPatch(raw, where) {
+  if (!isPlainObject(raw)) {
+    throw new Error(`${where} must be an object like { "all://": "http://127.0.0.1:7890" }`);
+  }
+  const allowed = ['http', 'https', 'all://'];
+  const result = {};
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    if (rawValue === undefined || rawValue === null) continue;
+    if (!allowed.includes(rawKey)) {
+      throw new Error(`${where}: unknown protocols key "${rawKey}"; use http, https, or all://`);
+    }
+    // 数组表示同一协议下轮询使用；单个字符串是它的简写。
+    const list = Array.isArray(rawValue) ? rawValue : [rawValue];
+    const proxies = [];
+    for (const entry of list) {
+      if (typeof entry !== 'string') {
+        throw new Error(`${where}.${rawKey}: proxy must be a string`);
+      }
+      const trimmed = entry.trim();
+      if (trimmed === '') continue;
+      let parsed;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        throw new Error(
+          `invalid proxy "${trimmed}": include a scheme, e.g. http://127.0.0.1:7890`,
+        );
+      }
+      if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol)) {
+        throw new Error(
+          `invalid proxy "${trimmed}": unsupported scheme "${parsed.protocol.replace(':', '')}"; ` +
+            'use http, https, socks5, or socks5h',
+        );
+      }
+      if (parsed.hostname === '') {
+        throw new Error(`invalid proxy "${trimmed}": missing host`);
+      }
+      proxies.push(trimmed);
+    }
+    // 单值写成字符串，多值写成数组：与 SearXNG 的 settings.yml 写法一一对应，
+    // 用户把卡片里看到的内容抄进文件时不用改形状。
+    if (proxies.length === 1) result[rawKey] = proxies[0];
+    else if (proxies.length > 1) result[rawKey] = proxies;
+  }
+  return result;
+}
+
 function isValidProxyValue(value) {
   if (value === 'direct' || value === 'none') {
     return true;

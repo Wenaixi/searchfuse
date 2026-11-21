@@ -65,6 +65,24 @@ window.__ModuleLoader__.load({
           'Empty keeps the machine proxy. "direct" or "none" bypasses it for this server alone.',
         mcpPickToConfigure: 'Pick an MCP server above to edit its URL or proxy.',
         mcpEnabled: 'Enabled',
+        searxngSection: 'SearXNG upstream engines',
+        searxngHint:
+          'The bundled SearXNG instance fans out to upstream engines. Set a proxy per protocol here; several proxies under one protocol are used round-robin.',
+        searxngEmbedded: 'Use the bundled SearXNG instance',
+        searxngEmbeddedHint:
+          'Off by default: the bundled instance is an ~22 MB native binary whose first start has a visible cost. Turn it on when you want search without configuring an external instance.',
+        searxngNetworks: 'Named networks',
+        searxngNetworkName: 'new network name',
+        searxngNetworkProxies: 'Proxies (one per line)',
+        searxngNetworkAdd: 'Add network',
+        searxngEngines: 'Upstream engine rules',
+        searxngEngineName: 'engine name (e.g. google, brave, duckduckgo)',
+        searxngEngineAdd: 'Add rule',
+        searxngEngineNetwork: 'Network',
+        searxngEngineProxies: 'Proxies (one per line)',
+        searxngEngineTor: 'Via Tor',
+        searxngEngineDisabled: 'Disabled',
+        searxngPickToConfigure: 'Pick a network or engine above to edit it.',
         engine: 'Preferred engine',
         apiKey: 'API key',
         apiKeyHint:
@@ -133,6 +151,24 @@ window.__ModuleLoader__.load({
         mcpProxyHint: '留空跟随系统代理；填 "direct" 或 "none" 表示这个服务单独直连。',
         mcpPickToConfigure: '在上面选一个 MCP 服务，才能编辑它的地址或代理。',
         mcpEnabled: '启用',
+        searxngSection: 'SearXNG 上游引擎',
+        searxngHint:
+          '随包的 SearXNG 实例会扇出到几十个上游引擎。这里按协议给它们配代理；同一协议下写多个代理会轮询使用。',
+        searxngEmbedded: '启用随包 SearXNG 实例',
+        searxngEmbeddedHint:
+          '默认关闭：随包实例是一个约 22 MB 的原生产物，首次启动有可感知的代价。想不配外部实例也能搜时才打开。',
+        searxngNetworks: '命名网络',
+        searxngNetworkName: '新网络名称',
+        searxngNetworkProxies: '代理（每行一个）',
+        searxngNetworkAdd: '添加网络',
+        searxngEngines: '上游引擎规则',
+        searxngEngineName: '引擎名（如 google、brave、duckduckgo）',
+        searxngEngineAdd: '添加规则',
+        searxngEngineNetwork: '网络',
+        searxngEngineProxies: '代理（每行一个）',
+        searxngEngineTor: '走 Tor',
+        searxngEngineDisabled: '禁用',
+        searxngPickToConfigure: '在上面选一个网络或引擎，才能编辑它。',
         engine: '首选引擎',
         apiKey: 'API 密钥',
         apiKeyHint: '多个密钥用英文逗号分隔。鉴权、限流或配额失败时会自动轮换到下一个密钥。',
@@ -303,6 +339,14 @@ window.__ModuleLoader__.load({
         mcpUrl: '',
         mcpProxy: '',
         mcpEnabled: true,
+        // SearXNG 上游：随包实例开关、命名网络、逐引擎规则。三者各自用
+        // 「选中目标 + 待提交值」表示，与 MCP 的编辑区同构。
+        searxngEmbedded: Boolean(summary && summary.searxng && summary.searxng.embedded),
+        searxngTarget: '',
+        searxngProxyText: '',
+        searxngEngineNetwork: '',
+        searxngEngineTor: false,
+        searxngEngineDisabled: false,
       };
     }
 
@@ -440,7 +484,89 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // SearXNG：随包实例开关只要与当前值不同就提交。它不是一个「预填值」，
+      // 而是一个布尔，所以「不同」就是用户真的动过。
+      var searxngCurrent = (summary && summary.searxng) || {};
+      if (draft.searxngEmbedded !== Boolean(searxngCurrent.embedded)) {
+        payload.searxngEmbedded = Boolean(draft.searxngEmbedded);
+      }
+
+      // 命名网络与逐引擎规则：一次只提交一个目标，由 searxngTarget 指名。
+      // 代理文本按行拆分，空行忽略；多行就是同一协议下的轮询列表。
+      if (typeof draft.searxngTarget === 'string' && draft.searxngTarget !== '') {
+        var target = draft.searxngTarget;
+        if (target.indexOf('network:') === 0) {
+          var networkName = target.slice('network:'.length);
+          payload.searxngNetwork = networkName;
+          payload.searxngNetworkProxies = proxiesFromText(draft.searxngProxyText);
+        } else if (target.indexOf('engine:') === 0) {
+          var engineName = target.slice('engine:'.length);
+          payload.searxngEngine = engineName;
+          payload.searxngEngineProxies = proxiesFromText(draft.searxngProxyText);
+          payload.searxngEngineNetwork = draft.searxngEngineNetwork;
+          payload.searxngEngineTor = Boolean(draft.searxngEngineTor);
+          payload.searxngEngineDisabled = Boolean(draft.searxngEngineDisabled);
+        }
+      }
+
       return payload;
+    }
+
+    /**
+     * 把文本框里的多行代理转成 `{ "all://": [...] }`。
+     *
+     * 卡片用一个 `all://` 键承载全部行：SearXNG 的 `all://` 本来就表示
+     * 「所有协议」，而在逐引擎页面上让用户为 http 与 https 各填一遍是重复
+     * 劳动。需要分协议时，用户直接在配置文件里写。
+     */
+    function proxiesFromText(text) {
+      var lines = String(text || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      if (lines.length === 0) return {};
+      return { 'all://': lines.length === 1 ? lines[0] : lines };
+    }
+
+    /**
+     * 展开一个 SearXNG 上游目标，把它的当前值填进编辑区。
+     *
+     * 目标的编码：`network:<name>` 指向一条命名网络，`engine:<name>` 指向
+     * 一条上游引擎规则。代理文本按行回填，与提交时的拆分对称。
+     */
+    function selectSearxng(summary, draft, target) {
+      var next = Object.assign({}, draft, { searxngTarget: target });
+      next.searxngProxyText = '';
+      next.searxngEngineNetwork = '';
+      next.searxngEngineTor = false;
+      next.searxngEngineDisabled = false;
+      if (target === '') return next;
+      var section = (summary && summary.searxng) || {};
+      if (target.indexOf('network:') === 0) {
+        var network = (section.networks || {})[target.slice('network:'.length)] || {};
+        next.searxngProxyText = proxiesToText(network.proxies);
+        return next;
+      }
+      var rule = (section.engines || {})[target.slice('engine:'.length)] || {};
+      next.searxngProxyText = proxiesToText(rule.proxies);
+      next.searxngEngineNetwork = rule.network || '';
+      next.searxngEngineTor = rule.using_tor_proxy === true;
+      next.searxngEngineDisabled = rule.disabled === true;
+      return next;
+    }
+
+    /** 把一份 proxies 摊平成一行的代理清单，每行一个。 */
+    function proxiesToText(proxies) {
+      if (!proxies || typeof proxies !== 'object') return '';
+      var lines = [];
+      Object.keys(proxies).forEach((key) => {
+        var raw = proxies[key];
+        var list = Array.isArray(raw) ? raw : [raw];
+        list.forEach((entry) => {
+          if (typeof entry === 'string' && entry !== '') lines.push(entry);
+        });
+      });
+      return lines.join('\n');
     }
 
     /**
@@ -1294,6 +1420,305 @@ window.__ModuleLoader__.load({
           );
         }
 
+        // SearXNG 上游区块：随包实例的开关，以及它内部几十个上游引擎的
+        // 抓取路径。与 MCP 同构（选中目标 + 待提交值），差别在目标是两段
+        // 命名空间：命名网络与逐引擎规则。
+        var searxngBlock = null;
+        if (summary && summary.searxng) {
+          var section = summary.searxng || {};
+          var networkNames = Object.keys(section.networks || {});
+          var upstreamNames = Object.keys(section.engines || {});
+
+          var targetRow = (key, title, subtitle) => {
+            var isOpen = draft.searxngTarget === key;
+            return h(
+              'div',
+              { key: 'sx-' + key, style: { marginBottom: '6px' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () =>
+                    draftState[1](selectSearxng(summary, draft, isOpen ? '' : key)),
+                  style: {
+                    appearance: 'none',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '3px 0',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    font: 'inherit',
+                    textAlign: 'left',
+                    width: '100%',
+                    display: 'flex',
+                    gap: '8px',
+                    alignItems: 'baseline',
+                  },
+                },
+                h('span', { style: { fontWeight: 500, fontSize: '13px' } }, title),
+                h(
+                  'span',
+                  {
+                    style: {
+                      fontSize: '12px',
+                      opacity: 0.6,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    },
+                  },
+                  subtitle,
+                ),
+              ),
+            );
+          };
+
+          var editingPanel = null;
+          if (draft.searxngTarget !== '') {
+            var isNetwork = draft.searxngTarget.indexOf('network:') === 0;
+            editingPanel = h(
+              'div',
+              { style: { paddingLeft: '12px', marginTop: '4px' } },
+              h(
+                'label',
+                { style: { display: 'block', fontSize: '12px', marginBottom: '2px' } },
+                isNetwork ? t.searxngNetworkProxies : t.searxngEngineProxies,
+              ),
+              h('textarea', {
+                value: draft.searxngProxyText,
+                rows: 3,
+                placeholder: 'http://127.0.0.1:7890\nsocks5h://127.0.0.1:9050',
+                onChange: (event) =>
+                  draftState[1](
+                    Object.assign({}, draft, { searxngProxyText: event.target.value }),
+                  ),
+                style: {
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  font: 'inherit',
+                  fontSize: '12px',
+                  borderRadius: '8px',
+                  padding: '6px 8px',
+                  border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+                  background: 'transparent',
+                  color: 'inherit',
+                },
+              }),
+              h(
+                'div',
+                { style: { fontSize: '11px', opacity: 0.6, marginTop: '2px' } },
+                t.searxngHint,
+              ),
+              isNetwork
+                ? null
+                : h(
+                    'div',
+                    { style: { marginTop: '6px' } },
+                    h(
+                      'label',
+                      { style: { display: 'block', fontSize: '12px', marginBottom: '2px' } },
+                      t.searxngEngineNetwork,
+                    ),
+                    h(
+                      'select',
+                      {
+                        value: draft.searxngEngineNetwork,
+                        onChange: (event) =>
+                          draftState[1](
+                            Object.assign({}, draft, { searxngEngineNetwork: event.target.value }),
+                          ),
+                        style: {
+                          width: '100%',
+                          padding: '6px 8px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+                          background: 'transparent',
+                          color: 'inherit',
+                          font: 'inherit',
+                          fontSize: '12px',
+                        },
+                      },
+                      [h('option', { key: '', value: '' }, '—')].concat(
+                        networkNames.map((name) =>
+                          h('option', { key: name, value: name }, name),
+                        ),
+                      ),
+                    ),
+                    h(
+                      'label',
+                      {
+                        style: {
+                          display: 'inline-flex',
+                          gap: '6px',
+                          alignItems: 'center',
+                          marginTop: '6px',
+                          marginRight: '12px',
+                          fontSize: '12px',
+                        },
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: draft.searxngEngineTor,
+                        onChange: (event) =>
+                          draftState[1](
+                            Object.assign({}, draft, { searxngEngineTor: event.target.checked }),
+                          ),
+                      }),
+                      t.searxngEngineTor,
+                    ),
+                    h(
+                      'label',
+                      {
+                        style: {
+                          display: 'inline-flex',
+                          gap: '6px',
+                          alignItems: 'center',
+                          fontSize: '12px',
+                        },
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: draft.searxngEngineDisabled,
+                        onChange: (event) =>
+                          draftState[1](
+                            Object.assign({}, draft, {
+                              searxngEngineDisabled: event.target.checked,
+                            }),
+                          ),
+                      }),
+                      t.searxngEngineDisabled,
+                    ),
+                  ),
+            );
+          }
+
+          // 新增一条网络 / 引擎：用一个可提交名字的输入框。名字对上游引擎
+          // 不做白名单——SearXNG 的清单随版本变化，硬编码必然过时。
+          var adder = (kind, placeholder, label) => {
+            var field = kind + 'Name';
+            if (!draft[field]) {
+              // 首次渲染时补一个空槽，避免 undefined 进入受控输入。
+              Object.defineProperty(draft, field, { value: '', writable: true });
+            }
+            return h(
+              'div',
+              { key: 'add-' + kind, style: { display: 'flex', gap: '6px', marginTop: '6px' } },
+              h('input', {
+                type: 'text',
+                placeholder: placeholder,
+                value: draft[field],
+                onChange: (event) =>
+                  draftState[1](Object.assign({}, draft, { [field]: event.target.value })),
+                style: {
+                  flex: 1,
+                  padding: '5px 8px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+                  background: 'transparent',
+                  color: 'inherit',
+                  font: 'inherit',
+                  fontSize: '12px',
+                },
+              }),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: String(draft[field] || '').trim() === '',
+                  onClick: () => {
+                    var name = String(draft[field] || '').trim();
+                    var key = kind + ':' + name;
+                    var cleared = Object.assign({}, draft);
+                    cleared[field] = '';
+                    draftState[1](selectSearxng(summary, cleared, key));
+                    noteState[1]('');
+                  },
+                  style: {
+                    appearance: 'none',
+                    font: 'inherit',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+                    borderRadius: '8px',
+                    padding: '4px 10px',
+                    background: 'none',
+                    color: 'inherit',
+                  },
+                },
+                label,
+              ),
+            );
+          };
+
+          searxngBlock = h(
+            'div',
+            { style: { marginTop: '16px' } },
+            h(
+              'h4',
+              { style: { margin: '0 0 4px', fontSize: '14px', lineHeight: '20px', fontWeight: 500 } },
+              t.searxngSection,
+            ),
+            h(
+              'label',
+              {
+                style: {
+                  display: 'flex',
+                  gap: '8px',
+                  alignItems: 'center',
+                  fontSize: '13px',
+                  margin: '6px 0 2px',
+                },
+              },
+              h('input', {
+                type: 'checkbox',
+                checked: Boolean(draft.searxngEmbedded),
+                onChange: (event) =>
+                  draftState[1](
+                    Object.assign({}, draft, { searxngEmbedded: event.target.checked }),
+                  ),
+              }),
+              t.searxngEmbedded,
+            ),
+            h(
+              'div',
+              { style: { fontSize: '11px', opacity: 0.6, marginBottom: '10px' } },
+              t.searxngEmbeddedHint,
+            ),
+            h(
+              'div',
+              { style: { fontSize: '12px', fontWeight: 500, marginBottom: '2px' } },
+              t.searxngNetworks,
+            ),
+            networkNames.map((name) => {
+              var network = (section.networks || {})[name] || {};
+              var summaryLine = proxiesToText(network.proxies).replace(/\n/g, ', ');
+              return targetRow('network:' + name, name, summaryLine);
+            }),
+            adder('network', t.searxngNetworkName, t.searxngNetworkAdd),
+            h(
+              'div',
+              { style: { fontSize: '12px', fontWeight: 500, margin: '12px 0 2px' } },
+              t.searxngEngines,
+            ),
+            upstreamNames.map((name) => {
+              var rule = (section.engines || {})[name] || {};
+              var parts = [];
+              if (rule.network) parts.push('→ ' + rule.network);
+              if (rule.using_tor_proxy) parts.push('tor');
+              if (rule.disabled) parts.push('disabled');
+              return targetRow('engine:' + name, name, parts.join(' · '));
+            }),
+            adder('engine', t.searxngEngineName, t.searxngEngineAdd),
+            draft.searxngTarget === ''
+              ? h(
+                  'div',
+                  { style: { fontSize: '12px', opacity: 0.6, marginTop: '6px' } },
+                  t.searxngPickToConfigure,
+                )
+              : null,
+            editingPanel,
+          );
+        }
+
         if (view === 'page') {
           // 尺寸做成页面自带的小节标题那样，让这份表单读起来像 bundle
           // 页面又多了一节。
@@ -1309,6 +1734,7 @@ window.__ModuleLoader__.load({
             ),
             body,
             mcpBlock,
+            searxngBlock,
           );
         }
 

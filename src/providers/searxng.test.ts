@@ -38,13 +38,16 @@ afterEach(() => {
 });
 
 describe('searxng provider shape', () => {
-  it('is unavailable until a baseURL is configured', () => {
-    // Public SearXNG instances mostly refuse format=json, so there is no
-    // sensible default host to fall back on. Reporting "available" without a
-    // URL would park a runner in the chain that can only fail at call time.
-    expect(searxngProvider.isAvailable(settings(), {}, 'search')).toBe(true);
+  it('needs either a baseURL or an explicit opt-in to the bundled instance', () => {
+    // 随包实例约 22 MiB 且首次启动要解压，所以它是显式开关，不是默认值：
+    // 裸机器若默认启用，第一次搜索就会去拉一个原生产物。
+    expect(searxngProvider.isAvailable(settings({ baseURL: undefined }), {}, 'search')).toBe(false);
     expect(searxngProvider.isAvailable(settings({ baseURL: '' }), {}, 'search')).toBe(false);
     expect(searxngProvider.isAvailable({} as never, {}, 'search')).toBe(false);
+    // 用户托付的实例：旧语义，只要填了 URL 就可用。
+    expect(searxngProvider.isAvailable(settings({ baseURL: 'http://searx.local' }), {}, 'search')).toBe(true);
+    // 明确打开随包实例。
+    expect(searxngProvider.isAvailable(settings({ embedded: true }), {}, 'search')).toBe(true);
   });
 
   it('serves search only, not page fetch', () => {

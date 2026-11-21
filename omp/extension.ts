@@ -23,10 +23,11 @@ import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
 const KERNEL_PATH = '__SEARCHFUSE_KERNEL_PATH__';
 
 /** 一次搜索的墙钟上限。比聚合默认的 8 秒宽，留给慢引擎。 */
-const SEARCH_TIMEOUT_MS = 240_000;
-
 /** 唤醒服务允许的最长等待（它通常几百毫秒就起来）。 */
 const WAKE_TIMEOUT_MS = 15_000;
+
+/** 服务端点请求本身的超时上限，比唤醒宽松（它可能要真的跑一次搜索）。 */
+const SEARCH_TIMEOUT_MS = 240_000;
 
 /**
  * 找一个真正的 Node 可执行文件来跑 kernel。
@@ -120,10 +121,14 @@ async function tryServe(args: string[], signal: AbortSignal | undefined): Promis
   const request = toServeRequest(args);
   if (request === undefined) return undefined;
   const search = new URLSearchParams(request.params);
+  // 服务端跑一次聚合可能要几十秒，所以给足时间；但必须有一个上限，
+  // 否则服务卡住时这次工具调用会永久挂起，连取消都只能靠宿主的信号。
+  const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+  const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   try {
     const response = await fetch(`http://127.0.0.1:${runtime.port}${request.endpoint}?${search.toString()}`, {
       headers: { authorization: `Bearer ${runtime.token}`, accept: 'application/json' },
-      ...(signal ? { signal } : {}),
+      signal: combined,
     });
     if (response.ok) return await response.text();
   } catch {
@@ -174,80 +179,23 @@ function wakeServe(signal: AbortSignal | undefined): Promise<boolean> {
   });
 }
 
-/** 给唤醒重试一次。 */
+/**
+ * 取一次搜索结果。**两级**：HTTP -> 唤醒并重试。
+ *
+ * 没有第三级「搜完就 spawn 一个一次性 kernel」：那条路绕过服务，
+ * 让缓存与冷却状态失去意义，也等于给同一个查询维护第二套代码路径。
+ * 服务起不来就返回 undefined，由上层给出可用性提示。
+ */
 async function fetchOrSpawn(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
-  // 1. 直接试 HTTP。
   const first = await tryServe(args, signal);
   if (first !== undefined) return first;
 
-  // 2. 唤醒后再试。
   if (await wakeServe(signal)) {
     const second = await tryServe(args, signal);
     if (second !== undefined) return second;
   }
 
-  // 3. 兜底：跑一次常驻之外的子进程。
-  return runKernel(args, signal);
-}
-
-function runKernel(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value: string | undefined): void => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-
-    const nodeBinary = resolveNodeBinary();
-    if (nodeBinary === undefined) {
-      finish('NO_NODE: cannot find a Node.js executable; set SEARCHFUSE_NODE');
-      return;
-    }
-
-    let child;
-    try {
-      child = spawn(nodeBinary, [KERNEL_PATH, ...args], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch {
-      finish(undefined);
-      return;
-    }
-
-    let stdout = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    // stderr 不参与解析，但要不读就会在缓冲区满时阻塞子进程；失败时它有用。
-    let stderrText = '';
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderrText += chunk.toString();
-    });
-
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(undefined);
-    }, SEARCH_TIMEOUT_MS);
-    timer.unref();
-
-    const onAbort = (): void => {
-      child.kill();
-      finish(undefined);
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    child.on('error', () => {
-      clearTimeout(timer);
-      finish(undefined);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      // 失败时把 stderr 交出去：内部错误信息比一句「搜索不可用」有用得多。
-      finish(code === 0 ? stdout : `KERNEL_FAILED exit=${code ?? '?'} ${stderrText.slice(0, 300)}`);
-    });
-  });
+  return undefined;
 }
 
 /**

@@ -377,6 +377,13 @@ describe('a save carries only what the save is about', () => {
       mcpUrl: '',
       mcpProxy: '',
       mcpEnabled: true,
+      // SearXNG 上游的编辑区，与 MCP 同构：一个目标 + 待提交值。
+      searxngEmbedded: false,
+      searxngTarget: '',
+      searxngProxyText: '',
+      searxngEngineNetwork: '',
+      searxngEngineTor: false,
+      searxngEngineDisabled: false,
     });
   });
 
@@ -604,6 +611,56 @@ const READINESS = [
   { engine: 'grok-cli', ready: false, reason: 'binary "grok" not found', keySource: null },
   { engine: 'local', ready: true, reason: 'built in', keySource: null },
 ];
+
+describe('the SearXNG upstream section', () => {
+  const SUMMARY_WITH_SEARXNG = {
+    ...SUMMARY,
+    searxng: {
+      embedded: true,
+      outgoing: {},
+      networks: {
+        via_tor: { proxies: { 'all://': 'socks5h://127.0.0.1:9050' } },
+      },
+      engines: {
+        google: { network: 'via_tor' },
+        brave: { proxies: { https: ['http://a:8080', 'http://b:8080'] } },
+        startpage: { using_tor_proxy: true },
+      },
+    },
+  };
+
+  it('says nothing about a section the file does not configure', () => {
+    // 没有 searxng 段时不渲染这个区块：一个空的分区只会让人以为有东西。
+    const view = render(SUMMARY);
+    expect(view.texts.join(' ')).not.toMatch(/SearXNG upstream/i);
+  });
+
+  it('lists the configured networks and upstream engines', () => {
+    const view = render(SUMMARY_WITH_SEARXNG);
+    expect(view.texts.join(' ')).toMatch(/SearXNG upstream engines/i);
+    const texts = view.texts.join(' ');
+    expect(texts).toContain('via_tor');
+    expect(texts).toContain('socks5h://127.0.0.1:9050');
+    // 每个上游引擎一行，并把它的规则摘要写出来。
+    expect(texts).toContain('google');
+    expect(texts).toContain('brave');
+    expect(texts).toContain('startpage');
+    expect(texts).toMatch(/→ via_tor/);
+    expect(texts).toMatch(/tor/);
+  });
+
+  it('mirrors the bundled-instance switch from the file', () => {
+    const view = render(SUMMARY_WITH_SEARXNG);
+    expect(view.draft.searxngEmbedded).toBe(true);
+  });
+
+  it('does not render the upstream section when nothing is configured', () => {
+    const view = render({ ...SUMMARY, searxng: { embedded: false, outgoing: {}, networks: {}, engines: {} } });
+    // 存在但为空时只渲染开关，不渲染任何目标行。
+    expect(view.texts.join(' ')).toMatch(/Use the bundled SearXNG instance/i);
+    expect(view.texts.join(' ')).not.toMatch(/Named networks$/);
+  });
+});
 
 describe('the automatic engine chain lists what this machine can actually search with', () => {
   // The chain is a set of checkboxes, one per search engine the machine is

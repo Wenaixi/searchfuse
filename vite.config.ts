@@ -41,6 +41,13 @@ export default defineConfig({
       external: [
         'commander',
         'undici',
+        // 按平台分发的原生包：它用 optionalDependencies 只装本机那一个，
+        // 其余平台的导入必然解析失败。打包它既没有意义，也会让构建在没有
+        // 别的平台包时直接炸掉。
+        '@searxng-js/searxng',
+        '@searxng-js/linux-x64',
+        '@searxng-js/win32-x64',
+        '@searxng-js/darwin-arm64',
         ...builtinModules,
         ...builtinModules.map((name) => `node:${name}`),
       ],

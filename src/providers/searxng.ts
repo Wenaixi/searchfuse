@@ -13,6 +13,8 @@ import { safeHostname } from '../util/host.ts';
 import { requestText } from '../util/timedRequest.ts';
 import { resolveExplicitProxy } from '../util/explicitProxy.ts';
 import { resolveEndpoint } from './endpoint.ts';
+import { acquireSearxngServer } from './searxngServer.ts';
+import type { SearxngConfig } from '../config.ts';
 import type { EngineOutput, EngineRequest, SearchEngine } from './index.ts';
 
 const DEFAULT_MAX_RESULTS = 10;
@@ -37,7 +39,15 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
   }
 
   const startedAt = Date.now();
-  const base = resolveEndpoint(options.settings.baseURL, '', '/search');
+  const configuredBase = options.settings.baseURL?.trim() ?? '';
+
+  // 两条路：配了 baseURL 就连用户的实例；没配但打开了随包实例才起内置的。
+  // 内置实例必须是进程内复用的（见 searxngServer 的注释），所以这里拿到的
+  // 是一个已经在健康状态的服务。
+  const base = configuredBase !== ''
+    ? resolveEndpoint(configuredBase, '', '/search')
+    : await embeddedSearchBase(options.searxng);
+
   const url = new URL(base);
   url.searchParams.set('q', options.query);
   url.searchParams.set('format', 'json');
@@ -49,7 +59,7 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
     { method: 'GET', headers: { accept: 'application/json' } },
     AbortSignal.timeout(options.timeoutMs),
     options.timeoutMs,
-    [options.settings.baseURL],
+    [configuredBase],
     resolveExplicitProxy(options.settings.proxy),
   );
 
@@ -122,14 +132,31 @@ export async function executeSearxngSearch(options: EngineRequest): Promise<Engi
   };
 }
 
+/** 内置实例的 `/search` 端点；拿不到实例时抛错，由调用方转成可行动的消息。 */
+async function embeddedSearchBase(config: SearxngConfig | undefined): Promise<string> {
+  if (config?.embedded !== true) {
+    // 路由层已经用 isAvailable 挡过一道，这里再挡一次是因为 execute 也可能
+    // 从别的路径直接进来（例如显式点名这个引擎）。报错要说清缺的是哪个开关。
+    throw new Error(
+      'The searxng engine needs either engines.searxng.baseURL or searxng.embedded: true. ' +
+        'Without one of them there is no instance to search through.',
+    );
+  }
+  const server = await acquireSearxngServer(config);
+  return `${server.url.replace(/\/+$/, '')}/search`;
+}
+
 export const searxngProvider: SearchEngine = {
   name: 'searxng',
   roles: ['search'],
   requirement:
-    'a SearXNG baseURL whose settings.yml enables format: json (public instances usually leave it off and answer 403)',
-  // 不存在一个靠谱的默认主机，所以未配置的条目绝不能声称自己可用：
-  // 否则链式调度器会被它占住，直到调用时才失败，把配置问题伪装成
-  // 运行期问题。
-  isAvailable: (settings) => typeof settings.baseURL === 'string' && settings.baseURL.trim() !== '',
+    'engines.searxng.baseURL pointing at an instance whose settings.yml enables format: json, or searxng.embedded: true to use the bundled one',
+  // 可用的两种方式：显式给了 baseURL（用户托付的实例），或者打开了随包实例。
+  // 只有前者是旧语义；后者要用户明确点头，因为随包实例是一个约 22 MiB 的
+  // 原生产物，第一次启动会有可感知的代价，不能悄悄变成裸机的默认行为。
+  isAvailable: (settings) => {
+    const base = settings.baseURL?.trim() ?? '';
+    return base !== '' || settings.embedded === true;
+  },
   execute: executeSearxngSearch,
 };

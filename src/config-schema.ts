@@ -30,6 +30,8 @@ export const KNOWN_TOP_LEVEL_KEYS = [
   // 三宿主改造新增的两段。加在这里，`config set` 才不会把它们丢掉。
   'hosts',
   'serve',
+  // 随包 SearXNG 的抓取配置（代理、命名网络、逐引擎规则）。
+  'searxng',
 ] as const;
 
 export type KnownTopLevelKey = (typeof KNOWN_TOP_LEVEL_KEYS)[number];

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@searxng-js/searxng':
+        specifier: 0.1.2
+        version: 0.1.2
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -434,6 +437,26 @@ packages:
 
   '@rollup/rollup-win32-x64-msvc@4.59.0':
     resolution: {integrity: sha512-2HRCml6OztYXyJXAvdDXPKcawukWY2GpR5/nxKp4iBgiO3wcoEGkAaqctIbZcNB6KlUQBIqt8VYkNSj2397EfA==}
+    cpu: [x64]
+    os: [win32]
+
+  '@searxng-js/darwin-arm64@0.1.2':
+    resolution: {integrity: sha512-aqWhvPDfL7AE5dy/91NYQ6iKzG2DObkpRSRi3Fe1c2VnQgYUMaQPJXzjYItfNgC22jOWwkqXfCBJeBAMvKqDKA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@searxng-js/linux-x64@0.1.2':
+    resolution: {integrity: sha512-YQt/mm6hiDsN95eQBwlJxTKJpVz+wMwMFic0r2T8WYaAKz1n9HOCXxMHcmduSnKb+eoplcbpjbgbsTdvdws+Jw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@searxng-js/searxng@0.1.2':
+    resolution: {integrity: sha512-7RK2zuSceleNjgt/Qoz4szX/vYrev3wa6fKl6HhEWvv3UgoKbG8Ha8jWo83h9vbPzUOh+L3T/xnBAYjgdCNuEw==}
+    engines: {node: '>=20.3'}
+
+  '@searxng-js/win32-x64@0.1.2':
+    resolution: {integrity: sha512-z7d5G0Z9xz/c3rBxM3WIqoaEn7YKiw3TEZ/jQt5SQlDUHet1ZVRo20Yl5OJls3KKtWn5XE8k2yOgoWrc30kY3Q==}
     cpu: [x64]
     os: [win32]
 
@@ -1138,6 +1161,21 @@ snapshots:
     optional: true
 
   '@rollup/rollup-win32-x64-msvc@4.59.0':
+    optional: true
+
+  '@searxng-js/darwin-arm64@0.1.2':
+    optional: true
+
+  '@searxng-js/linux-x64@0.1.2':
+    optional: true
+
+  '@searxng-js/searxng@0.1.2':
+    optionalDependencies:
+      '@searxng-js/darwin-arm64': 0.1.2
+      '@searxng-js/linux-x64': 0.1.2
+      '@searxng-js/win32-x64': 0.1.2
+
+  '@searxng-js/win32-x64@0.1.2':
     optional: true
 
   '@types/chai@5.2.3':

@@ -1,4 +1,4 @@
-import type { EngineSettings, Role } from '../config.ts';
+import type { EngineSettings, Role, SearxngConfig } from '../config.ts';
 import { antigravityCliProvider } from './antigravity.ts';
 import { anysearchProvider } from './anysearch.ts';
 import { exaProvider } from './exa.ts';
@@ -44,6 +44,11 @@ export interface EngineRequest {
    * 缺省即为关闭。
    */
   allowPrivateNetwork?: boolean;
+  /**
+   * 随包 SearXNG 实例的抓取配置。只有 searxng 引擎会读它：其余引擎
+   * 走的是自己的 baseURL / proxy，与这里无关。
+   */
+  searxng?: SearxngConfig;
 }
 
 export interface EngineOutput {

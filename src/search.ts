@@ -585,6 +585,7 @@ async function runOneSource(
             settings: { ...settings, apiKey: keyRun.apiKey },
             apiKeySecrets: apiKeys,
             allowPrivateNetwork,
+            searxng: config.searxng,
           },
           budget.killAfterMs,
         );

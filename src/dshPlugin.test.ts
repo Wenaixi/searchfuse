@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -175,8 +176,24 @@ function toolNamed(tools: Map<string, RegisteredTool>, name: string): Registered
 
 const created: string[] = [];
 const originalElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE;
+// 真实家目录的快照：多个用例会把 USERPROFILE 指向临时目录（插件按
+// homedir() 找 runtime.json），所以每个用例结束时必须还原到这一份，而不是
+// 「上一个用例碰巧留下的值」。
+const INITIAL_HOME = process.env.USERPROFILE;
 
-afterEach(() => {
+afterEach(async () => {
+  if (stubServer !== undefined) {
+    const server = stubServer;
+    stubServer = undefined;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  stubServe = undefined;
+  if (INITIAL_HOME === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = INITIAL_HOME;
+  }
+  originalHome = undefined;
   delete process.env.MODSEARCH_DSH_CLI;
   if (originalElectronRunAsNode === undefined) {
     delete process.env.ELECTRON_RUN_AS_NODE;
@@ -188,6 +205,75 @@ afterEach(() => {
     fs.rmSync(created.pop() as string, { recursive: true, force: true });
   }
 });
+
+/**
+ * 起一个桩 HTTP 服务，并把它的端口与 token 写进临时 HOME 的 runtime.json。
+ *
+ * 插件现在走 `HTTP -> 唤醒 -> 重试` 的两级路径（曾经还有第三级「搜完就
+ * spawn 一个一次性 kernel」，已移除），所以验证点从「CLI 的 stdout」挪到了
+ * 「服务端的响应」。这个桩服务记录收到的每个请求，测试据此断言参数转发。
+ */
+interface StubServe {
+  /** 插件会发到这个端口；未定义表示 runtime.json 刻意缺失。 */
+  requests: Array<{ path: string; params: URLSearchParams; authorization: string | undefined }>;
+  /** 改动下一次响应的行为。默认按已登记的响应表作答。 */
+  respond: (status: number, body: string) => void;
+}
+
+let stubServe: StubServe | undefined;
+let stubServer: import('http').Server | undefined;
+let originalHome: string | undefined;
+
+/** 起桩服务并让插件指向它；测试只需要给一份响应。 */
+async function serveWith(status: number, body: unknown): Promise<StubServe> {
+  const payload = typeof body === 'string' ? body : JSON.stringify(body);
+  const stub = startStubServe({ path: '/v1/search', status, body: payload });
+  stubServe = stub;
+  await pointPluginAtStub();
+  return stub;
+}
+
+function startStubServe(endpoint: { path: string; status: number; body: string }): StubServe {
+  const requests: StubServe['requests'] = [];
+  const state = { status: endpoint.status, body: endpoint.body };
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    requests.push({
+      path: url.pathname,
+      params: url.searchParams,
+      authorization: req.headers.authorization as string | undefined,
+    });
+    res.writeHead(state.status, { 'content-type': 'application/json' });
+    res.end(state.body);
+  });
+  const stub: StubServe = {
+    requests,
+    respond: (status: number, body: string) => {
+      state.status = status;
+      state.body = body;
+    },
+  };
+  stubServer = server;
+  return stub;
+}
+
+/** 把桩服务的地址写进临时 HOME，让插件读得到。 */
+async function pointPluginAtStub(): Promise<void> {
+  const port = await new Promise<number>((resolve) => {
+    stubServer!.listen(0, '127.0.0.1', () => {
+      resolve((stubServer!.address() as import('node:net').AddressInfo).port);
+    });
+  });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-dsh-home-'));
+  created.push(home);
+  fs.mkdirSync(path.join(home, '.searchfuse'), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, '.searchfuse', 'runtime.json'),
+    JSON.stringify({ port, token: 'test-token' }),
+  );
+  originalHome = process.env.USERPROFILE;
+  process.env.USERPROFILE = home;
+}
 
 /** Point MODSEARCH_DSH_CLI at a node script whose stdout is this envelope. */
 function fakeCli(body: string): void {
@@ -220,37 +306,33 @@ const okSearchEntry = {
 };
 
 describe('dsh web search provider', () => {
-  it('runs the CLI in Node mode when the plugin is hosted by Electron', async () => {
-    delete process.env.ELECTRON_RUN_AS_NODE;
-    Object.defineProperty(process.versions, 'electron', {
-      value: '43.4.0',
-      configurable: true,
-    });
-    fakeCli(`
-      if (process.env.ELECTRON_RUN_AS_NODE !== '1') {
-        process.stderr.write('Electron Node mode was not enabled');
-        process.exit(1);
-      }
-      console.log(JSON.stringify({ results: [${JSON.stringify(okSearchEntry)}] }));
-    `);
-
+  it('reaches the service over HTTP instead of spawning a one-off kernel', async () => {
+    // 三级回退已收敛成两级：HTTP -> 唤醒 -> 重试。这条用例钉住第一级就命中，
+    // 也就是服务在跑时不会再起任何子进程。
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).resolves.toMatchObject({
       content: expect.stringContaining('What the web says.'),
     });
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0].path).toBe('/v1/search');
+    expect(stub.requests[0].params.get('q')).toBe('anything');
+    expect(stub.requests[0].authorization).toBe('Bearer test-token');
   });
 
-  it('maps the CLI envelope to the seam result shape', async () => {
+  it('maps the envelope to the seam result shape', async () => {
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { providers } = await load();
     expect(providers).toHaveLength(1);
     expect(providers[0].id).toBe('modsearch');
     expect(providers[0].available()).toBe(true);
-    envelopeCli(okSearchEntry);
     const result = await providers[0].search({ query: 'anything', maxResults: 5 });
     expect(result.content).toContain('What the web says.');
     expect(result.content).toContain('Uncertain: dates approximate');
     expect(result.truncated).toBe(false);
-    // Junk without a URL is dropped; published_at becomes the seam's camelCase.
+    // Max results travels as a query parameter; junk without a URL is dropped
+    // and published_at becomes the seam's camelCase.
+    expect(stub.requests[0].params.get('max')).toBe('5');
     expect(result.sources).toEqual([
       { title: 'A', url: 'https://a.example', snippet: 'sa', publishedAt: '2026-08-01' },
       { title: 'B', url: 'https://b.example', snippet: 'sb' },
@@ -258,12 +340,16 @@ describe('dsh web search provider', () => {
   });
 
   it('names the attempt trail when every engine failed', async () => {
-    envelopeCli({
-      ...okSearchEntry,
-      status: 'unavailable',
-      summary: '',
-      items: [],
-      attempts: [{ engine: 'antigravity-cli', ok: false, error: 'not signed in' }],
+    await serveWith(200, {
+      results: [
+        {
+          ...okSearchEntry,
+          status: 'unavailable',
+          summary: '',
+          items: [],
+          attempts: [{ engine: 'antigravity-cli', ok: false, error: 'not signed in' }],
+        },
+      ],
     });
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
@@ -271,104 +357,114 @@ describe('dsh web search provider', () => {
     );
   });
 
-  it('surfaces a non-zero CLI exit with its stderr', async () => {
-    fakeCli(`process.stderr.write('Error: no engines'); process.exit(1)`);
+  it('carries the service error body instead of hiding it behind "unreachable"', async () => {
+    // 服务端 5xx 的正文里有逐引擎的尝试轨迹；旧路径靠 CLI 的 stderr 表达
+    // 这件事，HTTP 路径必须把同一份信息带出来。
+    await serveWith(500, { error: 'Every engine for the web source failed.' });
     const { providers } = await load();
-    await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(/exit 1.*no engines/s);
+    await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
+      /500.*Every engine for the web source failed/s,
+    );
   });
 
   it('says how to reinstall when the CLI build is missing, as after a GitHub source install', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-dsh-cli-'));
     created.push(dir);
+    // 必须同时屏蔽真实家目录：那台机器上跑着一个真实服务时，第一级 HTTP
+    // 就会成功，这个用例根本走不到检查构建的那一步。
+    process.env.USERPROFILE = dir;
     process.env.MODSEARCH_DSH_CLI = path.join(dir, 'dist', 'main.js');
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
       /build is missing.*GitHub.*@wenaixi\/searchfuse/s,
     );
   });
+
+  it('reports unreachable rather than spawning anything when no service answers', async () => {
+    // runtime.json 缺失 + 唤醒失败（这里用不存在的 CLI 制造失败），
+    // 结果必须是一句可行动的报错，而不是悄悄退化成一个并行实现。
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-dsh-nohome-'));
+    created.push(home);
+    process.env.USERPROFILE = home;
+    process.env.MODSEARCH_DSH_CLI = path.join(home, 'definitely-missing-cli.js');
+    const { providers } = await load();
+    await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
+      /build is missing.*GitHub/s,
+    );
+  });
 });
 
-/** A fake CLI that answers with its own argv as the summary. */
-function argvEchoCli(): void {
-  fakeCli(`
-    const entry = ${JSON.stringify(okSearchEntry)};
-    entry.summary = JSON.stringify(process.argv.slice(2));
-    entry.content = '';
-    console.log(JSON.stringify({ results: [entry] }));
-  `);
-}
-
-/** The value following a flag in an echoed argv. */
-function flag(argv: string[], name: string): string | undefined {
-  const index = argv.indexOf(name);
-  return index === -1 ? undefined : argv[index + 1];
-}
-
 describe('dsh CLI budgets', () => {
+  // 预算现在以查询参数的形式下发到服务端；服务端读不到它们就会退回自己的
+  // 默认值，卡片里的 aggregate.deadlineMs 也就会变成哑设置。
+  const budgetOf = (stub: StubServe) => ({
+    timeout: stub.requests[0]?.params.get('timeout') ?? undefined,
+    deadline: stub.requests[0]?.params.get('deadline') ?? undefined,
+  });
+
   it('passes the built-in budgets when neither the plugin nor the file sets one', async () => {
-    argvEchoCli();
     // Pinned explicitly so this case does not depend on what the ambient
     // ~/.searchfuse/config.json happens to hold: the point is the built-in
     // default, not the machine it runs on.
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { providers } = await load({ providerTimeoutMs: 40_000, providerDeadlineMs: 55_000 });
-    const result = await providers[0].search({ query: 'anything' });
-    const argv = JSON.parse(result.content.split('\n')[0]) as string[];
+    await providers[0].search({ query: 'anything' });
     // One engine may take 40s, the whole chain 55s. Even an engine that
     // ignores its own timeout is stopped 5s past it, which leaves a fast
     // fallback 10s, and the run ends before the host's 60s abort.
-    expect(flag(argv, '--timeout')).toBe('40000');
-    expect(flag(argv, '--deadline')).toBe('55000');
+    expect(budgetOf(stub).timeout).toBe('40000');
+    expect(budgetOf(stub).deadline).toBe('55000');
   });
 
-  it('follows aggregate.deadlineMs from the file when the plugin config is silent', async () => {
-    // One number in the config file sizing both the CLI and the model-facing
-    // tool is the point of this fallback; two numbers that disagree is what
-    // it replaces.
-    argvEchoCli();
+  it('bounds the per-engine budget by the run budget it sends', async () => {
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { providers } = await load();
-    const result = await providers[0].search({ query: 'anything' });
-    const argv = JSON.parse(result.content.split('\n')[0]) as string[];
-    const deadline = Number(flag(argv, '--deadline'));
-    const timeout = Number(flag(argv, '--timeout'));
+    await providers[0].search({ query: 'anything' });
+    const deadline = Number(budgetOf(stub).deadline);
+    const timeout = Number(budgetOf(stub).timeout);
     expect(Number.isFinite(deadline)).toBe(true);
     // The per-engine budget never exceeds the run budget.
     expect(timeout).toBeLessThanOrEqual(deadline);
   });
 
   it('lets the plugin config move both provider budgets', async () => {
-    argvEchoCli();
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { providers } = await load({ providerTimeoutMs: 30_000, providerDeadlineMs: 50_000 });
-    const result = await providers[0].search({ query: 'anything' });
-    const argv = JSON.parse(result.content.split('\n')[0]) as string[];
-    expect(flag(argv, '--timeout')).toBe('30000');
-    expect(flag(argv, '--deadline')).toBe('50000');
+    await providers[0].search({ query: 'anything' });
+    expect(budgetOf(stub).timeout).toBe('30000');
+    expect(budgetOf(stub).deadline).toBe('50000');
   });
 
   it('bounds x_search and read_page by a run deadline inside their own backstop', async () => {
-    argvEchoCli();
+    const stub = await serveWith(200, { results: [okSearchEntry] });
     const { tools } = await load({ xSearch: true });
     for (const [name, args] of [
       ['x_search', { query: 'anything' }],
       ['read_page', { url: 'https://a.example' }],
     ] as const) {
+      stub.requests.length = 0;
       const tool = toolNamed(tools, name) as RegisteredTool & { timeoutMs: number };
-      const value = await tool.execute(args, {});
-      const argv = JSON.parse(String(value.summary)) as string[];
-      const engineTimeout = Number(flag(argv, '--timeout'));
-      const deadline = Number(flag(argv, '--deadline'));
+      await tool.execute(args, {});
+      const { timeout, deadline } = budgetOf(stub);
+      expect(timeout).toBeDefined();
+      expect(deadline).toBeDefined();
+      const engineTimeout = Number(timeout);
+      const deadlineMs = Number(deadline);
       // A slow first engine leaves time for the next, and the whole run ends
       // before the harness backstop fires its bare abort.
-      expect(engineTimeout).toBeLessThan(deadline);
-      expect(deadline).toBeLessThan(tool.timeoutMs);
+      expect(engineTimeout).toBeLessThan(deadlineMs);
+      expect(deadlineMs).toBeLessThan(tool.timeoutMs);
     }
   });
 });
 
 describe('dsh x_search tool', () => {
   it('returns evidence plus provenance as the canonical value', async () => {
+    const stub = await serveWith(200, {
+      results: [{ ...okSearchEntry, source: 'x', requestedSource: 'x', engine: 'grok-cli' }],
+    });
     const { tools } = await load({ xSearch: true });
     const tool = toolNamed(tools, 'x_search');
-    envelopeCli({ ...okSearchEntry, source: 'x', requestedSource: 'x', engine: 'grok-cli' });
     const value = await tool.execute({ query: 'what is @dev saying' }, {});
     expect(value).toEqual({
       status: 'ok',
@@ -380,9 +476,11 @@ describe('dsh x_search tool', () => {
   });
 
   it('marks a web stand-in answer as degraded in value and render', async () => {
+    await serveWith(200, {
+      results: [{ ...okSearchEntry, requestedSource: 'x', status: 'degraded' }],
+    });
     const { tools } = await load({ xSearch: true });
     const tool = toolNamed(tools, 'x_search');
-    envelopeCli({ ...okSearchEntry, requestedSource: 'x', status: 'degraded' });
     const value = await tool.execute({ query: 'reactions to the launch' }, {});
     expect(value.status).toBe('degraded');
     expect(value.source).toBe('web');
@@ -433,22 +531,29 @@ describe('dsh read_page tool', () => {
   });
 
   it('returns the fetch evidence fields as the canonical value', async () => {
+    const stub = await serveWith(200, {
+      results: [
+        {
+          source: 'web',
+          requestedSource: 'web',
+          engine: 'antigravity-cli',
+          status: 'ok',
+          warnings: ['Fetched through Firecrawl in the cloud.'],
+          attempts: [],
+          durationSeconds: 2,
+          summary: 'The page in one line.',
+          content: 'Full extracted content.',
+          links: [{ text: 'docs', url: 'https://a.example/docs' }],
+          uncertainty: [],
+        },
+      ],
+    });
     const { tools } = await load();
     const tool = toolNamed(tools, 'read_page');
-    envelopeCli({
-      source: 'web',
-      requestedSource: 'web',
-      engine: 'antigravity-cli',
-      status: 'ok',
-      warnings: ['Fetched through Firecrawl in the cloud.'],
-      attempts: [],
-      durationSeconds: 2,
-      summary: 'The page in one line.',
-      content: 'Full extracted content.',
-      links: [{ text: 'docs', url: 'https://a.example/docs' }],
-      uncertainty: [],
-    });
     const value = await tool.execute({ url: 'https://a.example', query: 'rate limits' }, {});
+    // 读页也走同一条 HTTP 通道，且 url 以参数形式转发。
+    expect(stub.requests[0].path).toBe('/v1/read-page');
+    expect(stub.requests[0].params.get('url')).toBe('https://a.example');
     expect(value).toEqual({
       summary: 'The page in one line.',
       content: 'Full extracted content.',
@@ -1202,6 +1307,85 @@ describe('dsh settings card route', () => {
     } finally {
       errors.mockRestore();
     }
+  });
+
+  it('exposes the searxng section to the card without inventing defaults', async () => {
+    await withConfig(
+      {
+        engine: '',
+        searxng: {
+          networks: { via_tor: { proxies: { 'all://': 'socks5h://127.0.0.1:9050' } } },
+          engines: { brave: { network: 'via_tor' } },
+        },
+      },
+      async (handler) => {
+        const { body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
+        const searxng = body.searxng as {
+          embedded: boolean;
+          networks: Record<string, unknown>;
+          engines: Record<string, unknown>;
+        };
+        expect(searxng.embedded).toBe(false);
+        expect(Object.keys(searxng.networks)).toEqual(['via_tor']);
+        expect(searxng.engines).toEqual({ brave: { network: 'via_tor' } });
+      },
+    );
+  });
+
+  it('writes a per-engine proxy with round-robin order preserved', async () => {
+    await withConfig({ engine: '' }, async (handler, file) => {
+      const { status } = await callRoute(
+        handler,
+        postOf({
+          searxngEngine: 'google',
+          searxngEngineProxies: { 'all://': ['http://p1:8080', 'http://p2:8080'] },
+        }),
+      );
+      expect(status).toBe(200);
+      // 数组顺序就是轮询顺序，写盘时必须原样保留；把它压成单值会让
+      // 「同一协议多代理轮询」在文件里消失。
+      const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(saved.searxng.engines.google.proxies).toEqual({
+        'all://': ['http://p1:8080', 'http://p2:8080'],
+      });
+    });
+  });
+
+  it('rejects an engine that references a network nobody defined', async () => {
+    await withConfig({ engine: '' }, async (handler, file) => {
+      const before = fs.readFileSync(file, 'utf-8');
+      const { status, body } = await callRoute(
+        handler,
+        postOf({ searxngEngine: 'brave', searxngEngineNetwork: 'via_tor' }),
+      );
+      expect(status).toBe(400);
+      expect(String(body.error)).toMatch(/brave\.network "via_tor" is not defined/);
+      // 校验失败时文件必须原样不动：一次被拒绝的保存不能留下半份配置。
+      expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    });
+  });
+
+  it('rejects a proxy without a scheme before writing anything', async () => {
+    await withConfig({ engine: '' }, async (handler, file) => {
+      const before = fs.readFileSync(file, 'utf-8');
+      const { status, body } = await callRoute(
+        handler,
+        postOf({ searxngNetwork: 'via_tor', searxngNetworkProxies: { 'all://': '127.0.0.1:7890' } }),
+      );
+      expect(status).toBe(400);
+      expect(String(body.error)).toMatch(/include a scheme/);
+      expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    });
+  });
+
+  it('toggles the bundled instance and removes the key when switched off', async () => {
+    await withConfig({ engine: '', searxng: { embedded: true } }, async (handler, file) => {
+      await callRoute(handler, postOf({ searxngEmbedded: false }));
+      const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      // 关闭写的是「删掉这个键」，而不是 `embedded: false`：后者会让
+      // 「文件里有没有这个开关」变得不可区分，而 isAvailable 正是看这个。
+      expect(Object.hasOwn(saved.searxng, 'embedded')).toBe(false);
+    });
   });
 
   it('registers neither the route nor the namespace when the card is switched off', async () => {

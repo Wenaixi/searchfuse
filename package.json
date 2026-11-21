@@ -75,6 +75,7 @@
     }
   },
   "dependencies": {
+    "@searxng-js/searxng": "0.1.2",
     "commander": "^13.1.0",
     "undici": "^7.30.2"
   },
