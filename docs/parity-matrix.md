@@ -38,10 +38,10 @@
 | 单引擎独立工具 | TODO(S3) | TODO(S4) | N/A: 宿主无此 API（`SearchProviderId` 封闭枚举） |
 | MCP：context7 | TODO(S2) | TODO(S4) | TODO(S5) |
 | MCP：grep | TODO(S2) | TODO(S4) | TODO(S5) |
-| 配置热更新 | TODO(S3) | TODO(S4) | N/A: 宿主无对应 UI（`fs.watch` 只监视自身 config） |
+| 配置热更新 | TODO(S3) | TODO(S4) | N/A: 宿主无对应 UI（omp 有原生 fs.watch，但只在 session_start 拉起服务，不跟随搜索配置变化） |
 | 设置卡片 UI | TODO(S3) | N/A: 宿主无对应 UI（mod 无内置卡片渲染） | N/A: 宿主无对应 UI |
 | 引擎失败诊断 | TODO(S1) | TODO(S1) | TODO(S1) |
-| 服务不可达时的降级 | TODO(S3) | TODO(S4) | N/A: 宿主无此 API（无 provider 回退链） |
+| 服务不可达时的降级 | TODO(S3) | TODO(S4) | TODO(S5)（实测：退到公网 Parallel、exit 0、stderr 空——**有降级但目标是公网**，S5② 断言此行为） |
 
 ## 已知语义损失（不是「不支持」，是「有损」）
 

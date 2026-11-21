@@ -367,7 +367,6 @@ export function register(on: any) {
     // 开关：读共享配置的 hosts.claudeCode.enabled（见 §4.3，v5 统一键名）
     const enabled = await $.settings.read({ key: 'searchfuseHosts' })
     if (enabled?.claudeCode?.enabled !== true) return next(e)
-
     // spawn kernel：$ 调用直接写在 hook 体内
     // v5：用 globalThis 取 process（直接写 process 会 TS2591）
     const run = await $.process.run({
@@ -386,6 +385,10 @@ export function register(on: any) {
 - `on` / `$` / `e` / `next` 必须显式标 `: any`，否则 `TS7006`（4 条）
 - 直接写 `process.execPath` 会 `TS2591`（宿主 `types: []`，无 Node 类型），须用 `(globalThis as any).process`
 - `--strict` 会把上述 warning 升为 error，所以规范的写法必须一次到位
+
+**`$.settings.read({key})` 的返回形状（v6 实测确认）**：返回的是**该键的原值**，不是 `{ value }` 包裹。实测把 `{searchfuseHosts:{claudeCode:{enabled:true}}}` 写进 settings 后，hook 内读到 `{"claudeCode":{"enabled":true}}`。因此 `enabled?.claudeCode?.enabled !== true` 是正确写法。
+
+另：`session.start` 钩子抛异常会被宿主**静默跳过**（只向 stderr 打 `hook skipped: threw Error…`），不影响会话继续——这也是为什么 S4④ 要求断言「`next` 被调用恰好一次」而不是只看是否有报错。
 
 **`validate` 的硬规则（实测，必须遵守）**：
 - `$` 只能在 hook 体内部以 `$.noun.method(...)` 出现
