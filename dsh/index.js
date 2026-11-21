@@ -423,12 +423,111 @@ function cliPath() {
   return cli;
 }
 
-async function runCli(args, signal) {
+/**
+ * 读本地服务的运行时信息：`~/.searchfuse/runtime.json`。
+ *
+ * 返回 undefined 表示服务没起（文件不在、读不了、或不是我们要的形状）。
+ * 调用方据此回退到子进程。
+ */
+function readServeRuntime() {
+  const file = join(homedir(), '.searchfuse', 'runtime.json');
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!isPlainObject(parsed)) return undefined;
+  if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
+  return { port: parsed.port, token: parsed.token };
+}
+
+/**
+ * 取一次搜索结果：**服务优先，子进程兜底**。
+ *
+ * 为什么要两条：服务在跑时省掉一次 Node 启动（约 200ms）；服务不在时
+ * 用户仍然能搜。只走一条就等于把可用性押在另一件事上。
+ */
+/** 调一次服务；拿到文本就返回，否则 undefined。 */
+async function tryServe(args, signal) {
+  const runtime = readServeRuntime();
+  if (runtime === undefined) return undefined;
+  const query = args[0];
+  const source = args[2] ?? 'web';
+  const max = args[8];
+  const params = new URLSearchParams({ q: query, source });
+  if (max !== undefined) params.set('max', max);
+  try {
+    const url = `http://127.0.0.1:${runtime.port}/v1/search?${params.toString()}`;
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${runtime.token}`, accept: 'application/json' },
+      ...(signal ? { signal } : {}),
+    });
+    if (response.ok) return await response.text();
+  } catch {
+    // 连接被拒或超时：交给上层决定下一步。
+  }
+  return undefined;
+}
+
+/**
+ * 唤醒服务：用 `serve --ensure` 幂等地把它拉起来。
+ *
+ * 为什么不是 `spawn(serve)` 直接起：`--ensure` 会先探 `/healthz`，
+ * 已经在跑就 exit 0，不会重复起第二个实例抢同一个文件。
+ *
+ * 返回是否**这次真的把它拉起来了**（供上层的重试判断）。
+ */
+async function wakeServe(signal) {
+  const cli = cliPath();
+  try {
+    const { code } = await run(process.execPath, [cli, 'serve', '--ensure'], signal, childEnv());
+    return code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 取一次搜索结果。**三级回退**，顺序是刻意的：
+ *
+ * 1. HTTP    —— 服务在跑，最快（省一次 Node 启动）
+ * 2. 唤醒+重试 —— 服务没跑，先拉起来再试（保活，用户无感）
+ * 3. spawn   —— 服务起不来（端口占用、缺构建、权限），直接跑一次聚合器
+ *
+ * 为什么第二级不是直接 spawn：服务活着时三家共享同一份缓存与冷却状态；
+ * 每次绕过它单独 spawn 会让那份状态失去意义。唤醒比重跑更符合「共用
+ * 一个服务」的初衷。
+ */
+async function fetchOrSpawn(args, signal) {
+  // 1. 直接试 HTTP。
+  const first = await tryServe(args, signal);
+  if (first !== undefined) return first;
+
+  // 2. 唤醒，然后再试一次。
+  const woke = await wakeServe(signal);
+  if (woke) {
+    const second = await tryServe(args, signal);
+    if (second !== undefined) return second;
+  }
+
+  // 3. 兜底：跑一次子进程。
   const cli = cliPath();
   const { stdout, stderr, code } = await run(process.execPath, [cli, ...args], signal, childEnv());
   if (code !== 0) {
     throw new Error(`searchfuse failed (exit ${code}): ${(stderr || stdout).trim().slice(0, 500)}`);
   }
+  return stdout;
+}
+
+async function runCli(args, signal) {
+  const stdout = await fetchOrSpawn(args, signal);
   let parsed;
   try {
     parsed = JSON.parse(stdout);

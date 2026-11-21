@@ -14,6 +14,9 @@
 // 渲染而不是裸复制，因为复制之后扩展与包的 dist/ 已无相对关系。
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
 
 /** 渲染时替换成真实的绝对路径。 */
@@ -21,6 +24,9 @@ const KERNEL_PATH = '__SEARCHFUSE_KERNEL_PATH__';
 
 /** 一次搜索的墙钟上限。比聚合默认的 8 秒宽，留给慢引擎。 */
 const SEARCH_TIMEOUT_MS = 240_000;
+
+/** 唤醒服务允许的最长等待（它通常几百毫秒就起来）。 */
+const WAKE_TIMEOUT_MS = 15_000;
 
 /**
  * 找一个真正的 Node 可执行文件来跑 kernel。
@@ -57,6 +63,133 @@ interface KernelHit {
  *
  * 三个工具共用这一条通道：超时、取消、退出码的判定只写一份。
  */
+/** `~/.searchfuse/runtime.json` 的形状；读不到就是服务没起。 */
+interface ServeRuntime {
+  port: number;
+  token: string;
+}
+
+/**
+ * 读服务的运行时信息。
+ *
+ * omp 扩展是普通 Node 进程（不是 mod 沙箱），所以能直接用 fs 与 homedir。
+ */
+function readServeRuntime(): ServeRuntime | undefined {
+  try {
+    const raw = readFileSync(join(homedir(), '.searchfuse', 'runtime.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
+    if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
+    return { port: parsed.port, token: parsed.token };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 把 kernel 的 argv 翻译成服务的查询参数。
+ *
+ * 三个工具的参数不同（`--query` vs `--url`），但服务端点也是分开的，
+ * 所以这里只负责挑出「用哪个端点、带哪些查询串」。
+ */
+function toServeRequest(args: string[]): { endpoint: string; params: Record<string, string> } | undefined {
+  const flag = (name: string): string | undefined => {
+    const index = args.indexOf(name);
+    return index === -1 ? undefined : args[index + 1];
+  };
+  const url = flag('--url');
+  if (url !== undefined) {
+    return { endpoint: '/v1/read-page', params: { url } };
+  }
+  const query = flag('--query');
+  if (query === undefined) return undefined;
+  const params: Record<string, string> = { q: query, source: flag('--source') ?? 'web' };
+  const max = flag('--max-results');
+  if (max !== undefined) params.max = max;
+  return { endpoint: '/v1/search', params };
+}
+
+/**
+ * 取一次搜索结果：**服务优先，子进程兜底**。
+ *
+ * omp 侧有完整 Node，两条路都能走；服务在跑时省掉一次进程启动。
+ */
+/** 调一次服务；拿到文本就返回，否则 undefined。 */
+async function tryServe(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
+  const runtime = readServeRuntime();
+  if (runtime === undefined) return undefined;
+  const request = toServeRequest(args);
+  if (request === undefined) return undefined;
+  const search = new URLSearchParams(request.params);
+  try {
+    const response = await fetch(`http://127.0.0.1:${runtime.port}${request.endpoint}?${search.toString()}`, {
+      headers: { authorization: `Bearer ${runtime.token}`, accept: 'application/json' },
+      ...(signal ? { signal } : {}),
+    });
+    if (response.ok) return await response.text();
+  } catch {
+    // 连接被拒：交给上层。
+  }
+  return undefined;
+}
+
+/**
+ * 唤醒服务：跑 `serve --ensure`。
+ *
+ * 它先探 `/healthz`，已在跑就 exit 0，所以重复调用不会起第二个实例。
+ * omp 扩展是普通 Node 进程，能直接起子进程。
+ */
+function wakeServe(signal: AbortSignal | undefined): Promise<boolean> {
+  return new Promise((resolve) => {
+    const node = resolveNodeBinary();
+    if (node === undefined) {
+      resolve(false);
+      return;
+    }
+    // kernel 与服务入口在同一个 dist 目录，所以从 KERNEL_PATH 推出 main.js。
+    const cliPath = KERNEL_PATH.replace(/kernel\.js$/, 'main.js');
+    let child;
+    try {
+      child = spawn(node, [cliPath, 'serve', '--ensure'], { stdio: 'ignore' });
+    } catch {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(false);
+    }, WAKE_TIMEOUT_MS);
+    timer.unref();
+    signal?.addEventListener('abort', () => {
+      child.kill();
+      resolve(false);
+    }, { once: true });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}
+
+/** 给唤醒重试一次。 */
+async function fetchOrSpawn(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
+  // 1. 直接试 HTTP。
+  const first = await tryServe(args, signal);
+  if (first !== undefined) return first;
+
+  // 2. 唤醒后再试。
+  if (await wakeServe(signal)) {
+    const second = await tryServe(args, signal);
+    if (second !== undefined) return second;
+  }
+
+  // 3. 兜底：跑一次常驻之外的子进程。
+  return runKernel(args, signal);
+}
+
 function runKernel(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
   return new Promise((resolve) => {
     let settled = false;
@@ -178,7 +311,7 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await runKernel(['--query', params.query, '--source', 'web'], signal);
+      const raw = await fetchOrSpawn(['--query', params.query, '--source', 'web'], signal);
       if (raw === undefined) {
         return {
           content: [{ type: 'text', text: '搜索暂时不可用（超时或无法启动本地聚合器）。' }],
@@ -201,7 +334,7 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await runKernel(['--query', params.query, '--source', 'x'], signal);
+      const raw = await fetchOrSpawn(['--query', params.query, '--source', 'x'], signal);
       if (raw === undefined) {
         return { content: [{ type: 'text', text: 'X 搜索暂时不可用。' }], isError: true };
       }
@@ -220,7 +353,7 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await runKernel(['--url', params.url], signal);
+      const raw = await fetchOrSpawn(['--url', params.url], signal);
       if (raw === undefined) {
         return { content: [{ type: 'text', text: '页面读取暂时不可用。' }], isError: true };
       }
