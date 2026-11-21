@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   allowsPrivateNetwork,
@@ -8,10 +9,11 @@ import {
   initConfigFile,
   loadConfigFile,
   migrateLegacyConfig,
+  migrateLegacyDir,
   renderEffectiveConfig,
   setConfigValue,
 } from './config.ts';
-import { cleanupTempDirs, expectPosixMode, tempConfigPath } from './testing/helpers.ts';
+import { cleanupTempDirs, expectPosixMode, tempConfigPath, withTempHome } from './testing/helpers.ts';
 
 describe('config file', () => {
   afterEach(() => cleanupTempDirs());
@@ -504,5 +506,85 @@ describe('config file', () => {
     expect(parsed.engines['grok-cli'].bin).toBe('/opt/grok (file)');
     expect(parsed.engines.local.model).toBe('m (file)');
     expect(parsed.engine).toBe('agy (file)');
+  });
+});
+
+describe('migrateLegacyDir', () => {
+  afterEach(() => cleanupTempDirs());
+
+  /** 造一份旧目录配置与一份新目录配置，返回两者路径。 */
+  function setup(legacy: unknown, current: unknown) {
+    const { home, restore } = withTempHome();
+    const legacyDir = path.join(home, '.modsearch');
+    const currentDir = path.join(home, '.searchfuse');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.mkdirSync(currentDir, { recursive: true });
+    const legacyFile = path.join(legacyDir, 'config.json');
+    const currentFile = path.join(currentDir, 'config.json');
+    fs.writeFileSync(legacyFile, JSON.stringify(legacy));
+    fs.writeFileSync(currentFile, JSON.stringify(current));
+    return { home, restore, legacyFile, currentFile };
+  }
+
+  it('补进旧配置里新文件缺的顶层键', () => {
+    const { restore, currentFile } = setup({ mcp: { probe: { url: 'https://x' } } }, { engine: 'tavily' });
+    try {
+      migrateLegacyDir();
+      const merged = JSON.parse(fs.readFileSync(currentFile, 'utf-8'));
+      expect(merged.engine).toBe('tavily');
+      expect(merged.mcp).toEqual({ probe: { url: 'https://x' } });
+    } finally {
+      restore();
+    }
+  });
+
+  it('新文件已有的键不被旧值覆盖', () => {
+    const { restore, currentFile } = setup(
+      { engine: 'exa', engines: { exa: { apiKey: 'old-key' } } },
+      { engine: 'tavily', engines: { tavily: { apiKey: 'new-key' } } },
+    );
+    try {
+      migrateLegacyDir();
+      const merged = JSON.parse(fs.readFileSync(currentFile, 'utf-8'));
+      expect(merged.engine).toBe('tavily');
+      expect(merged.engines.tavily.apiKey).toBe('new-key');
+      // 旧文件独有的引擎整个搬进来。
+      expect(merged.engines.exa.apiKey).toBe('old-key');
+    } finally {
+      restore();
+    }
+  });
+
+  it('深合并 engines 下同一引擎缺的字段，并留下备份', () => {
+    const { restore, legacyFile, currentFile } = setup(
+      { engines: { tavily: { apiKey: 'k', baseURL: 'https://b' } } },
+      { engines: { tavily: { apiKey: 'k-new' } } },
+    );
+    try {
+      migrateLegacyDir();
+      const merged = JSON.parse(fs.readFileSync(currentFile, 'utf-8'));
+      expect(merged.engines.tavily.apiKey).toBe('k-new');
+      expect(merged.engines.tavily.baseURL).toBe('https://b');
+      // 备份存在，且带着旧文件的内容。
+      const backups = fs.readdirSync(path.dirname(legacyFile)).filter((n) => n.startsWith('config.json.bak'));
+      expect(backups.length).toBe(1);
+      const backup = JSON.parse(fs.readFileSync(path.join(path.dirname(legacyFile), backups[0]!), 'utf-8'));
+      expect(backup.engines.tavily.apiKey).toBe('k');
+    } finally {
+      restore();
+    }
+  });
+
+  it('没有要补的键时不改写也不留备份', () => {
+    const { restore, legacyFile, currentFile } = setup({ engine: 'tavily' }, { engine: 'tavily' });
+    const before = fs.readFileSync(currentFile, 'utf-8');
+    try {
+      migrateLegacyDir();
+      expect(fs.readFileSync(currentFile, 'utf-8')).toBe(before);
+      const backups = fs.readdirSync(path.dirname(legacyFile)).filter((n) => n.startsWith('config.json.bak'));
+      expect(backups).toEqual([]);
+    } finally {
+      restore();
+    }
   });
 });

@@ -160,6 +160,8 @@ interface LegacyRoleConfig {
 const LEGACY_DIR_NAME = '.modsearch';
 /** 当前目录名。 */
 const DIR_NAME = '.searchfuse';
+/** 需要按键级合并的文件名：只有配置有「旧文件独有、新文件缺失」的风险。 */
+const MERGE_FILE_NAME = 'config.json';
 
 export const CONFIG_DIR = path.join(os.homedir(), DIR_NAME);
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -204,6 +206,12 @@ export function migrateLegacyDir(): void {
     const to = path.join(current, name);
     try {
       if (fs.existsSync(to)) {
+        // 配置文件是唯一的例外：两份都存在时，新文件可能缺了旧文件里
+        // 独有的引擎设置。整文件跳过会让那些 key 静默消失——用户在新名
+        // 下只配了一个引擎，旧名下的另外几个就再也回不来了。
+        if (name === MERGE_FILE_NAME) {
+          mergeLegacyConfig(from, to);
+        }
         continue;
       }
       fs.copyFileSync(from, to);
@@ -212,6 +220,83 @@ export function migrateLegacyDir(): void {
     } catch {
       // 单个文件搬不动就跳过它，其余照常。
     }
+  }
+}
+
+/**
+ * 把旧配置里新文件缺的键补进来。
+ *
+ * 三条规则：
+ * - **新文件已有的键一律不动**：那是用户在新名下自己的选择，覆盖等于丢数据。
+ * - **只补缺，不删**：旧文件里没有的键保持新文件原样。
+ * - **写之前先备份**：出问题能回退，备份名带时间戳，不覆盖上一次的备份。
+ *
+ * 深合并两层（`engines.<name>.<setting>`）：因为引擎设置是唯一按名字分组的
+ * 嵌套结构，浅合并在 `engines` 这一层就会把整个引擎列表当成一个值，新旧
+ * 各取其一，仍然会丢数据。
+ *
+ * 任何一步失败都静默放弃：迁移是便利，不是正确性的必要条件。
+ */
+function mergeLegacyConfig(legacyPath: string, currentPath: string): void {
+  let legacyRaw: unknown;
+  let currentRaw: unknown;
+  try {
+    legacyRaw = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
+    currentRaw = JSON.parse(fs.readFileSync(currentPath, 'utf-8'));
+  } catch {
+    // 任一侧读不出来或不是合法 JSON，就不合并。让用户自己决定怎么处理。
+    return;
+  }
+  if (!isPlainObject(legacyRaw) || !isPlainObject(currentRaw)) {
+    return;
+  }
+
+  let changed = false;
+  for (const [key, legacyValue] of Object.entries(legacyRaw)) {
+    if (!Object.hasOwn(currentRaw, key)) {
+      currentRaw[key] = legacyValue;
+      changed = true;
+      continue;
+    }
+    // engines 是唯一值得深合并的一层。其余键保持新文件的整体值。
+    if (key === 'engines' && isPlainObject(legacyValue) && isPlainObject(currentRaw.engines)) {
+      const currentEngines = currentRaw.engines as Record<string, unknown>;
+      for (const [engine, legacySettings] of Object.entries(legacyValue)) {
+        if (!Object.hasOwn(currentEngines, engine)) {
+          currentEngines[engine] = legacySettings;
+          changed = true;
+          continue;
+        }
+        const currentSettings = currentEngines[engine];
+        if (isPlainObject(legacySettings) && isPlainObject(currentSettings)) {
+          const target = currentSettings as Record<string, unknown>;
+          for (const [field, fieldValue] of Object.entries(legacySettings)) {
+            if (!Object.hasOwn(target, field)) {
+              target[field] = fieldValue;
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = `${legacyPath}.bak-${stamp}`;
+    fs.copyFileSync(legacyPath, backup);
+    try {
+      fs.chmodSync(backup, 0o600);
+    } catch {
+      // Windows 上 chmod 静默无效，不阻塞迁移。
+    }
+    fs.writeFileSync(currentPath, `${JSON.stringify(currentRaw, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // 写入失败就保持原样：迁移不该让 CLI 起不来。
   }
 }
 
