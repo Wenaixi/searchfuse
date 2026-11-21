@@ -171,6 +171,16 @@ export function currentConfigPath(): string {
   return path.join(os.homedir(), DIR_NAME, 'config.json');
 }
 
+/** 项目层的配置文件：`<cwd>/.searchfuse/config.json`。 */
+export function projectConfigPath(cwd: string = process.cwd()): string {
+  return path.join(cwd, DIR_NAME, 'config.json');
+}
+
+/** 宿主覆盖层的配置文件：`~/.searchfuse/hosts/<name>.json`。 */
+export function hostConfigPath(hostName: string): string {
+  return path.join(os.homedir(), DIR_NAME, 'hosts', `${hostName}.json`);
+}
+
 /**
  * 把旧目录里的文件搬到新目录，只搬一次。
  *
@@ -546,6 +556,112 @@ export function loadConfigFile(configPath = currentConfigPath()): ModsearchConfi
   }
 }
 
+/**
+ * 深合并两层配置：`override` 已有的键胜出，缺失的键从 `base` 继承。
+ *
+ * 三条规则：
+ * - 两边都是普通对象 → 递归合并（这样只换一把 key 不用重抄整张引擎表）
+ * - 其余一律由 `override` 整体替换（数组不合并：改顺序就得整份给出）
+ * - `undefined` 不算值，不能用来「删除」；要删除就写 `null`
+ *
+ * 为什么不用现成的深合并库：规则只有三条，而这类库通常带着循环引用检测、
+ * 原型链处理、数组策略选项等一大堆我们不需要的语义。三条规则的实现只有
+ * 十几行，读的人一眼能看懂。
+ */
+export function mergeConfig<T>(base: T, override: T): T {
+  if (!isPlainObject(base) || !isPlainObject(override)) {
+    return override;
+  }
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    const current = out[key];
+    out[key] = isPlainObject(value) && isPlainObject(current) ? mergeConfig(current, value) : value;
+  }
+  return out as T;
+}
+
+/**
+ * 读一层配置；文件不存在就返回空对象。
+ *
+ * 与 `loadConfigFile` 的区别：这个**不抛错**——分层读取时，项目层或宿主层
+ * 缺失是常态（多数用户根本不会有这两个文件），缺失不该让整次读取失败。
+ * 但文件存在却解析不了仍然要报：那是用户的配置，不能当作「没有」继续。
+ */
+function readConfigLayer(configPath: string): ModsearchConfig {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Error(`Cannot read ${configPath}: ${(error as Error).message}`);
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return {};
+    return migrateLegacyConfig(parsed as ModsearchConfig & LegacyConfig);
+  } catch (error) {
+    throw new Error(`Failed to parse ${configPath}: ${(error as Error).message}. Fix or delete the file.`);
+  }
+}
+
+/** 三层合并的结果，附带每层用的是哪个文件（诊断时要说清「这个值从哪来」）。 */
+export interface LayeredConfig {
+  config: ModsearchConfig;
+  /** 实际存在的层，按读取顺序。缺失的层不出现在这里。 */
+  layers: Array<{ name: 'global' | 'project' | 'host'; path: string }>;
+}
+
+/**
+ * 按「全局 → 项目 → 宿主」三层读配置，深合并。
+ *
+ * 为什么是这个顺序：全局是所有宿主的共同基线；项目层只影响这个仓库
+ * （放一份 `<cwd>/.searchfuse/config.json`，像 `CLAUDE.md` 那样跟随工作目录）；
+ * 宿主层只影响某一个宿主（想给 Claude 用另一把 key 时放
+ * `~/.searchfuse/hosts/claudeCode.json`）。后者覆盖前者。
+ *
+ * `hostName` 省略时跳过宿主层（CLI 自身、`doctor` 的全局视角用它）。
+ */
+export function loadLayeredConfig(options: {
+  hostName?: string;
+  cwd?: string;
+  /** 测试用：替换 home 目录（默认 `os.homedir()`）。 */
+  home?: string;
+  /** 测试用：只读指定文件，跳过其它层。 */
+  onlyGlobalPath?: string;
+} = {}): LayeredConfig {
+  const home = options.home ?? os.homedir();
+  const layers: LayeredConfig['layers'] = [];
+  let merged: ModsearchConfig = {};
+
+  const globalPath = options.onlyGlobalPath ?? path.join(home, DIR_NAME, 'config.json');
+  const projectPath = path.join(options.cwd ?? process.cwd(), DIR_NAME, 'config.json');
+
+  const read = (name: LayeredConfig['layers'][number]['name'], file: string): void => {
+    const layer = readConfigLayer(file);
+    // 空对象意味着「这一层什么都没写」：记进 layers 会让诊断输出一片噪声。
+    if (Object.keys(layer).length === 0) return;
+    merged = mergeConfig(merged, layer);
+    layers.push({ name, path: file });
+  };
+
+  read('global', globalPath);
+  if (options.onlyGlobalPath === undefined) {
+    // 项目层与全局层可能是同一个文件（cwd 恰好是 home）——避免读两遍。
+    if (path.resolve(projectPath) !== path.resolve(globalPath)) {
+      read('project', projectPath);
+    }
+    if (options.hostName !== undefined) {
+      const hostPath = path.join(home, DIR_NAME, 'hosts', `${options.hostName}.json`);
+      if (path.resolve(hostPath) !== path.resolve(globalPath) && path.resolve(hostPath) !== path.resolve(projectPath)) {
+        read('host', hostPath);
+      }
+    }
+  }
+
+  return { config: merged, layers };
+}
+
 /** 用户指定的引擎，如果有的话。 */
 export function chosenEngine(config: ModsearchConfig): string | undefined {
   return config.engine?.trim() || undefined;
@@ -670,6 +786,30 @@ export function setConfigValue(
       throw new Error(`Invalid allowPrivateNetwork value: ${value}. Use true or false.`);
     }
     config.allowPrivateNetwork = parsed;
+  } else if (parts.length === 2 && parts[0] === 'hosts') {
+    // `hosts.<name>.enabled` 是宿主开关。名字必须是我们认识的那几个，
+    // 否则用户以为自己关掉了某个宿主，实际什么也没发生。
+    const hostName = parts[1]!;
+    const knownHosts = ['dsh', 'claudeCode', 'omp'] as const;
+    if (!(knownHosts as readonly string[]).includes(hostName)) {
+      throw new Error(`Unknown host: ${hostName}. Known hosts: ${knownHosts.join(', ')}.`);
+    }
+    const parsed = coerceBoolean(value);
+    if (parsed === undefined) {
+      throw new Error(`Invalid hosts.${hostName} value: ${value}. Use true or false.`);
+    }
+    config.hosts = { ...config.hosts, [hostName]: { ...config.hosts?.[hostName as 'dsh'], enabled: parsed } };
+  } else if (parts.length === 2 && parts[0] === 'serve') {
+    // `serve.port` 与 `serve.idleExitSeconds` 都必须是非负整数。
+    const field = parts[1]!;
+    if (field !== 'port' && field !== 'idleExitSeconds') {
+      throw new Error(`Unknown serve setting: ${field}. Use port or idleExitSeconds.`);
+    }
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error(`Invalid serve.${field} value: ${value}. Use a non-negative integer.`);
+    }
+    config.serve = { ...config.serve, [field]: n };
   } else {
     const [rawEngineName, field] =
       parts[0] === 'engines' ? [parts[1], parts[2]] : [parts[0], parts[1]];

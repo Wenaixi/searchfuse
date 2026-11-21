@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -8,6 +9,8 @@ import {
   engineSettings,
   initConfigFile,
   loadConfigFile,
+  loadLayeredConfig,
+  mergeConfig,
   migrateLegacyConfig,
   migrateLegacyDir,
   renderEffectiveConfig,
@@ -586,5 +589,99 @@ describe('migrateLegacyDir', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('loadLayeredConfig', () => {
+  afterEach(() => cleanupTempDirs());
+
+  /** 在 home 与 cwd 下各造一份配置，返回两者的根目录。 */
+  function setup(
+    global: unknown | undefined,
+    project: unknown | undefined,
+    host: unknown | undefined,
+    hostName = 'claudeCode',
+  ) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sf-layers-home-'));
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sf-layers-cwd-'));
+    createdDirs.push(home, cwd);
+
+    const write = (file: string, contents: unknown) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(contents));
+    };
+    if (global !== undefined) write(path.join(home, '.searchfuse', 'config.json'), global);
+    if (project !== undefined) write(path.join(cwd, '.searchfuse', 'config.json'), project);
+    if (host !== undefined) write(path.join(home, '.searchfuse', 'hosts', `${hostName}.json`), host);
+    return { home, cwd, hostName };
+  }
+
+  const createdDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of createdDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('只有全局层时就是全局配置', () => {
+    const { home, cwd } = setup({ engine: 'tavily', engines: { tavily: { apiKey: 'k' } } }, undefined, undefined);
+    const result = loadLayeredConfig({ home, cwd, hostName: 'claudeCode' });
+    expect(result.config.engine).toBe('tavily');
+    expect(result.config.engines?.tavily?.apiKey).toBe('k');
+    expect(result.layers.map((l) => l.name)).toEqual(['global']);
+  });
+
+  it('项目层覆盖全局层的同名键，其余继承', () => {
+    const { home, cwd } = setup({ engine: 'exa', cooldown: 'on' }, { engine: 'tavily' }, undefined);
+    const result = loadLayeredConfig({ home, cwd, hostName: 'claudeCode' });
+    expect(result.config.engine).toBe('tavily');
+    expect(result.config.cooldown).toBe('on');
+    expect(result.layers.map((l) => l.name)).toEqual(['global', 'project']);
+  });
+
+  it('宿主层覆盖项目层，深合并只改一个字段', () => {
+    const { home, cwd } = setup(
+      { engines: { exa: { apiKey: 'global-key' }, tavily: { apiKey: 't' } } },
+      undefined,
+      { engines: { exa: { apiKey: 'host-key' } } },
+    );
+    const result = loadLayeredConfig({ home, cwd, hostName: 'claudeCode' });
+    // exa 被宿主层覆盖。
+    expect(result.config.engines?.exa?.apiKey).toBe('host-key');
+    // tavily 从全局继承。
+    expect(result.config.engines?.tavily?.apiKey).toBe('t');
+    expect(result.layers.map((l) => l.name)).toEqual(['global', 'host']);
+  });
+
+  it('不传 hostName 时跳过宿主层', () => {
+    const { home, cwd } = setup({ engine: 'exa' }, undefined, { engine: 'tavily' });
+    const result = loadLayeredConfig({ home, cwd });
+    expect(result.config.engine).toBe('exa');
+    expect(result.layers.map((l) => l.name)).toEqual(['global']);
+  });
+
+  it('数组整体替换，不逐项合并', () => {
+    const { home, cwd } = setup({ hosts: {} } as never, undefined, undefined);
+    const merged = mergeConfig({ a: [1, 2, 3] }, { a: [4] });
+    expect(merged.a).toEqual([4]);
+  });
+
+  it('override 的 undefined 不算值，不会删除 base 的键', () => {
+    const merged = mergeConfig({ a: 1, b: 2 }, { a: undefined, b: 3 });
+    expect(merged.a).toBe(1);
+    expect(merged.b).toBe(3);
+  });
+
+  it('三层都不存在时返回空配置', () => {
+    const { home, cwd } = setup(undefined, undefined, undefined);
+    const result = loadLayeredConfig({ home, cwd, hostName: 'omp' });
+    expect(result.config).toEqual({});
+    expect(result.layers).toEqual([]);
+  });
+
+  it('某一层解析失败时报错，而不是当作空', () => {
+    const { home, cwd } = setup({ engine: 'exa' }, undefined, undefined);
+    const broken = path.join(cwd, '.searchfuse', 'config.json');
+    fs.mkdirSync(path.dirname(broken), { recursive: true });
+    fs.writeFileSync(broken, '{broken');
+    expect(() => loadLayeredConfig({ home, cwd, hostName: 'claudeCode' })).toThrow('Failed to parse');
   });
 });
