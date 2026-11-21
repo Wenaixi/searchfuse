@@ -49,6 +49,46 @@
 
 **为什么这样切**：配置真身必须共享（否则三家的引擎密钥各存一份，改一处另两处不知道）；宿主设置必须隔离（`modelRoles`、`permissions`、`hooks` 是各宿主自己的语言，混在一起谁都不认识）。
 
+## 三·五、配置分层：共用 + 可独立
+
+**三层深合并，后者覆盖前者。**
+
+```
+1. 全局   ~/.searchfuse/config.json            ← 所有宿主的共同基线
+2. 项目   <cwd>/.searchfuse/config.json        ← 这个仓库的覆盖（可选）
+3. 宿主   ~/.searchfuse/hosts/<name>.json      ← 只给某个宿主的覆盖（可选）
+```
+
+**合并规则**：深合并，**后者已有的键覆盖前者，缺失的键继承前者**。
+
+举例——全局配了三个引擎，只想让 Claude 用另一个 exa key：
+
+```jsonc
+// ~/.searchfuse/config.json（全局，所有宿主）
+{ "engines": { "exa": { "apiKey": "key-A" }, "tavily": { "apiKey": "key-T" } } }
+
+// ~/.searchfuse/hosts/claudeCode.json（只影响 Claude）
+{ "engines": { "exa": { "apiKey": "key-B" } } }
+
+// 结果：Claude 用 key-B + 继承 tavily；其余宿主用 key-A + tavily
+```
+
+**为什么深合并而不是浅合并**：浅合并意味着写 `engines` 就整个替换引擎表，用户只想换一把 key 却要把整表抄一遍。深合并让「覆盖一个字段」真的只覆盖那一个字段。
+
+**为什么项目层可选**：多数人不需要按仓库区分密钥。需要的人（比如公司项目用自己的 exa key）放一个 `.searchfuse/config.json` 到仓库根即可，与 `CLAUDE.md` 的工作方式一致。
+
+**三家的读取方式**：
+
+| 宿主 | 全局 | 项目 | 宿主覆盖 |
+|---|---|---|---|
+| dsh | `ctx.tools.register` 侧读 | 读 `<cwd>/.searchfuse/` | 读 `hosts/dsh.json` |
+| Claude Code | `$.fs.read` 绝对路径 | `$.fs.read('.searchfuse/config.json')`（相对路径按会话 cwd 解析，官方文档确认） | `$.fs.read` 绝对路径 |
+| omp 扩展 | `node:fs` | `ctx.cwd` + 相对路径 | `node:fs` |
+
+**实现位置**：`src/config.ts` 加一个 `loadLayeredConfig(hostName, cwd)`，把三层合并成一份 `ModsearchConfig` 返回。三家都调它（dsh 通过 dist、Claude 通过 kernel.js 的 `--host` 参数、omp 扩展通过 kernel.js）。
+
+**注意**：`kernel.js` 要接受 `--host <name>` 与 `--cwd <dir>`，才能按宿主解析覆盖层。这是对既有 I/O 契约的扩展。
+
 ## 四、三家如何接管
 
 ### 4.1 dsh（保持现状，已实现）
@@ -147,11 +187,38 @@ const DEFAULT_MCP = {
 | **omp** | `mcp.json` 已有的跳过 | 写进 `mcpServers` | `~/.omp/agent/mcp.json` |
 | **Claude Code** | `~/.claude.json` 已有的跳过 | 写进 `plugin.json` 的 `mcpServers` | 插件清单 |
 
+**两级检测（两者都要）**：
+
+1. **是否已配置**：先查宿主自己的 MCP 配置里有没有同名 server。有就跳过，不重复注册。
+2. **是否可用**：对 HTTP 传输的 server 做一次可达性探测（`POST` 一个最小 JSON-RPC `initialize`，超时 3 秒）。连不上就跳过并报告原因。
+
+**为什么两者都要**：「已配过」避免重复注册；「能用」避免注册一个坏 server 让模型反复超时。探测失败不阻塞搜索——它只是不注册那个 MCP。
+
+**探测的代价**：每次 `hosts sync` 或宿主启动各一次，3 秒超时。可以缓存在 `~/.searchfuse/mcp-health.json`（带时间戳，5 分钟内复用）。
+
 **关键设计：默认集合放在 `~/.searchfuse/config.json` 的 `mcp` 段**。
 
 理由：这是共享层。用户在一处删掉 `grep`，三家都不会再注册它——不需要分别去三处删除。
 
-**`initConfigFile` 要写入默认 MCP**（现在 `CONFIG_TEMPLATE` 里没有）。
+**默认 MCP 不进 `CONFIG_TEMPLATE`**——这是既有测试钉住的规则（`config.test.ts:446`：
+
+> 「a default written into the file would silently outrank a future change to it」
+> 写进文件的默认值会静默压过未来的默认值变更。
+
+正确做法：默认集合是**代码里的常量**，在读取配置时与用户 `mcp` 段合并：
+
+```ts
+const DEFAULT_MCP = {
+  context7: { transport: 'streamable-http', url: 'https://mcp.context7.com/mcp' },
+  grep:     { transport: 'streamable-http', url: 'https://mcp.grep.app' },
+}
+
+// effectiveMcp(config) = { ...DEFAULT_MCP, ...config.mcp }
+//   用户写了同名 → 用户值胜出（可以改端点、可以 enabled: false 关掉）
+//   用户没写 → 用默认（端点升级时自动跟随）
+```
+
+这样「缺则注册」成立，且默认值将来变化时用户能自动受益。
 
 ## 七、配置 schema
 
@@ -160,10 +227,11 @@ const DEFAULT_MCP = {
   "engine": "",
   "engines": { ... },
   "aggregate": { "mode": "rrf", ... },
-  // 默认 MCP 集合。缺则三家各自注册；删掉某项就是三家都不要。
+  // MCP 覆盖。**留空即可**——默认值在代码里（DEFAULT_MCP）。
+  // 只有想改端点或关掉某个时才写这一项。
   "mcp": {
-    "context7": { "transport": "streamable-http", "url": "https://mcp.context7.com/mcp" },
-    "grep":     { "transport": "streamable-http", "url": "https://mcp.grep.app" }
+    // "context7": { "transport": "streamable-http", "url": "https://自己的实例" }
+    // "grep": { "enabled": false }   ← 关掉它
   },
   "hosts": {
     "dsh":        { "enabled": true },
@@ -179,7 +247,9 @@ const DEFAULT_MCP = {
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| M1 | `CONFIG_TEMPLATE` 加默认 MCP；`hosts sync` 三家各自补缺 | `init` 后配置含默认 MCP；对已有配置不覆盖 |
+| M0 | `loadLayeredConfig`：三层深合并 | 单测：全局+项目+宿主三层，后者覆盖前者、缺失继承 |
+| M1 | `DEFAULT_MCP` 常量 + `effectiveMcp()` 合并；`hosts sync` 三家各自补缺 | 用户不写也能拿到 context7/grep；写了覆盖默认；`config.test.ts:446` 仍通过（模板不含默认值） |
+| M1·5 | MCP 双检测：是否已配 + 可达性探测 | 探测连不上的 server 不被注册；已配的不重复 |
 | M2 | `omp/extension.ts`：同名覆盖 `web_search` | `omp -e ./omp/extension.ts -p "use web_search"` 命中我们的实现 |
 | M3 | Claude 的 `tool.list` 移除 `WebSearch` + 注册 `mcp__searchfuse__web_search` | `claude plugin validate` 绿；真机验证模型只看到我们的 |
 | M4 | dsh 保持现状，验证 MCP 默认集合生效 | 真机 `web_search` + `mcp__grep_*` 都可用 |
