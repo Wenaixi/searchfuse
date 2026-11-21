@@ -589,6 +589,9 @@ function postOf(payload: Record<string, unknown>): Record<string, unknown> {
   return {
     method: 'POST',
     url: '/searchfuse/config',
+    // 路由强制 application/json：跨站「简单请求」只能用 text/plain 等三种
+    // content-type，要求 JSON 就等于让它在 CORS 预检阶段被拒。
+    headers: { 'content-type': 'application/json' },
     [Symbol.asyncIterator]: async function* () {
       yield Buffer.from(JSON.stringify(payload));
     },
@@ -910,6 +913,10 @@ describe('dsh settings card route', () => {
     });
   });
 
+  // 这条曾经叫「without a plugin host/origin policy」，断言任意 Host/Origin 都放行。
+  // 那正好是本次修掉的漏洞：裸 webServer 不继承 dsh 的 Connection 鉴权，浏览器里
+  // 任意第三方页面都能用简单请求改 baseURL，把已存的密钥送到攻击者主机。
+  // 现在反向断言：非本机来源一律 403，且磁盘上的配置不会被改动。
   it.each([
     { host: 'dsh.example.com', origin: 'https://dsh.example.com' },
     { host: '192.168.1.10:3080', origin: 'http://192.168.1.10:3080' },
@@ -920,7 +927,7 @@ describe('dsh settings card route', () => {
       origin: 'https://dsh.example.com',
       'sec-fetch-site': 'cross-site',
     },
-  ])('reads and saves settings without a plugin host/origin policy: %j', async (headers) => {
+  ])('rejects non-loopback host or cross-site origin: %j', async (headers) => {
     await withConfig(
       { engine: 'tavily', engines: { tavily: { apiKey: 'tvly-secret' } } },
       async (handler, file) => {
@@ -929,19 +936,38 @@ describe('dsh settings card route', () => {
           url: '/searchfuse/config',
           headers,
         });
-        expect(read.status).toBe(200);
-        expect(read.body.engine).toBe('tavily');
-        expect(JSON.stringify(read.body)).not.toContain('tvly-secret');
+        expect(read.status).toBe(403);
 
         const write = await callRoute(handler, {
           ...postOf({ engine: 'exa' }),
           headers,
         });
-        expect(write.status).toBe(200);
-        expect(write.body.engine).toBe('exa');
-        expect(JSON.stringify(write.body)).not.toContain('tvly-secret');
+        expect(write.status).toBe(403);
+        // 关键：被拒之后磁盘上仍是原配置，攻击者没能改掉 baseURL。
         expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toEqual({
-          engine: 'exa',
+          engine: 'tavily',
+          engines: { tavily: { apiKey: 'tvly-secret' } },
+        });
+      },
+    );
+  });
+
+  it('rejects a POST that is not application/json (cross-site simple request)', async () => {
+    await withConfig(
+      { engine: 'tavily', engines: { tavily: { apiKey: 'tvly-secret' } } },
+      async (handler, file) => {
+        // 跨站「简单请求」只能带 text/plain 之类，浏览器不会触发预检。
+        const write = await callRoute(handler, {
+          method: 'POST',
+          url: '/searchfuse/config',
+          headers: { 'content-type': 'text/plain' },
+          [Symbol.asyncIterator]: async function* () {
+            yield Buffer.from(JSON.stringify({ engine: 'exa' }));
+          },
+        });
+        expect(write.status).toBe(415);
+        expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toEqual({
+          engine: 'tavily',
           engines: { tavily: { apiKey: 'tvly-secret' } },
         });
       },

@@ -1531,6 +1531,33 @@ function registerConfigRoute(ctx) {
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(body));
       };
+      // 同源守卫。裸的 webServer 注册表不继承 dsh 的 Connection 鉴权，宿主侧
+      // 也不施加任何 Host/Origin 策略，所以这条路由必须自己守：
+      //  - Host 必须指向本机回环，挡掉 DNS rebinding。
+      //  - Origin 若存在必须同源，挡掉跨站读取响应。
+      //  - POST 必须是 application/json：浏览器对非 JSON 的跨站 POST 可走
+      //    “简单请求”绕开 CORS 预检，强制 JSON 会让它在预检阶段就被拒。
+      const sameOrigin = (value) => {
+        if (typeof value !== 'string' || value === '') return true; // 非浏览器客户端没有 Origin
+        try {
+          const origin = new URL(value)
+          return origin.hostname === '127.0.0.1'
+            || origin.hostname === 'localhost'
+            || origin.hostname === '[::1]'
+        } catch {
+          return false
+        }
+      }
+      const hostIsLoopback = (() => {
+        const raw = req.headers?.host
+        if (typeof raw !== 'string' || raw === '') return true // 无 Host 头：非浏览器直连
+        const hostname = raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]
+        return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]'
+      })()
+      if (!hostIsLoopback || !sameOrigin(req.headers?.origin)) {
+        send(403, { error: 'request must come from the local host' })
+        return
+      }
       if (req.method === 'GET') {
         try {
           const summary = engineSummary();
@@ -1546,6 +1573,14 @@ function registerConfigRoute(ctx) {
       }
       if (req.method !== 'POST') {
         res.writeHead(405).end();
+        return;
+      }
+      // 必须是 application/json。跨站「简单请求」只能用
+      // text/plain、application/x-www-form-urlencoded、multipart/form-data
+      // 这三种 content-type，强制 JSON 就让它在 CORS 预检阶段被拒。
+      const contentType = String(req.headers?.['content-type'] ?? '');
+      if (!contentType.toLowerCase().includes('application/json')) {
+        send(415, { error: 'content-type must be application/json' });
         return;
       }
       try {
