@@ -26,6 +26,10 @@ export default defineConfig({
         main: resolve(__dirname, 'src/main.ts'),
         'mcp-protocol': resolve(__dirname, 'src/mcp/protocol.ts'),
         'mcp-registry': resolve(__dirname, 'src/mcp/registry.ts'),
+        // dsh/index.js 是手写 JavaScript，够不到 TypeScript 源码。配置的
+        // 白名单键清单必须能从这里读，否则两个写入方（CLI 的白名单重建、
+        // 卡片的整份回写）会各说各话。
+        'config-schema': resolve(__dirname, 'src/config-schema.ts'),
       },
       formats: ['es'],
     },
