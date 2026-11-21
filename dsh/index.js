@@ -684,7 +684,10 @@ function hasApiKeys(value) {
 
 /** ~/.searchfuse/config.json，每个 harness 共用的那一个文件。 */
 function modsearchConfigPath() {
-  return join(homedir(), '.modsearch', 'config.json');
+  // 与 src/config.ts 的 DIR_NAME 保持一致。这里曾返回 `.modsearch`，
+  // 于是冲突：CLI 读写 `.searchfuse`，卡片读写 `.modsearch`，同一段注释
+  // 却写着 `.searchfuse`。两个路径各存一份配置，改一边另一边看不到。
+  return join(homedir(), '.searchfuse', 'config.json');
 }
 
 /**

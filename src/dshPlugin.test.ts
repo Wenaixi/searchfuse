@@ -602,7 +602,7 @@ async function withConfig(
   pluginConfig: Record<string, unknown> = {},
 ): Promise<void> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-home-'));
-  const file = path.join(home, '.modsearch', 'config.json');
+  const file = path.join(home, '.searchfuse', 'config.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, typeof contents === 'string' ? contents : JSON.stringify(contents));
   // 只记录宿主原有的相关变量以便还原；是否清空由用例自己决定，
@@ -963,7 +963,7 @@ describe('dsh settings card route', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-home-'));
     created.push(home);
     const real = path.join(home, 'real.json');
-    const file = path.join(home, '.modsearch', 'config.json');
+    const file = path.join(home, '.searchfuse', 'config.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(real, JSON.stringify({ engine: 'tavily' }));
     fs.symlinkSync(real, file);
