@@ -31,6 +31,9 @@ import { spawnHidden } from './spawnHidden.js';
 // 只有 src/search.ts 一份。此处曾指向 dist/main.js（完整 CLI），但那个
 // 入口还带着 commander 的参数解析与 doctor/config 等子命令，搜索并不需要。
 const CLI_PATH = fileURLToPath(new URL('../dist/kernel.js', import.meta.url));
+// doctor 需要完整 CLI（子命令解析、config 读取），而 CLI_PATH 指向的是
+// 只认 --query 的搜索内核。两者不是同一个入口，不能共用一个常量。
+const DOCTOR_CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 // 由仓库里的一个测试与 src/schema.ts 保持同步；插件文件无法导入 TS 源码，
 // 且要保持完全零依赖（只用 node 内置模块）。
 const SEARCH_OUTPUT_SCHEMA = JSON.parse(
@@ -1270,6 +1273,92 @@ function applyCardSettings(patch) {
     config.searxng = searxngBase;
   }
 
+  // 外部实例地址与代理。空串表示清掉（回到官方端点 / 跟随环境）。
+  // 它与 searxngEmbedded 共同表达「用哪一个实例」：地址非空则外部优先，
+  // 否则看随包开关。
+  if (patch?.searxngExternalURL !== undefined) {
+    if (config.engines !== undefined && !isPlainObject(config.engines)) {
+      throw new Error('the "engines" section of the config file is not an object');
+    }
+    config.engines = { ...(isPlainObject(config.engines) ? config.engines : {}) };
+    var searxngEngineEntry =
+      isPlainObject(config.engines.searxng) ? { ...config.engines.searxng } : {};
+    var externalURL = typeof patch.searxngExternalURL === 'string'
+      ? patch.searxngExternalURL.trim()
+      : '';
+    if (externalURL === '') {
+      delete searxngEngineEntry.baseURL;
+    } else {
+      if (!/^https?:\/\//i.test(externalURL)) {
+        throw new Error(`invalid SearXNG base URL: ${externalURL}. Use a full http(s) URL`);
+      }
+      searxngEngineEntry.baseURL = externalURL;
+    }
+    if (patch.searxngExternalProxy !== undefined) {
+      var externalProxy = typeof patch.searxngExternalProxy === 'string'
+        ? patch.searxngExternalProxy.trim()
+        : '';
+      if (externalProxy === '') {
+        delete searxngEngineEntry.proxy;
+      } else {
+        if (!isValidProxyValue(externalProxy)) {
+          throw new Error(`invalid SearXNG proxy: ${externalProxy}`);
+        }
+        searxngEngineEntry.proxy = externalProxy;
+      }
+    }
+    config.engines.searxng = searxngEngineEntry;
+  }
+
+  // 批量上游引擎规则：{ <engineName>: { enabled?: bool, proxy?: string } }。
+  //
+  // 每条都先复制现有规则再逐字段覆盖，所以 UI 没暴露的 network /
+  // using_tor_proxy 不会被一次保存擦掉。这也是「卡片不展示的字段必须
+  // 原样保留」这条红线的落点。
+  if (patch?.searxngRules !== undefined) {
+    if (!isPlainObject(patch.searxngRules)) {
+      throw new Error('searxngRules must be an object of engine rules');
+    }
+    if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
+      throw new Error('the "searxng" section of the config file is not an object');
+    }
+    var rulesBase = { ...(isPlainObject(config.searxng) ? config.searxng : {}) };
+    var rulesEngines = isPlainObject(rulesBase.engines) ? { ...rulesBase.engines } : {};
+    for (var [ruleKey, ruleValue] of Object.entries(patch.searxngRules)) {
+      if (!isPlainObject(ruleValue)) {
+        throw new Error(`searxngRules.${ruleKey} must be an object`);
+      }
+      var existing = isPlainObject(rulesEngines[ruleKey]) ? { ...rulesEngines[ruleKey] } : {};
+      if (ruleValue.enabled !== undefined) {
+        if (ruleValue.enabled === true) {
+          // 「启用」是默认态，删掉 disabled 而不是写 false——与既有写法一致。
+          delete existing.disabled;
+        } else {
+          existing.disabled = true;
+        }
+      }
+      if (ruleValue.proxy !== undefined) {
+        var proxyLines = proxiesFromPatch(ruleValue.proxy, `searxngRules.${ruleKey}.proxy`);
+        if (Object.keys(proxyLines).length === 0) {
+          delete existing.proxies;
+        } else {
+          existing.proxies = proxyLines;
+        }
+      }
+      if (Object.keys(existing).length > 0) {
+        rulesEngines[ruleKey] = existing;
+      } else {
+        delete rulesEngines[ruleKey];
+      }
+    }
+    if (Object.keys(rulesEngines).length === 0) {
+      delete rulesBase.engines;
+    } else {
+      rulesBase.engines = rulesEngines;
+    }
+    config.searxng = rulesBase;
+  }
+
   if (patch?.searxngOutgoingProxies !== undefined) {
     if (config.searxng !== undefined && !isPlainObject(config.searxng)) {
       throw new Error('the "searxng" section of the config file is not an object');
@@ -1447,7 +1536,7 @@ const READINESS_ROLES = ['search', 'social', 'fetch'];
 let readinessCache = null;
 
 async function engineReadiness() {
-  const cli = process.env.MODSEARCH_DSH_CLI || CLI_PATH;
+  const cli = process.env.MODSEARCH_DSH_CLI || DOCTOR_CLI_PATH;
   if (readinessCache !== null && readinessCache.cli === cli) {
     if (Date.now() - readinessCache.at < READINESS_TTL_MS) {
       return readinessCache.value;
@@ -1582,6 +1671,45 @@ function validateProxiesShape(proxies, where) {
     }
   }
   return null;
+}
+
+/**
+ * 把「一行一个代理」的文本转成 proxies 结构。
+ *
+ * 卡片用文本框承载逐引擎代理（一行一个），这里负责把它规范成
+ * `{ 'all://': [...] }`。空文本 = 清掉该引擎的代理覆盖。
+ *
+ * 校验与 `parseProxiesPatch` 同源：协议只认 http(s)/socks5(h)，
+ * 缺 scheme 或主机都当场报错，而不是等实例启动时才炸。
+ */
+function proxiesFromPatch(text, where) {
+  var raw = typeof text === 'string' ? text : '';
+  var lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  if (lines.length === 0) return {};
+  var parsed = [];
+  for (var line of lines) {
+    var url;
+    try {
+      url = new URL(line);
+    } catch {
+      throw new Error(
+        `${where}: invalid proxy "${line}". Include a scheme, e.g. http://127.0.0.1:7890`,
+      );
+    }
+    if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(url.protocol)) {
+      throw new Error(
+        `${where}: unsupported scheme "${url.protocol.replace(':', '')}" in "${line}"`,
+      );
+    }
+    if (url.hostname === '') {
+      throw new Error(`${where}: invalid proxy "${line}": missing host`);
+    }
+    parsed.push(line);
+  }
+  return { 'all://': parsed.length === 1 ? parsed[0] : parsed };
 }
 
 /**

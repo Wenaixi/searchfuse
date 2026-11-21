@@ -151,9 +151,9 @@ export interface SearxngConfig {
   /**
    * 是否启用随包实例。
    *
-   * 默认关闭：那个实例是一个约 22 MiB 的原生产物，第一次启动要解压与建索引，
-   * 把它设成默认会让每台裸机的第一次搜索都去拉它。只有用户明确要「不配外部
-   * 实例也能搜」时才打开，此时 `engines.searxng.baseURL` 留空即可。
+   * **默认开启**：装完即可搜索，无需先配外部实例。显式写 `false` 才关闭。
+   * 它与 `engines.searxng.baseURL` 的分工是：填了 baseURL 就用用户的实例，
+   * 留空则用随包实例。
    *
    * 若同时配了 `baseURL`，以 `baseURL` 为准，这个开关不再起作用。
    */
@@ -861,7 +861,9 @@ export function engineSettings(
   // 随包实例是顶层 `searxng.embedded` 的策略，不是某个引擎的密钥或端点，
   // 所以它不在 engines 命名空间里；这里把它派生进 settings，好让只拿得到
   // EngineSettings 的 isAvailable 能据实回答。
-  if (engineName === 'searxng' && config.searxng?.embedded === true) {
+  // 随包实例**默认开启**：用户装完就能搜，不必先配外部实例。
+  // 显式写 `embedded: false` 才关；写 `baseURL` 则以用户实例为准。
+  if (engineName === 'searxng' && config.searxng?.embedded !== false) {
     settings.embedded = true;
   }
   // 一个「除非点名否则关闭」的引擎，只在文件没有表态时才采用该默认。
