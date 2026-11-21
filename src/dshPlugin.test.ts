@@ -1422,6 +1422,30 @@ describe('dsh settings card route', () => {
     });
   });
 
+  it('turns the bundled instance off when an external one is chosen', async () => {
+    // 三态互斥的核心契约：切到外部时，随包开关必须让位。否则两份来源同时
+    // 在场，谁优先就变成实现细节而非用户的选择。
+    await withConfig({ engine: '', searxng: { embedded: true } }, async (handler, file) => {
+      // 卡片切到 external 时，一次提交里同时带这两项。
+      await callRoute(
+        handler,
+        postOf({
+          searxngEmbedded: false,
+          searxngExternalURL: 'https://searx.example.com',
+        }),
+      );
+      const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(saved.searxng.embedded).toBe(false);
+      expect(saved.engines.searxng.baseURL).toBe('https://searx.example.com');
+
+      // 再切回内置：地址必须被清掉，内置必须显式为 true。
+      await callRoute(handler, postOf({ searxngEmbedded: true, searxngExternalURL: '' }));
+      const back = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(back.searxng.embedded).toBe(true);
+      expect(Object.hasOwn(back.engines.searxng || {}, 'baseURL')).toBe(false);
+    });
+  });
+
   it('keeps upstream rule fields the card never shows', async () => {
     // 防数据丢失红线：卡片只暴露 enabled/proxies，但配置文件里可能还有
     // network / using_tor_proxy。一次只改开关的保存绝不能把它们擦掉。
@@ -1520,7 +1544,8 @@ describe('dsh settings card route', () => {
     // 否则设置页与外发行为不一致。
     await withConfig({ engine: '' }, async (handler) => {
       const { body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
-      expect(body.searxng.embedded).toBe(true);
+      const searxng = body.searxng as { embedded: boolean };
+      expect(searxng.embedded).toBe(true);
     });
   });
 

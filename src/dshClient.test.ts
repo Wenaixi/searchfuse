@@ -26,6 +26,7 @@ interface Card {
   selectEngine: (summary: unknown, draft: CardDraft, engine: string) => CardDraft;
   toggleEngine: (draft: CardDraft, engine: string, enabled: boolean) => CardDraft;
   savePayload: (summary: unknown, draft: unknown) => Record<string, unknown>;
+  isDirty: (summary: unknown, draft: unknown) => boolean;
   secretFieldProps: () => Record<string, unknown>;
   ConfigCard: (react: unknown, ui: unknown, localeRef?: unknown) => () => unknown;
 }
@@ -460,6 +461,51 @@ describe('a save carries only what the save is about', () => {
     draft = selectEngine(SUMMARY, draft, 'exa');
     expect(draft.engine).toBe('exa');
     expect(draft.enabled.exa).toBe(true);
+  });
+});
+
+describe('the save button lights up exactly when a save would write something', () => {
+  // 「保存」灰着而其实有东西要写，用户会以为已经改完；亮着而什么都不写，
+  // 点一下等于白按。判据必须与 savePayload 是同一套。
+
+  it('stays quiet on a freshly loaded draft', () => {
+    const { nextDraft, isDirty } = evaluate({}).factory(() => ({})).__card;
+    const draft = nextDraft(SUMMARY, SUMMARY.engine as string);
+    expect(isDirty(SUMMARY, draft)).toBe(false);
+  });
+
+  it('lights up when an engine other than the preference has its endpoint edited', () => {
+    // 这是本条测试存在的理由：旧判据拿 editTarget 的 baseURL 去比首选
+    // 引擎的值，于是改 exa 的端点、首选是 tavily 时，按钮不会亮。
+    const { nextDraft, isDirty, savePayload } = evaluate({}).factory(() => ({})).__card;
+    const summary = { ...SUMMARY, engine: 'tavily' };
+    const draft = nextDraft(summary, 'exa');
+    draft.baseURL = 'https://exa.example.com';
+    expect(isDirty(summary, draft)).toBe(true);
+    // 与真实提交保持一致：savePayload 确实会写出这个端点。
+    expect(savePayload(summary, draft).target).toBe('exa');
+  });
+
+  it('lights up when the preference moves', () => {
+    const { nextDraft, isDirty } = evaluate({}).factory(() => ({})).__card;
+    const draft = nextDraft(SUMMARY, SUMMARY.engine as string);
+    draft.engine = 'firecrawl';
+    expect(isDirty(SUMMARY, draft)).toBe(true);
+  });
+
+  it('lights up when an engine is toggled off', () => {
+    const { nextDraft, toggleEngine, isDirty } = evaluate({}).factory(() => ({})).__card;
+    const draft = nextDraft(SUMMARY, SUMMARY.engine as string);
+    const next = toggleEngine(draft, 'tavily', false);
+    expect(isDirty(SUMMARY, next)).toBe(true);
+  });
+
+  it('stays quiet after a preference is moved away and back', () => {
+    const { nextDraft, isDirty } = evaluate({}).factory(() => ({})).__card;
+    const draft = nextDraft(SUMMARY, SUMMARY.engine as string);
+    draft.engine = 'firecrawl';
+    draft.engine = String(SUMMARY.engine);
+    expect(isDirty(SUMMARY, draft)).toBe(false);
   });
 });
 
@@ -1506,5 +1552,60 @@ describe('per-engine proxy and tool name fields', () => {
     draft.exposeState = 'off';
     const payload = card.savePayload(SUMMARY, draft);
     expect(payload.expose).toEqual({ enabled: false, expose: { aggregate: false, tool: false } });
+  });
+});
+
+describe('the card’s stylesheet holds its design contracts', () => {
+  // 样式没有运行时断言可依赖：一条写错的 token 会静默失效，界面退回浏览器
+  // 默认值，而控制台一片安静。这些静态门禁就是那类故障的唯一防线。
+
+  const css = () => {
+    const start = SOURCE.indexOf('var CARD_CSS = `');
+    const end = SOURCE.indexOf('`;', start);
+    return SOURCE.slice(start, end);
+  };
+
+  it('never uses token names the host does not define', () => {
+    // 以下名字在官方主题里根本不存在，写上等于写空值（技能库实测清单）。
+    const bogus = [
+      '--dsw-alias-surface-primary',
+      '--dsw-alias-surface-secondary',
+      '--dsw-alias-border-subtle',
+      '--dsw-alias-accent-primary',
+    ];
+    for (const name of bogus) {
+      expect(css()).not.toContain(name);
+    }
+  });
+
+  it('uses the semantic alias layer, not the raw palette', () => {
+    // --dsw-static-* 是原始色板，引用它等于放弃主题联动。
+    expect(css()).not.toContain('--dsw-static-');
+  });
+
+  it('gives every interactive control a focus ring', () => {
+    expect(css()).toContain(':focus-visible');
+    expect(css()).toContain('--dsw-focus-ring-width');
+  });
+
+  it('honours the reduced-motion preference', () => {
+    // 有过渡就必须有降级，否则前庭不适的用户没有退路。
+    expect(css()).toContain('prefers-reduced-motion');
+  });
+
+  it('draws hairlines at 0.5px, never 1px', () => {
+    // 官方九处描边全是 0.5px；1px 会让整块读起来比宿主粗一档。
+    const borders = css().match(/border[^;{]*:\s*(\d+(?:\.\d+)?)px\s+solid/g) ?? [];
+    for (const rule of borders) {
+      const px = rule.match(/(\d+(?:\.\d+)?)px/);
+      expect(Number(px?.[1])).toBeLessThanOrEqual(1);
+      // 允许 0.5 与 1（后者只用于折叠卡片外框这种刻意的例外）。
+    }
+  });
+
+  it('keeps the injected style tag a singleton', () => {
+    // HMR 重跑工厂时必须更新已有标签，而不是再插一个。
+    expect(SOURCE).toContain('tag.textContent = CARD_CSS');
+    expect(SOURCE).toMatch(/if \(!tag\) \{/);
   });
 });

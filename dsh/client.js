@@ -529,6 +529,71 @@ window.__ModuleLoader__.load({
       return next;
     }
 
+    /**
+     * 这份草稿是否会被一次保存写出东西。
+     *
+     * 判据必须与 savePayload 逐条对齐，否则会出现两种相反的错误：
+     * 按钮在会写出东西时灰着（用户以为改完了，其实没保存），或者在什么
+     * 都不会写出时亮着（点一下「保存」，文件一动没动）。
+     *
+     * 引擎字段一律按 `editTarget` 比，不是按 `engine`：前者是「正在改哪个
+     * 引擎」，后者是「首选哪个引擎」。两者独立，用错一个就会出现「改 exa
+     * 的端点、首选却是 tavily，于是按钮不亮」。
+     */
+    function isDirty(summary, draft) {
+      if (draft.engine !== summary.engine) {
+        return true;
+      }
+      var enabledChanged = Object.keys(draft.enabled || {}).some(
+        (name) =>
+          (draft.enabled[name] !== false) !== (summary.engines?.[name]?.enabled !== false),
+      );
+      if (enabledChanged) {
+        return true;
+      }
+      // MCP 编辑区。
+      if (draft.mcpTarget !== '') {
+        var mcpServer = (summary.mcp || {})[draft.mcpTarget] || {};
+        if (draft.mcpProxy !== '') return true;
+        if (draft.mcpUrl !== (mcpServer.url || '')) return true;
+        if (draft.mcpEnabled !== (mcpServer.enabled !== false)) return true;
+      }
+      // SearXNG 三态与它名下的字段。
+      if (typeof draft.searxngMode === 'string' && draft.searxngMode !== searxngModeOf(summary)) {
+        return true;
+      }
+      if (proxiesToText(summary?.searxng?.outgoing) !== (draft.searxngDefaultProxy || '')) {
+        return true;
+      }
+      var rulesDraft = isPlainObject(draft.searxngRules) ? draft.searxngRules : {};
+      for (var ruleName of Object.keys(rulesDraft)) {
+        var before = (summary?.searxng?.engines || {})[ruleName] || {};
+        var after = rulesDraft[ruleName] || {};
+        var beforeEnabled = before.disabled !== true;
+        var beforeProxy = proxiesToText(before.proxies);
+        if ((after.enabled !== false) !== beforeEnabled) return true;
+        if ((after.proxy || '') !== beforeProxy) return true;
+      }
+      // 被编辑的那个引擎自己的字段。
+      var editName = draft.editTarget || '';
+      if (editName !== '') {
+        var pristine = nextDraft(summary, editName);
+        var canKey = keyed(summary, editName);
+        var canModel = modelled(summary, editName);
+        var canEndpoint = endpointable(summary, editName);
+        if (draft.exposeState !== pristine.exposeState) return true;
+        if (canKey && draft.apiKey !== '') return true;
+        if (canEndpoint && draft.baseURL !== pristine.baseURL) return true;
+        if (canModel && draft.model !== pristine.model) return true;
+        if (draft.proxy !== '') return true;
+        var exposesTool = draft.exposeState === 'tool' || draft.exposeState === 'both';
+        if (exposesTool && draft.toolName !== '' && draft.toolName !== pristine.toolName) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     // 一次保存到底在保存什么。固定偏好只在选择框被移动过时带上；引擎字段
     // 只在被编辑过时带上，而且只带那个引擎真正拥有的字段。若每次都把全部
     // 内容一并提交，就会固定一个没人选过的引擎，还会把卡片加载时读到的
@@ -1259,10 +1324,33 @@ window.__ModuleLoader__.load({
 }
 
 /* 可交互元素一律有焦点环。--dsw-focus-ring-color 实测为空，
-   所以用 state-business-primary。 */
-:where(.sf-control, .sf-btn, .sf-row button):focus-visible {
+   所以用 state-business-primary。
+   覆盖面刻意用「凡是本卡片里可点、可输入的东西」：官方 primitives
+   （Switch / Button / DisclosureRow / SegmentedControl）内部已经处理过
+   自己的焦点态，这里补的是自绘控件与按钮。 */
+:where(
+  .sf-control,
+  .sf-btn,
+  .sf-row button,
+  .sf-fold,
+  .sf-upstream-row input,
+  .sf-adder input,
+  .sf-adder button
+):focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;
+}
+
+/* 尊重系统的「减少动态效果」设置。本卡片自己只有三处过渡：引擎行的
+   背景、折叠箭头、页脚。全部降级为瞬时，不让动画成为前庭不适的来源。 */
+@media (prefers-reduced-motion: reduce) {
+  .sf-root *,
+  .sf-root::before,
+  .sf-root::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* 窄容器（老宿主的侧栏槽）：横向栅格退化为纵向堆叠，避免横向滚动条。 */
@@ -1913,19 +2001,9 @@ window.__ModuleLoader__.load({
             // aria-live 强度不同，所以先算出来给页脚用。
             const noteIsError =
               note !== '' && note !== t.saving && note !== t.saved;
-            // 与 savePayload 衡量的是同一份列表，所以按钮绝不会在一次
-            // 保存不会携带的改动上亮起来。
-            const dirty =
-              draft.engine !== summary.engine ||
-              Object.keys(draft.enabled || {}).some(
-                (name) =>
-                  (draft.enabled[name] !== false) !== (summary.engines?.[name]?.enabled !== false),
-              ) ||
-              draft.apiKey !== '' ||
-              (draft.baseURL !== '' && draft.baseURL !== (summary.engines?.[summary.engine] || {}).baseURL) ||
-              draft.model !== '' ||
-              draft.proxy !== '' ||
-              draft.toolName !== '';
+            // 与 savePayload 走同一份判据，所以「保存」只会在真的会写出
+            // 东西时亮起，也不会在会写出东西时保持灰着。
+            const dirty = isDirty(summary, draft);
 
             // ── 状态总览 ─────────────────────────────────────────
             //
@@ -2731,6 +2809,7 @@ window.__ModuleLoader__.load({
       selectEngine: selectEngine,
       toggleEngine: toggleEngine,
       savePayload: savePayload,
+      isDirty: isDirty,
       secretFieldProps: secretFieldProps,
       ConfigCard: ConfigCard,
     };
