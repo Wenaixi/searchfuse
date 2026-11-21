@@ -159,6 +159,9 @@ searchfuse/
 
 **底层函数已存在（实测）**：`src/search.ts:203` 已有 `export async function runSearch(options: RunSearchOptions): Promise<RunSearchResult>`，返回的 `RunSearchResult` 含 `meta.durationSeconds`（恰好是 Claude Code `WebSearchOutput` 的必需字段）。所以 `kernel.ts` 只是一层薄包装，不是新逻辑。
 
+**该薄包装已实测编译通过（v6）**：用一段等价代码（argv 解析 → `runSearch` → stdout JSON）跑 `tsc --noEmit`，除缺 `@types/node` 的 `process` 之外**零类型错误**。说明 `RunSearchOptions` 的字段映射与返回值序列化都对得上，S1⑤ 的契约不是纸上要求。
+
+
 **kernel 的 I/O 契约（v5 写死，v4 未定义）**：
 
 ```
