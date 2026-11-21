@@ -129,6 +129,26 @@ export interface ModsearchConfig {
    * 它从不授权把保留地址（或解析到保留地址的目标）发给 Firecrawl。默认关闭。
    */
   allowPrivateNetwork?: boolean;
+  /**
+   * 每个宿主是否接入。`false` 表示不接管该宿主（dsh 不注册 search provider、
+   * Claude Code 的 hook 直接放行、omp 的配置被 hosts sync 改回公网）。
+   * 缺省视为接入。
+   */
+  hosts?: {
+    dsh?: { enabled?: boolean };
+    claudeCode?: { enabled?: boolean };
+    omp?: { enabled?: boolean };
+  };
+  /**
+   * 本地服务的设置。仅 omp 需要它——dsh 与 Claude Code 走进程内内核调用，
+   * 不经过这个服务。
+   */
+  serve?: {
+    /** 首选端口。被占用时不漂移，直接让需要它的宿主降级。 */
+    port?: number;
+    /** 空闲多少秒后退出。0（默认）表示不退出。 */
+    idleExitSeconds?: number;
+  };
 }
 
 /** 角色偏好收敛成单个字段之前，旧配置使用的形状。 */
@@ -397,6 +417,15 @@ export function migrateLegacyConfig(raw: ModsearchConfig & LegacyConfig): Modsea
   // mcp 段抹掉。它不会报错，只会让工具在下次加载时安静地消失。
   if (raw.mcp !== undefined) {
     config.mcp = raw.mcp;
+  }
+  // 三宿主改造新增的两段。放在这里而不是各写一个 if，是因为这个函数的
+  // 陷阱没有尽头：每加一个顶层段就要记得补一行，漏了不报错。清单放在
+  // config-schema.ts 里，dsh 侧（手写 JS，够不到 TS 源码）通过
+  // dist/config-schema.js 读同一份，两个写入方才不会各说各话。
+  for (const key of ['hosts', 'serve'] as const) {
+    if (raw[key] !== undefined) {
+      config[key] = raw[key];
+    }
   }
   if (seenApiKeys.size > 0) {
     SEEN_API_KEYS.set(config, [...seenApiKeys]);

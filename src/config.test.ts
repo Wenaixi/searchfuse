@@ -39,6 +39,26 @@ describe('config file', () => {
     expectPosixMode(p, 0o600);
   });
 
+  it('keeps the new top-level sections across config set', () => {
+    // 回归：`migrateLegacyConfig` 是白名单重建，新增的顶层段忘记搬运
+    // 就会在每一次 `config set` 之后静默消失。hosts/serve 是后加的，
+    // 正是这个陷阱的最新实例。
+    const p = tempConfigPath();
+    fs.writeFileSync(
+      p,
+      JSON.stringify({
+        hosts: { dsh: { enabled: true }, omp: { enabled: false } },
+        serve: { port: 7799, idleExitSeconds: 0 },
+      }),
+    );
+
+    setConfigValue('engine', 'tavily', p);
+
+    const config = loadConfigFile(p);
+    expect(config.hosts).toEqual({ dsh: { enabled: true }, omp: { enabled: false } });
+    expect(config.serve).toEqual({ port: 7799, idleExitSeconds: 0 });
+  });
+
   it('rejects unknown fields and malformed keys', () => {
     const p = tempConfigPath();
     expect(() => setConfigValue('tavily.password', 'x', p)).toThrow('Unknown engine setting');

@@ -234,7 +234,9 @@ dsh 现有 `runCli()` 传 `-q/--source/--timeout/--deadline`（`dsh/index.js:227
 }
 ```
 
-**`serve.token` 不在这份 schema 里**（v2 曾把它写成两个真身）。token 只存在于 `~/.searchfuse/serve-token`（0600），与配置分离——配置会被用户手动编辑、复制、备份，秘密不该跟着走。
+**`serve.token` 不在这份 schema 里**（v2 曾把它写成两个真身）。token 只存在于 `~/.searchfuse/serve-token`，与配置分离——配置会被用户手动编辑、复制、备份，秘密不该跟着走。
+
+**跨平台权限的真实边界（v8 实测）**：POSIX（Linux/macOS）上创建该文件用 `mode: 0o600`，有效。**Windows 上 `chmodSync(0o600)` 不报错但完全不生效**——实测写入后 `stat` 仍是 `666`。因此 Windows 侧的 token 对同机其他用户账户是**可读的**。这不改变设计（token 只保护 127.0.0.1 上的本地服务，且 Windows 的 `%USERPROFILE%` 默认只有本账户可访问），但**不能声称 0600 在所有平台生效**。`doctor` 在 Windows 上跳过权限判定，与 `docs/security.md:13` 的既有口径一致。
 
 **两个写入方必须共用白名单（v3 新增 CRITICAL，实测发现）**：
 
@@ -308,7 +310,7 @@ v4 给出三条启动路径，且**默认不空闲退出**：
 
 服务持有 API key 且提供 `/v1/read-page`。**只有一个消费者（omp），所以只有一个 token。**
 
-- 启动时生成随机 token，写入 `~/.searchfuse/serve-token`（0600）
+- 启动时生成随机 token，写入 `~/.searchfuse/serve-token`（POSIX 用 `0o600`；Windows 忽略权限位，见 §4.2 的跨平台说明）
 - **除 `/healthz` 外的全部端点**校验 `Authorization: Bearer <token>`（`/healthz` 免鉴权，见 §5.3）
 - **token 轮换的处理（v6 补）**：服务重启会换 token；`hosts sync` 只在安装时写一次，重启后 omp 会拿旧 token 撞 401 然后**静默回公网**。处置：服务启动时若检测到 omp 配置指向自己且 token 已变，**打印可直接复制执行的修复命令原文**（`searchfuse hosts sync`）；`doctor` 输出同样的命令而不只是「指向它」。**不自动改写 omp 配置**（越界），但必须有可操作的信号。
 - omp 用原生 `searxng.token`（`searxng.ts:143` 确认发 `Authorization: Bearer`）
@@ -556,6 +558,32 @@ v1 的验收可被 40 行桩骗过，v2 的 S4 经实测也无效——`claude p
 ## 十一、分发
 
 `package.json` 的 `files` 当前不含 `claude/` 与 `omp/`（实测 `npm pack --dry-run` 33 个文件里两者都是 0 条）：需补全两项。
+
+## 十一·五、跨平台（Linux / macOS / Windows）
+
+三宿主都要在三个平台上可用。不是"顺便兼容"，是**硬约束**——每条都要有对应的实现方式或明确的降级说明。
+
+| 关注点 | Linux / macOS | Windows | 实现方式 |
+|---|---|---|---|
+| 拉起子进程 | `process.execPath` | 同左 | 直接用 `process.execPath`，三平台一致；**不要**用 `'node'` 裸名（Windows 上不保证在 PATH） |
+| 可执行文件后缀 | 无 | `.exe` | 需要解析外部 `curl`/`agy` 时用 `src/system.ts` 的 `platform === 'win32' && extname === '' ? [bin + '.exe'] : [bin]`（已有） |
+| 路径拼接 | `/` | `\` | 一律 `path.join` / `path.dirname`，**禁止**手写 `'/'` 拼路径；URL 里的 `/` 除外 |
+| `~` 展开 | shell 负责 | 同左 | Node 代码里一律 `os.homedir()`，不解析 `~`（已有 `src/config.ts:144`） |
+| 文件权限 `0o600` | 生效 | **静默无效** | 见 §4.2：POSIX 用 mode，Windows 跳过判定；`doctor` 不报 Windows 的权限问题 |
+| 目录 `0o700` | 生效 | 静默无效 | 同上 |
+| 原子写（临时文件 + rename） | `renameSync` 原子 | **同样可用**（已实测） | `src/config.ts:710-731` 的「写临时文件 → rename」在三平台都成立。实测 Windows 上 `fs.renameSync(tmp, existing)` 成功覆盖，内容为新值——Node 内部已处理 POSIX/Windows 差异，**不需要额外兼容代码** |
+| 端口 7799 被占 | 报错并降级 | 同左 | 行为一致，不依赖平台 |
+| 服务进程随父进程退出 | 需显式 `detached: false` | 同左 | `spawn` 默认不 detach；`serve --ensure` 拉起后由服务自己管生命周期 |
+| 换行符 | LF | CRLF | 写配置一律 `JSON.stringify(…, null, 2)` + `'\n'`，不依赖平台默认；读入用 `split(/\r?\n/)` |
+| 路径大小写 | 大小写敏感 | **不敏感** | 比较路径时不要假设大小写敏感（例如 `hosts sync` 判断"是否已安装"时用 `realpath` 归一） |
+
+**已实测（Windows）**：
+
+1. ✅ `fs.renameSync(tmp, existing)` **成功覆盖**，内容为新值——原子写方案无需平台分支
+2. ✅ `spawn(process.execPath, [脚本, '--query', 'hello'])` 完整可用：exit 0、参数正确传递、stdout 可读
+3. ⬜ macOS 的 `0o600` 生效情况尚未实测（POSIX 语义与 Linux 一致，风险低）
+
+**实测得到的平台差异只有一处需要代码分支**：`0o600` 在 Windows 静默无效（`stat` 仍 `666`）。其余（`execPath`、`rename`、路径拼接、换行）三平台行为一致，因此**不为它们写 `if (platform === 'win32')` ——那才是真正的过度工程**。
 
 ## 十二、CLI 落点
 
