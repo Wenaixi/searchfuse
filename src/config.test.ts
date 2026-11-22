@@ -591,6 +591,27 @@ describe('migrateLegacyDir', () => {
       restore();
     }
   });
+
+  it('不把旧目录里的 cache.json 搬过来', () => {
+    // 回归：缓存功能已删除，但迁移会把旧目录的每个文件都 copyFileSync 过去，
+    // 于是「删掉新目录的 cache.json，每次运行又复活」，且 mtime 永远是旧的。
+    // 判据是缓存文件不出现，而其余文件照常迁移。
+    const { home, restore } = setup({ engine: 'tavily' }, { engine: 'tavily' });
+    try {
+      const legacyDir = path.join(home, '.modsearch');
+      const currentDir = path.join(home, '.searchfuse');
+      fs.writeFileSync(path.join(legacyDir, 'cache.json'), '{"k":{"items":[]}}');
+      fs.writeFileSync(path.join(legacyDir, 'state.json'), '{"quota":1}');
+
+      migrateLegacyDir();
+
+      expect(fs.existsSync(path.join(currentDir, 'cache.json'))).toBe(false);
+      // 同一个循环里别的文件仍然要搬：跳过名单只认名字，不误伤。
+      expect(fs.existsSync(path.join(currentDir, 'state.json'))).toBe(true);
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe('loadLayeredConfig', () => {

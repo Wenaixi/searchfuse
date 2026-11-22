@@ -1,5 +1,4 @@
 import {
-  aggregateCacheTtlMs,
   aggregateDeadlineMs,
   aggregateMode,
   engineSettings,
@@ -10,7 +9,6 @@ import {
 import { coolingEngineEntry, coolingEntry, type CooldownController } from './cooldown.ts';
 import { fanout, type FanoutTarget } from './aggregate/fanout.ts';
 import { rrfFuse } from './aggregate/rrf.ts';
-import { cacheKey, currentCachePath, pruneCache, readCache, writeCache } from './aggregate/cache.ts';
 import {
   allEngines,
   enginesForRole,
@@ -137,9 +135,6 @@ export interface RunSearchResult {
     durationSeconds: number;
   };
 }
-
-/** 缓存融合结果的上限，让文件大小有界，无需后台任务来清理。 */
-const CACHE_ENTRY_CAP = 100;
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 // 先给引擎自己的超时一个开火的机会；SIGTERM 只是兜底。
@@ -355,30 +350,10 @@ async function runFused(
     allowPrivateNetwork: options.allowPrivateNetwork === true || config.allowPrivateNetwork === true,
   };
   const budgetMs = aggregateDeadlineMs(config);
-  // 重复的查询会真实消耗免密钥引擎的额度（Firecrawl 的每月额度、
-  // You.com 的每日每 IP 配额），而智能体在收窄问题的过程中往往会把
-  // 同一句话问两遍。一份短期的磁盘缓存能把第二次提问变成一次磁盘读取。
-  //
-  // 缓存键里包含引擎集合，因为不同的集合就是不同的答案；
-  // 它不包含引擎顺序，因为那是路由，不是问题本身。
-  const cachePath = currentCachePath();
-  const cacheTtl = aggregateCacheTtlMs(config);
-  const key = cacheKey({
-    query: query ?? '',
-    maxResults: request.maxResults ?? 10,
-    engines: targets.map((t) => t.engine.name),
-  });
-  const cached = readCache(cachePath, key, new Date(), cacheTtl);
-  if (cached !== undefined && Array.isArray(cached.items)) {
-    return buildFusedResult({
-      items: cached.items as Array<Record<string, unknown>>,
-      engines: cached.engines ?? targets.map((t) => t.engine.name),
-      failures: cached.failures ?? [],
-      skipped,
-      durationSeconds: 0,
-      fromCache: true,
-    });
-  }
+  // 不再有融合结果缓存：曾有一份短期磁盘缓存，把重复查询变成一次磁盘读取，
+  // 省下免密钥引擎的额度。它的代价是「同一个问题问两次，第二次可能拿到旧的
+  // 答案，而你无从知道」——这在检索场景里是危险的，因为用户要的往往正是
+  // 最新的那条。额度问题交给引擎自己的限流与冷却处理，答案新鲜度优先。
   let fanoutResult: Awaited<ReturnType<typeof fanout>>;
   try {
     // 第四个参数是「调用方取消」，而这里没有取消信号可传：`runSearch` 是库
@@ -401,47 +376,18 @@ async function runFused(
   const fused = rrfFuse(outputs);
   const enginesUsed = outputs.map((o) => o.engine);
 
-  // 在作答前把融合结果写进缓存。写入失败只意味着下一次
-  // 同样的查询又要再花配额，并不代表答案有错，所以这个
-  // 错误被吞掉，而不是上报出去。
-  try {
-    writeCache(
-      cachePath,
-      key,
-      {
-        summary:
-          fused.length > 0
-            ? `Fused ${fused.length} result(s) from ${enginesUsed.length} engine(s).`
-            : '',
-        items: fused as unknown as Array<Record<string, unknown>>,
-        storedAt: new Date().toISOString(),
-        engines: enginesUsed,
-        failures,
-      },
-      new Date(),
-      CACHE_ENTRY_CAP,
-    );
-    pruneCache(cachePath, new Date(), cacheTtl, CACHE_ENTRY_CAP);
-  } catch {
-    // 答案本身不受影响；理由见上。
-  }
-
   return buildFusedResult({
     items: fused as unknown as Array<Record<string, unknown>>,
     engines: enginesUsed,
     failures,
     skipped,
     durationSeconds: (Date.now() - startedAt) / 1000,
-    fromCache: false,
     query,
   });
 }
 
 /**
  * 组装一次融合运行作答所用的条目。
- *
- * 只用一个函数，好让缓存重放与新鲜运行不会在措辞上跑偏；
- * 调用方看到的唯一差别，就是重放没有花时间。
  */
 function buildFusedResult(input: {
   items: Array<Record<string, unknown>>;
@@ -449,20 +395,18 @@ function buildFusedResult(input: {
   failures: string[];
   skipped: string[];
   durationSeconds: number;
-  fromCache: boolean;
   query?: string;
 }): SourceResult {
-  const { items, engines, failures, skipped, durationSeconds, fromCache, query } = input;
+  const { items, engines, failures, skipped, durationSeconds, query } = input;
   const multiSource = items.filter((item) => {
     const found = item.foundIn;
     return Array.isArray(found) && found.length > 1;
   }).length;
-  const cacheNote = fromCache ? ' (served from a cached fusion)' : '';
   const summary =
     items.length > 0
       ? `Fused ${items.length} result(s) from ${engines.length} engine(s) (${engines.join(', ')})${query === undefined ? '' : ` for "${query}"`}.${
           multiSource > 0 ? ` ${multiSource} result(s) were returned by more than one engine.` : ''
-        }${cacheNote} Read items for the sources; each item's foundIn names the engines that returned it.`
+        } Read items for the sources; each item's foundIn names the engines that returned it.`
       : '';
 
   return {

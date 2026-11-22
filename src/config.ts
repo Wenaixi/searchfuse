@@ -31,12 +31,6 @@ export interface AggregateConfig {
    * 运行带着已到达的部分继续。链式模式下忽略此项——那条路有自己的单引擎预算。
    */
   deadlineMs?: number;
-  /**
-   * 融合结果从缓存提供的时间，毫秒。0 表示关闭缓存。默认 5 分钟：足够长，
-   * 让正在缩小问题范围的 agent 复用自己的答案；也足够短，让关于今日新闻的
-   * 搜索结果读到的时候还没过时。
-   */
-  cacheTtlMs?: number;
 }
 
 /**
@@ -241,6 +235,15 @@ const LEGACY_DIR_NAME = '.modsearch';
 const DIR_NAME = '.searchfuse';
 /** 需要按键级合并的文件名：只有配置有「旧文件独有、新文件缺失」的风险。 */
 const MERGE_FILE_NAME = 'config.json';
+/**
+ * 不参与迁移的文件名。
+ *
+ * `cache.json` 曾是融合结果的磁盘缓存，那个功能已被删除；迁移它是把一份
+ * 已废弃的数据搬进新目录，于是出现过一个很费解的现象：删掉新目录里的
+ * `cache.json`，每次运行都又「复活」，而且 mtime 永远是旧的——因为迁移用
+ * `copyFileSync` 复制且保留时间戳。缓存没有保留价值，直接跳过。
+ */
+const LEGACY_SKIP_NAMES = new Set(['cache.json']);
 
 export const CONFIG_DIR = path.join(os.homedir(), DIR_NAME);
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -291,6 +294,7 @@ export function migrateLegacyDir(): void {
     return;
   }
   for (const name of entries) {
+    if (LEGACY_SKIP_NAMES.has(name)) continue;
     const from = path.join(legacy, name);
     const to = path.join(current, name);
     try {
@@ -821,15 +825,6 @@ export function aggregateDeadlineMs(config: ModsearchConfig): number {
     return configured;
   }
   return 8_000;
-}
-
-/** 融合结果保持可缓存的时间。0 表示关闭缓存。 */
-export function aggregateCacheTtlMs(config: ModsearchConfig): number {
-  const configured = config.aggregate?.cacheTtlMs;
-  if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0) {
-    return configured;
-  }
-  return 5 * 60 * 1000;
 }
 
 /**

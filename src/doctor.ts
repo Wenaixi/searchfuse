@@ -3,9 +3,7 @@
 // Grok 登录文件是否存在。它报告的一切都是本地事实，所以在任何机器上、
 // 运行任意多次都是安全的。
 import * as fs from 'fs';
-import { currentCachePath } from './aggregate/cache.ts';
 import {
-  aggregateCacheTtlMs,
   aggregateDeadlineMs,
   aggregateMode,
   allowsPrivateNetwork,
@@ -117,9 +115,6 @@ export interface DoctorReport {
     mode: 'rrf' | 'chain';
     /** 整轮运行的墙钟预算。 */
     deadlineMs: number;
-    /** 结果缓存的 TTL，0 表示关闭。 */
-    cacheTtlMs: number;
-    cachePath: string;
     /** 会参与融合的引擎，以及为什么某些引擎不会。 */
     participants: Array<{ engine: string; reason: string }>;
   };
@@ -557,8 +552,6 @@ function diagnoseAggregate(
   return {
     mode: aggregateMode(config),
     deadlineMs: aggregateDeadlineMs(config),
-    cacheTtlMs: aggregateCacheTtlMs(config),
-    cachePath: currentCachePath(),
     participants,
   };
 }
@@ -657,11 +650,6 @@ export function formatDoctorReport(report: DoctorReport): string {
   const agg = report.aggregate;
   lines.push(`  mode:     ${agg.mode === 'rrf' ? 'rrf (concurrent fanout, fused)' : 'chain (sequential fallback)'}`);
   lines.push(`  deadline: ${agg.deadlineMs} ms (whole run)`);
-  lines.push(
-    agg.cacheTtlMs > 0
-      ? `  cache:    ${agg.cacheTtlMs} ms (${agg.cachePath})`
-      : '  cache:    off (ttl 0)',
-  );
   for (const p of agg.participants) {
     const mark = p.reason === '参与融合' ? 'FUSED  ' : 'skip   ';
     lines.push(`  - ${p.engine.padEnd(16)} ${mark}  ${p.reason}`);
