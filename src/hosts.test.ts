@@ -3,6 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  installOmpExtension,
+  removeOmpExtension,
   setYamlScalar,
   reportClaudeMcp,
   syncClaudeSettings,
@@ -155,6 +157,48 @@ describe('syncClaudeSettings', () => {
   it('拒绝覆盖无法解析的 settings 文件', () => {
     const file = tempFile('settings.json', '{ this is not json');
     expect(() => syncClaudeSettings(true, { runtimePath: "/tmp/rt.json", kernelPath: "/tmp/k.js" }, file)).toThrow('refusing to overwrite');
+  });
+});
+
+describe('omp 扩展的装卸', () => {
+  /**
+   * 把家目录指到临时目录：两个函数都按 `os.homedir()` 拼路径，
+   * Windows 上读 `USERPROFILE`，所以改这一个就够了。
+   */
+  function withTempHome(): () => void {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-home-'));
+    created.push(home);
+    const previous = process.env.USERPROFILE;
+    process.env.USERPROFILE = home;
+    return () => {
+      if (previous === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previous;
+      }
+    };
+  }
+
+  it('装上之后能被卸载掉，返回 true', () => {
+    const restore = withTempHome();
+    try {
+      const target = installOmpExtension('const K = "__SEARCHFUSE_KERNEL_PATH__";', 'C:/x/kernel.js');
+      expect(fs.existsSync(target)).toBe(true);
+      expect(removeOmpExtension()).toBe(true);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('本来就没装时返回 false，不抛异常', () => {
+    const restore = withTempHome();
+    try {
+      // 关键：关闭一个「没装过」的宿主不该让 hosts sync 崩掉。
+      expect(removeOmpExtension()).toBe(false);
+    } finally {
+      restore();
+    }
   });
 });
 

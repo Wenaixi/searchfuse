@@ -22,6 +22,7 @@ import {
   claudeSettingsPath,
   installOmpExtension,
   ompConfigPath,
+  removeOmpExtension,
   reportClaudeMcp,
   syncClaudeSettings,
   syncOmp,
@@ -351,6 +352,10 @@ hosts
       // omp：**不再写 searxng.endpoint**——搜索改由扩展同名覆盖内置工具完成。
       // 这里只清理历史遗留的 HTTP 接入（endpoint/token/Basic），因为
       // `searxng.endpoint` 是静态配置，跟随机端口天然冲突。
+      //
+      // 开关必须真的生效：早先无论 enabled 取值都调 syncOmp(undefined)，
+      // 于是 `hosts disable omp` 只改配置、扩展照装，用户以为关掉了却
+      // 仍在接管搜索。关闭时卸载扩展文件，才是「关掉」。
       const ompEnabled = config.hosts?.omp?.enabled !== false;
       if (options.dryRun) {
         lines.push(`omp: ${ompEnabled ? 'enable' : 'disable'} (${ompConfigPath()})`);
@@ -366,7 +371,18 @@ hosts
       // omp 扩展：同名覆盖内置 web_search。它 spawn kernel.js，
       // 所以不需要 HTTP 服务，也就绕开了「静态 endpoint vs 随机端口」的冲突。
       if (options.dryRun) {
-        lines.push('omp extension: would install (shadow builtin web_search)');
+        lines.push(
+          ompEnabled
+            ? 'omp extension: would install (shadow builtin web_search)'
+            : 'omp extension: would remove (host disabled)',
+        );
+      } else if (!ompEnabled) {
+        // 关掉就要撤掉扩展文件：留着它，omp 每次启动仍会接管搜索，
+        // 与 `hosts.omp.enabled=false` 的承诺相反。
+        const removed = removeOmpExtension();
+        lines.push(
+          removed ? 'omp extension: removed (host disabled)' : 'omp extension: none to remove',
+        );
       } else {
         // 用运行时字符串拼接，不让 vite 把模板内联成 data URL——
         // 它看到 `new URL(..., import.meta.url)` 会当作静态资源打包，

@@ -200,6 +200,24 @@ export function installOmpExtension(source: string, kernelPath: string): string 
 }
 
 /**
+ * 卸载 omp 扩展：删掉 `hosts sync` 装进去的那一个文件。
+ *
+ * 为什么需要它：`hosts.omp.enabled = false` 若只写配置而不动扩展，omp
+ * 每次启动仍会加载扩展、仍会接管搜索——开关写着「关」，行为却是「开」。
+ * 只删我们自己的文件，别的扩展一个都不碰；返回是否真的删掉了。
+ */
+export function removeOmpExtension(): boolean {
+  const target = path.join(ompExtensionsDir(), 'searchfuse.ts');
+  try {
+    fs.unlinkSync(target);
+    return true;
+  } catch {
+    // 文件本来就不在：没有东西可删，对调用方是「已关闭」的结果。
+    return false;
+  }
+}
+
+/**
  * 把 `searchfuseHosts` 镜像进 Claude Code 的 settings。
  *
  * 宿主二进制明确「插件不得写 settings 文件，只能 `$.settings.read`」，
