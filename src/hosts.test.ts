@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  installClaudeSkill,
   installOmpExtension,
   removeOmpExtension,
   setYamlScalar,
@@ -199,6 +200,59 @@ describe('omp 扩展的装卸', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('Claude Code mod 的常驻安装', () => {
+  /**
+   * 建一个假的 `claude/` 源目录。只放两个文件，够验证「复制哪些、
+   * 缺了怎么办」，不依赖仓库里的真实内容。
+   */
+  function fakeSource(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-src-'));
+    created.push(dir);
+    fs.mkdirSync(path.join(dir, 'hooks'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), '# skill\n', 'utf-8');
+    fs.writeFileSync(path.join(dir, 'hooks', 'hooks.json'), '{"modules":["./register.ts"]}\n', 'utf-8');
+    fs.writeFileSync(path.join(dir, 'hooks', 'register.ts'), 'export function register() {}\n', 'utf-8');
+    return dir;
+  }
+
+  function fakeTarget(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-dst-'));
+    created.push(dir);
+    return dir;
+  }
+
+  it('把源目录里的 mod 文件复制到目标目录', () => {
+    const source = fakeSource();
+    const target = fakeTarget();
+    const result = installClaudeSkill(source, target);
+    expect(result.changed).toBe(true);
+    expect(result.installed).toContain(path.join('hooks', 'register.ts'));
+    const copied = fs.readFileSync(path.join(target, 'hooks', 'register.ts'), 'utf-8');
+    expect(copied).toBe('export function register() {}\n');
+  });
+
+  it('第二次同步 content 相同，返回 changed=false（幂等）', () => {
+    const source = fakeSource();
+    const target = fakeTarget();
+    installClaudeSkill(source, target);
+    const second = installClaudeSkill(source, target);
+    expect(second.changed).toBe(false);
+    expect(second.installed).toEqual([]);
+  });
+
+  it('源文件缺失时跳过那一个，不抛异常', () => {
+    // 只留 SKILL.md，其余全删：发布包里 claude/ 未必齐全，
+    // 缺一个文件不该让整条 sync 崩掉。
+    const source = fakeSource();
+    fs.rmSync(path.join(source, 'hooks'), { recursive: true, force: true });
+    const target = fakeTarget();
+    const result = installClaudeSkill(source, target);
+    expect(result.installed).toEqual(['SKILL.md']);
+    expect(fs.existsSync(path.join(target, 'hooks', 'register.ts'))).toBe(false);
   });
 });
 

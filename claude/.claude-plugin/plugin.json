@@ -13,6 +13,5 @@
     "websearch",
     "search",
     "aggregate"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }

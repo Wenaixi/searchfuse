@@ -20,6 +20,8 @@ import { effectiveMcp } from './config.ts';
 import { formatDoctorReport, runDoctor } from './doctor.ts';
 import {
   claudeSettingsPath,
+  claudeSkillDir,
+  installClaudeSkill,
   installOmpExtension,
   ompConfigPath,
   removeOmpExtension,
@@ -416,6 +418,27 @@ hosts
             (result.changed ? '' : ' (no change)') +
             (result.backup ? ` [backup: ${path.basename(result.backup)}]` : ''),
         );
+      }
+
+      // Claude Code mod：把 `claude/` 同步进 `~/.claude/skills/searchfuse-mod/`，
+      // 让它作为 `@skills-dir` 插件常驻加载，从而在**每次会话**都接管内置
+      // WebSearch，而不是只在带 `--plugin-dir` 的那一次。
+      //
+      // 关闭时**不删目录**：`register.ts` 每次 tool.call 都读 enabled 开关，
+      // 关掉即交回原生实现。删了反而让重新开启时没有任何东西可加载。
+      {
+        const selfDir = path.dirname(fileURLToPath(import.meta.url));
+        const sourceDir = path.join(selfDir, '..', 'claude');
+        if (options.dryRun) {
+          lines.push(`claudeCode mod: would sync (${claudeSkillDir()})`);
+        } else {
+          const synced = installClaudeSkill(sourceDir);
+          lines.push(
+            synced.changed
+              ? `claudeCode mod: synced ${synced.installed.join(', ')}`
+              : 'claudeCode mod: already up to date',
+          );
+        }
       }
 
       // MCP：先用默认集合补缺，再探测可达性——注册一个连不上的 server

@@ -297,6 +297,73 @@ export function claudeSettingsPath(): string {
   return path.join(os.homedir(), '.claude', 'settings.json');
 }
 
+/**
+ * Claude Code mod 的用户级安装目录。
+ *
+ * `~/.claude/skills/<name>/` 会被当成 `@skills-dir` 插件自动加载，每个会话
+ * 生效，不需要 `--plugin-dir`。这是让「替换原生 WebSearch」常驻的唯一路径
+ * ——`--plugin-dir` 只活在带这个 flag 的那一次会话里。
+ */
+export function claudeSkillDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills', 'searchfuse-mod');
+}
+
+/** mod 需要落地的文件，相对 `claude/` 源目录。顺序无关，只为打印好看。 */
+const CLAUDE_MOD_FILES = [
+  'SKILL.md',
+  path.join('.claude-plugin', 'plugin.json'),
+  path.join('hooks', 'hooks.json'),
+  path.join('hooks', 'register.ts'),
+  'tsconfig.json',
+] as const;
+
+/**
+ * 把仓库里的 `claude/` 同步到 `~/.claude/skills/searchfuse-mod/`。
+ *
+ * 为什么需要它：那份常驻安装是**副本**，不是软链。手工拷一次之后，仓库里
+ * `register.ts` 再改，技能目录那份不会跟着变——于是出现「代码已修、行为还是
+ * 旧的」，与 pnpm `file:` 依赖被复制成快照是同一类陷阱。让它由 `hosts sync`
+ * 管，改完源码跑一次就对齐。
+ *
+ * 写入粒度是**逐个文件**，不是整目录覆盖：技能目录里可能有用户自己加的
+ * 东西，整目录替换会把它们抹掉。内容相同的文件不重写，保持 mtime 不变。
+ *
+ * `enabled=false` 时**不删目录**，这与 omp 的处理不同，理由要看清：
+ * omp 没有任何运行时开关，留着扩展就仍在接管搜索，所以必须删；而 Claude
+ * 的 `register.ts` 每次 `tool.call` 都读 `searchfuseHosts.claudeCode.enabled`，
+ * 读到 false 就 `next(e)` 交回原生实现。删目录反而会让重新开启时静默失效
+ * （文件没了，开关写 true 也没人加载）。
+ */
+export function installClaudeSkill(
+  sourceDir: string,
+  targetDir = claudeSkillDir(),
+): { changed: boolean; installed: string[] } {
+  const installed: string[] = [];
+  for (const relative of CLAUDE_MOD_FILES) {
+    const from = path.join(sourceDir, relative);
+    const to = path.join(targetDir, relative);
+    let content: string;
+    try {
+      content = fs.readFileSync(from, 'utf-8');
+    } catch {
+      // 源文件缺失：跳过这一个，其余照装。发布包里 `claude/` 未必齐全，
+      // 一个文件缺失不该让整条 sync 失败。
+      continue;
+    }
+    let current: string | undefined;
+    try {
+      current = fs.readFileSync(to, 'utf-8');
+    } catch {
+      current = undefined;
+    }
+    if (current === content) continue;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, content, 'utf-8');
+    installed.push(relative);
+  }
+  return { changed: installed.length > 0, installed };
+}
+
 /** omp 的 MCP 配置文件。它从这里读，也兼容 `.mcp.json`。 */
 export function ompMcpPath(): string {
   return path.join(os.homedir(), '.omp', 'agent', 'mcp.json');
