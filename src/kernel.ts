@@ -9,6 +9,7 @@
 //
 //   node dist/kernel.js --query <text> [--source web|x] [--max-results N]
 //                       [--timeout MS] [--deadline MS] [--engine NAME]
+//   node dist/kernel.js --url <url> [-q <focus>]      # 抓单页，不搜索
 //
 //   stdout  单行 JSON = RunSearchResult
 //   退出码   0 = 有结果；1 = 无结果/全部引擎失败；2 = 参数错误
@@ -16,6 +17,11 @@
 //
 // `-q` 与 `--query` 都接受，因为 dsh 已经在传 `-q`，而新调用方习惯用长选项。
 // 两者等价，不为迁就任何一方去改已验证的代码。
+//
+// 为什么 `--url` 必须能单独用：Claude 与 omp 两处的 `read_page` 都只传
+// `--url`，早先 kernel 强求非空 `--query`，于是两边的 read_page 一律
+// exit 2——工具注册得成功，调用必败，且失败信息还指向「参数错误」而不是
+// 「不支持」。`--url` 单独用与 CLI 的 `-u` 语义相同。
 
 import {
   allowsPrivateNetwork,
@@ -72,14 +78,17 @@ function takeNumber(args: string[], ...names: string[]): number | undefined {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // 两种模式：搜索（要 --query）与抓页（要 --url，可附 -q 作关注点）。
+  // 判定放在这里而不是靠 runSearch 内部，是因为「参数缺失」要退 2，
+  // 而 runSearch 的失败会退 1——调用方按退出码区分「重试」与「别重试」。
   const query = takeOption(args, '-q', '--query');
-  if (query === undefined || query.trim() === '') {
-    fail('missing --query (or -q) with a non-empty value');
-  }
-
   const url = takeOption(args, '--url');
-  if (url === undefined && query.trim() === '') {
-    fail('nothing to search: give --query or --url');
+
+  const hasQuery = query !== undefined && query.trim() !== '';
+  const hasUrl = url !== undefined && url.trim() !== '';
+
+  if (!hasQuery && !hasUrl) {
+    fail('nothing to do: give --query (or -q) to search, or --url to fetch a page');
   }
 
   const config = loadConfigFile(currentConfigPath());
