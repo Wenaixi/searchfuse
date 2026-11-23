@@ -43,6 +43,10 @@ export async function requestText(
 
   // 显式设置自己说了算，而且两个方向都算：`null` 意味着直连，
   // 且绝不能去查 http_proxy，所以这是一个严格的三路分支，而不是真值判断。
+  //
+  // `undefined` 现在的含义是「用户显式要求跟随系统代理」（见
+  // util/explicitProxy.ts）：默认已经翻成直连，所以这条分支只在有人写了
+  // `proxy: system` 时才走到。
   const proxyUrl =
     explicitProxy === undefined ? resolveProxyForUrl(new URL(url), process.env) : explicitProxy;
   // NO_PROXY 上面已经应用过了，所以这里给代理一个空的，让它总是使用

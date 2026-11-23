@@ -295,9 +295,9 @@ hostWindow.__ModuleLoader__.load({
         toolNameHint:
           'The name the model calls. Two engines cannot share a name, and the built-in tool names are reserved.',
         proxyLabel: 'Proxy',
-        proxyFallback: 'Leave blank to follow the system proxy',
+        proxyFallback: 'Empty is direct. Write "system" to follow the machine proxy',
         proxyHint:
-          'Route only this engine through its own proxy. "direct" or "none" bypasses the system proxy for this engine alone.',
+          'Direct is the default: a local proxy mostly adds "connection refused" and "the proxy timed out" to calls that would otherwise just work. "direct" and "none" say so out loud; "system" follows http_proxy.',
       },
       zh: {
         // 不叫「网页搜索」：dsh 自带一张「网页搜索（DeepSeek 搜索提供方）」卡片，
@@ -444,9 +444,9 @@ hostWindow.__ModuleLoader__.load({
         toolNameLabel: '工具名',
         toolNameHint: '模型调用时看到的名字。两个引擎不能同名，内置工具名已被占用。',
         proxyLabel: '代理',
-        proxyFallback: '留空则跟随系统代理',
+        proxyFallback: '留空即直连。填 "system" 才跟随系统代理',
         proxyHint:
-          '只让这个引擎走自己的代理。填 "direct" 或 "none" 表示仅此引擎绕过系统代理。',
+          '默认直连：一条本地代理通常只会给本来能通的调用添上两类故障——「连接被拒」与「代理超时」。"direct" 和 "none" 是直连的显式写法，"system" 则跟随 http_proxy。',
       },
     };
 
@@ -3246,6 +3246,11 @@ hostWindow.__ModuleLoader__.load({
                 )
               : null;
 
+          // SearXNG 也是一张卡片，与引擎卡片同一形态。
+          //
+          // 「本地还是远程」就是卡片头上那个分段选择器：内置实例（本地）、
+          // 外部实例（远程）、关闭。三态互斥，用分段控件而不是两个勾选框，
+          // 因为后者的读法是「可以同时开」，而它们不能。
           searxngBlock = h(
             'section',
             { key: 'sx-section', className: 'sf-section', 'aria-labelledby': 'sf-sx-title' },
@@ -3253,27 +3258,56 @@ hostWindow.__ModuleLoader__.load({
             h('p', { className: 'sf-hint' }, t.searxngModeHint),
             h(
               'div',
-              { className: 'sf-field' },
-              h('div', { className: 'sf-label' }, t.searxngModeLabel),
-              h(SegmentedControl, {
-                id: 'sf-searxng-mode',
-                label: t.searxngModeLabel,
-                value: draft.searxngMode,
-                options: modeOptions,
-                onChange: (next: any) => {
-                  draftState[1](Object.assign({}, draft, { searxngMode: next }));
-                  noteState[1]('');
-                },
-              }),
-            ),
-            embeddedPanel,
-            externalPanel,
-            // 命名网络：低频，收进一个折叠里（这是「全部展开」的唯一例外，
-            // 因为它属于「高级」语义，且条目数不固定）。
-            h(DisclosureRow, {
-              icon: null,
-              title: t.searxngAdvanced,
-              open: Boolean(draft.searxngShowNetworks),
+              { className: 'sf-engine-card', 'data-searxng-card': 'true' },
+              h(
+                'div',
+                { className: 'sf-card-head' },
+                h(
+                  'div',
+                  { className: 'sf-row-text' },
+                  h('span', { className: 'sf-row-name' }, 'SearXNG'),
+                  h(
+                    'div',
+                    { className: 'sf-badges' },
+                    h(
+                      'span',
+                      {
+                        key: 'sx-mode',
+                        className:
+                          draft.searxngMode === 'off' ? 'sf-badge sf-badge-muted' : 'sf-badge',
+                      },
+                      draft.searxngMode === 'off'
+                        ? t.searxngModeOff
+                        : draft.searxngMode === 'external'
+                          ? t.searxngModeExternal
+                          : t.searxngModeEmbedded,
+                    ),
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'sf-field' },
+                h('div', { className: 'sf-label' }, t.searxngModeLabel),
+                h(SegmentedControl, {
+                  id: 'sf-searxng-mode',
+                  label: t.searxngModeLabel,
+                  value: draft.searxngMode,
+                  options: modeOptions,
+                  onChange: (next: any) => {
+                    draftState[1](Object.assign({}, draft, { searxngMode: next }));
+                    noteState[1]('');
+                  },
+                }),
+              ),
+              embeddedPanel,
+              externalPanel,
+              // 命名网络：低频，收进一个折叠里（这是「全部展开」的唯一例外，
+              // 因为它属于「高级」语义，且条目数不固定）。
+              h(DisclosureRow, {
+                icon: null,
+                title: t.searxngAdvanced,
+                open: Boolean(draft.searxngShowNetworks),
               expandable: true,
               onToggle: () =>
                 draftState[1](
@@ -3305,6 +3339,7 @@ hostWindow.__ModuleLoader__.load({
                 }),
               ),
             }),
+            ),
           );
         }
 

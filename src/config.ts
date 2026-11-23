@@ -81,11 +81,12 @@ export interface EngineSettings {
    */
   baseURL?: string;
   /**
-   * 单引擎代理。未设置则跟随机器的 http_proxy / https_proxy / no_proxy；
-   * `direct` 或 `none` 强制只有这个引擎走直连；完整的 http(s) URL 则只让这个
-   * 引擎走该代理。所有引擎共享同一个进程，所以这是让其中一个引擎走不同路由的
-   * 唯一办法——让无 key 的引擎走本地中继、让区域 API 走区域出口，或者让某个
-   * 引擎绕过机器其余部分需要的代理。
+   * 单引擎代理。**未设置即直连**：这类调用面对的是公开 API，绕经一条本地
+   * 代理只会引入「代理没开就连接拒绝」与「本该 200 却变成代理超时」两类故障。
+   * `direct` / `none` 是直连的显式写法（与默认同义，写出来只为让文件自解释）；
+   * `system` 则显式要求跟随机器上的 http_proxy / https_proxy / no_proxy。
+   * 一个完整的 http(s) URL 让这个引擎走该代理，且只有它走——所有引擎共享同
+   * 一个进程，所以这是让其中一个走不同路由的唯一办法。
    */
   proxy?: string;
   /**
@@ -1096,7 +1097,7 @@ export function setConfigValue(
     }
     if (field === 'proxy') {
       const trimmed = value.trim();
-      // 空值会取消这项覆盖，回到跟随环境变量。存下的值要么是关键字、要么是 URL，
+      // 空值会取消这项覆盖，回到默认（直连）。存下的值要么是关键字、要么是 URL，
       // 绝不会是半成品：路由器每次运行都会解析它，所以这里存下一个它无法
       // 生效的值，等到出错时就离这条命令很远了。
       if (trimmed === '') {
@@ -1106,7 +1107,7 @@ export function setConfigValue(
       }
       const resolved = resolveExplicitProxy(trimmed);
       if (resolved === undefined) {
-        throw new Error(`Invalid proxy: "${value}". Use direct, none, or a full http(s) URL.`);
+        throw new Error(`Invalid proxy: "${value}". Use direct, none, system, or a full http(s) URL.`);
       }
       value = trimmed;
     }
