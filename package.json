@@ -31,7 +31,9 @@
     "CHANGELOG.md",
     "SECURITY.md",
     "dsh",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "omp",
+    "claude"
   ],
   "keywords": [
     "search",
