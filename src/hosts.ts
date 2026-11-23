@@ -493,3 +493,114 @@ export function reportClaudeMcp(claudeJsonPath = claudeUserConfigPath()): string
 export function claudeUserConfigPath(): string {
   return path.join(os.homedir(), '.claude.json');
 }
+
+/**
+ * 一个宿主当前的接入状态。
+ *
+ * 这是**只读**检测：它报告「现在是什么样」，不修任何东西。设置卡片需要
+ * 在表面显示「omp 接上了没」「Claude Code 的插件加载成没成」，而这件事
+ * 只能靠看文件回答——没有哪个宿主提供「你现在有没有接上我」的接口。
+ */
+export interface HostStatus {
+  /** 扩展/技能文件是否已经落地。 */
+  installed: boolean;
+  /** 已落地但内容与仓库源不一致的条目；空表示完全对齐。 */
+  stale: string[];
+  /** 缺了哪些应为文件。`installed` 为 true 时仍可能非空（装了一半）。 */
+  missing: string[];
+  /** 配置里那条接线还在不在（omp 的 searxng.endpoint / Claude 的 enabled）。 */
+  wired: boolean;
+}
+
+/** omp 扩展在扩展目录里的文件名。 */
+const OMP_EXTENSION_FILE = 'searchfuse.ts';
+
+/** 读 omp 的 config.yml，判断三个接线键是否齐全。 */
+function ompWired(file = ompConfigPath()): boolean {
+  const text = readOmpConfig(file);
+  if (text === '') return false;
+  // 只需要判断「这两个键有没有非空值」，不必完整解析 YAML。
+  const hasEndpoint = /^\s*endpoint:\s*[^\s#]/m.test(text);
+  const hasToken = /^\s*token:\s*[^\s#]/m.test(text);
+  return hasEndpoint && hasToken;
+}
+
+/**
+ * omp 的接入状态。
+ *
+ * `installed` 看扩展文件在不在，`stale` 比对内容与传入的源文本——两者分开
+ * 是因为它们对应两种不同的故障：「没装」要装，「装了但旧了」要重新同步，
+ * 而后者最容易骗人：文件明明在，行为却还是旧的。
+ */
+export function ompStatus(source: string | undefined, dir = ompExtensionsDir()): HostStatus {
+  const file = path.join(dir, OMP_EXTENSION_FILE);
+  let current: string | undefined;
+  try {
+    current = fs.readFileSync(file, 'utf-8');
+  } catch {
+    current = undefined;
+  }
+  const missing: string[] = current === undefined ? [OMP_EXTENSION_FILE] : [];
+  const stale: string[] = [];
+  if (current !== undefined && source !== undefined && current !== source) {
+    stale.push(OMP_EXTENSION_FILE);
+  }
+  return {
+    installed: current !== undefined,
+    stale,
+    missing,
+    wired: ompWired(),
+  };
+}
+
+/**
+ * Claude Code 的 mod 接入状态。
+ *
+ * 与 omp 的区别在于「开关归谁管」：omp 靠删文件来关闭（它没有运行时开关），
+ * 而 Claude 的 `register.ts` 每次调用都读 `searchfuseHosts.claudeCode.enabled`。
+ * 所以这里多一个 `enabled`，它来自设置文件而不是文件在不在——目录留着、
+ * 开关关掉，是一份完全合法且有意义的状态。
+ */
+export function claudeStatus(
+  sourceDir: string | undefined,
+  targetDir = claudeSkillDir(),
+): HostStatus & { enabled: boolean } {
+  const missing: string[] = [];
+  const stale: string[] = [];
+  let present = 0;
+  for (const relative of CLAUDE_MOD_FILES) {
+    const to = path.join(targetDir, relative);
+    let current: string | undefined;
+    try {
+      current = fs.readFileSync(to, 'utf-8');
+    } catch {
+      current = undefined;
+    }
+    if (current === undefined) {
+      missing.push(relative);
+      continue;
+    }
+    present += 1;
+    if (sourceDir !== undefined) {
+      let source: string | undefined;
+      try {
+        source = fs.readFileSync(path.join(sourceDir, relative), 'utf-8');
+      } catch {
+        // 源文件缺席不是「旧了」，只是这一项我们还不知道该怎么比。
+        source = undefined;
+      }
+      if (source !== undefined && current !== source) {
+        stale.push(relative);
+      }
+    }
+  }
+  return {
+    installed: present > 0,
+    stale,
+    missing,
+    // Claude 的接线状态写在插件自己的设置文件里，不在这里判断；调用方
+    // 从自己的配置里读 enabled，避免 hosts.ts 依赖插件配置的形状。
+    wired: present === CLAUDE_MOD_FILES.length,
+    enabled: true,
+  };
+}

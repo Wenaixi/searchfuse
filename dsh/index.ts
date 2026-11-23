@@ -122,6 +122,105 @@ function caughtCode(error: unknown): string {
 export const name = 'modsearch';
 export const inject = ['tools', 'web'];
 
+/**
+ * 一个宿主的接入状态。
+ *
+ * 与 `hosts.<name>.enabled` 是两件事：开关是「想不想接」，这里是「实际接上
+ * 了没」。两者不同步正是最需要被看见的那类故障。
+ */
+interface HostStatus {
+  /** 扩展/技能文件是否已经落地。 */
+  installed: boolean;
+  /** 落地了但内容与随包发布的源不一致的条目。 */
+  stale: string[];
+  /** 缺了哪些应有的文件（可能装了一半）。 */
+  missing: string[];
+}
+
+/** 包根目录。本文件在 dsh/ 下，所以上一层就是包根。 */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Claude Code mod 需要落地的文件，相对 `claude/` 源目录。 */
+const CLAUDE_MOD_FILES = [
+  'SKILL.md',
+  join('.claude-plugin', 'plugin.json'),
+  join('hooks', 'hooks.json'),
+  join('hooks', 'register.ts'),
+  'tsconfig.json',
+] as const;
+
+/** 读一个文件，读不到返回 undefined。 */
+function slurp(file: string): string | undefined {
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Claude Code mod 的接入状态。
+ *
+ * 目录里可能有用户自己加的东西，所以这里只按「应有文件清单」逐项比对，
+ * 不做整目录扫描：多出来的文件与我们无关，缺了或旧了才是我们要报的。
+ *
+ * 关闭时**不删目录**，所以这里读到的可能是「装好了但开关关着」——那是一份
+ * 完全合法的状态，由 `hosts.claudeCode.enabled` 表达，不是这里的事。
+ */
+function claudeHostStatus(): HostStatus {
+  const target = join(homedir(), '.claude', 'skills', 'searchfuse-mod');
+  const source = join(PACKAGE_ROOT, 'claude');
+  const missing: string[] = [];
+  const stale: string[] = [];
+  let present = 0;
+  for (const relative of CLAUDE_MOD_FILES) {
+    const current = slurp(join(target, relative));
+    if (current === undefined) {
+      missing.push(relative);
+      continue;
+    }
+    present += 1;
+    const expected = slurp(join(source, relative));
+    if (expected !== undefined && current !== expected) {
+      stale.push(relative);
+    }
+  }
+  return { installed: present > 0, stale, missing };
+}
+
+/**
+ * omp 扩展的接入状态。
+ *
+ * 「装了但旧了」是最容易骗人的一种：文件明明在，行为却还是旧的 ——
+ * 与 pnpm 把 `file:` 依赖复制成快照是同一类陷阱。所以内容比对单独报一栏。
+ */
+function ompHostStatus(): HostStatus {
+  const file = join(homedir(), '.omp', 'agent', 'extensions', 'searchfuse.ts');
+  const source = join(PACKAGE_ROOT, 'omp', 'extension.ts');
+  const current = slurp(file);
+  const missing = current === undefined ? ['searchfuse.ts'] : [];
+  const stale: string[] = [];
+  if (current !== undefined) {
+    const expected = slurp(source);
+    if (expected !== undefined && current !== expected) stale.push('searchfuse.ts');
+  }
+  return { installed: current !== undefined, stale, missing };
+}
+
+/** 各家宿主的接入状态，供卡片显示。 */
+function hostStatuses(config: Bag): Bag {
+  return {
+    claudeCode: claudeHostStatus(),
+    omp: ompHostStatus(),
+    // dsh 宿主本身不需要落地文件：它就是当前这个进程，接没接上由「这个
+    // 插件有没有被加载」自己说明，不必再查一遍磁盘。
+    enabled: {
+      claudeCode: config.hosts?.claudeCode?.enabled !== false,
+      omp: config.hosts?.omp?.enabled !== false,
+    },
+  };
+}
+
 export function apply(ctx: any, config: Bag = {}): void {
   if (config.searchProvider !== false) {
     registerSearchProvider(ctx, config);
@@ -1064,6 +1163,13 @@ function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessE
       : [],
     // 未写 mode 等于融合，与 src/config.ts 的 aggregateMode() 同一判据。
     aggregateMode: config.aggregate?.mode === 'chain' ? 'chain' : 'rrf',
+    // 宿主接入状态：卡片要显示「omp / Claude Code 现在接上了没」，
+    // 而这件事只能靠看文件回答，没有任何宿主提供查询接口。
+    //
+    // 与 `hosts.<name>.enabled` 分开报告是对的：开关是「想不想接」，
+    // 状态是「实际接上了没」。两者不同步正是最需要被看见的故障——
+    // 开关写着 true、文件却没装，或者反过来。
+    hosts: hostStatuses(config),
     // SearXNG 的抓取配置。卡片要能逐引擎配代理，所以这里原样交出去，
     // 保存时由 applyCardSettings 校验并写回。
     //
@@ -1146,6 +1252,28 @@ function applyCardSettings(patch: Bag): void {
       throw new Error(`aggregateMode must be "rrf" or "chain", got: ${String(mode)}`);
     }
     config.aggregate = Object.assign({}, config.aggregate, { mode });
+  }
+  // 宿主开关。卡片只能改自己属于的那两个宿主；dsh 由「插件有没有被加载」
+  // 表达，不是这里的一个布尔值。
+  //
+  // 这里只写配置，不触发 hosts sync：卡片是浏览器的，它没有权限去装文件，
+  // 也不该在用户点「保存」时顺手改另一个 harness 的目录。落地的动作仍然由
+  // `searchfuse hosts sync` 负责，卡片上的「需要更新」提示指向它。
+  if (patch?.hostEnabled !== undefined) {
+    if (!isPlainObject(patch.hostEnabled)) {
+      throw new Error('hostEnabled must be an object');
+    }
+    for (const [name, value] of Object.entries(patch.hostEnabled as Bag)) {
+      if (name !== 'claudeCode' && name !== 'omp') {
+        throw new Error(`unknown host: ${name}`);
+      }
+      if (typeof value !== 'boolean') {
+        throw new Error(`hosts.${name}.enabled must be true or false`);
+      }
+      config.hosts = Object.assign({}, config.hosts, {
+        [name]: Object.assign({}, (config.hosts as Bag)?.[name], { enabled: value }),
+      });
+    }
   }
   // 引擎字段一次编辑一个引擎，由 `target` 点名。缺失意味着这次保存没有碰任何
   // 引擎设置，这正是「只改钉住项」的保存的样子。

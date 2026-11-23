@@ -19,6 +19,10 @@ interface CardDraft extends Record<string, unknown> {
   baseURL: string;
   model: string;
   enabled: Record<string, boolean>;
+  /** 卡片上拖动与序号输入共同维护的顺序。 */
+  engineOrder: string[];
+  /** 'rrf' 并发融合，'chain' 一次试一个。 */
+  aggregateMode: string;
 }
 
 interface Card {
@@ -436,6 +440,9 @@ describe('a save carries only what the save is about', () => {
         'grok-cli',
       ],
       aggregateMode: 'rrf',
+      // 宿主开关的草稿初值：取自摘要里的生效值。测试摘要没有 hosts 段，
+      // 所以是空对象。
+      hostEnabled: {},
     });
   });
 

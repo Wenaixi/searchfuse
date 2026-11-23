@@ -76,6 +76,8 @@ interface CardDraft {
   engineOrder: string[];
   /** 'rrf' 并发融合，'chain' 一次试一个。 */
   aggregateMode: string;
+  /** 每个宿主接入开关的草稿值，按宿主名索引。 */
+  hostEnabled: Bag;
   [others: string]: any;
 }
 
@@ -215,6 +217,15 @@ hostWindow.__ModuleLoader__.load({
         modeChain: 'One at a time',
         modeRrfHint: 'Ask every enabled engine at once and merge the answers.',
         modeChainHint: 'Try one engine; only move on when it fails. Order matters.',
+        // 宿主接入区。
+        hostsSection: 'Host integration',
+        hostsHint: 'Wire searchfuse into other harnesses, and see whether they loaded.',
+        hostLoaded: 'loaded',
+        hostNotLoaded: 'not installed',
+        hostStale: 'out of date',
+        hostPartial: 'incomplete',
+        hostToggleHint: 'Turn this host integration on or off',
+        hostNeedsSync: 'Run `searchfuse hosts sync` to bring it up to date.',
         // 状态总览与引擎分组（设置界面重构）。
         overviewEngines: '{n} engines ready',
         overviewNoEngines: 'no engine ready',
@@ -362,6 +373,15 @@ hostWindow.__ModuleLoader__.load({
         modeChain: '逐个退避',
         modeRrfHint: '同时向所有已启用引擎提问，再融合答案。',
         modeChainHint: '一次只试一个引擎，失败才轮到下一个。顺序有意义。',
+        // 宿主接入区。
+        hostsSection: '宿主接入',
+        hostsHint: '把 searchfuse 接到其他 harness，并查看它们是否真的加载了。',
+        hostLoaded: '已加载',
+        hostNotLoaded: '未安装',
+        hostStale: '需要更新',
+        hostPartial: '不完整',
+        hostToggleHint: '打开或关闭这个宿主接入',
+        hostNeedsSync: '运行 `searchfuse hosts sync` 让它对齐。',
         // 状态总览与引擎分组（设置界面重构）。
         overviewEngines: '{n} 个引擎可用',
         overviewNoEngines: '没有可用的引擎',
@@ -574,6 +594,10 @@ hostWindow.__ModuleLoader__.load({
         exposeState: exposeState(summary, engine),
         engineOrder: carry && Array.isArray(carry.engineOrder) ? carry.engineOrder.slice() : order,
         aggregateMode: carry ? carry.aggregateMode : (summary.aggregateMode || 'rrf'),
+        // 宿主开关：摘要里的生效值作初始，carry 时保留用户的改动。
+        hostEnabled: carry
+          ? carry.hostEnabled
+          : Object.assign({}, (summary.hosts && summary.hosts.enabled) || {}),
         enabled: Object.assign(
           {},
           (carry && carry.enabled) ||            Object.fromEntries(
@@ -795,6 +819,17 @@ hostWindow.__ModuleLoader__.load({
       }
       if ((draft.aggregateMode || 'rrf') !== (summary.aggregateMode || 'rrf')) {
         return true;
+      }
+      // 宿主开关改变了也算一次改动。不判它，用户把 omp 关掉之后按钮仍然
+      // 灰着，改动就永远提交不上去。
+      if (isPlainObject(draft.hostEnabled)) {
+        const current = (summary.hosts && summary.hosts.enabled) || {};
+        for (const key of Object.keys(draft.hostEnabled)) {
+          const next = draft.hostEnabled[key];
+          if (typeof next === 'boolean' && next !== (current[key] !== false)) {
+            return true;
+          }
+        }
       }
       var enabledChanged = Object.keys(draft.enabled || {}).some(
         (name) =>
@@ -1025,6 +1060,22 @@ hostWindow.__ModuleLoader__.load({
       }
       if ((draft.aggregateMode || 'rrf') !== (summary.aggregateMode || 'rrf')) {
         payload.aggregateMode = draft.aggregateMode;
+      }
+      // 宿主开关：只提交变过的那几个。与其余字段同一份契约——一次只改
+      // 密钥的保存不该顺手把两个宿主开关一起重写。
+      if (isPlainObject(draft.hostEnabled)) {
+        const current = (summary.hosts && summary.hosts.enabled) || {};
+        const changed: Bag = {};
+        for (const key of Object.keys(draft.hostEnabled)) {
+          const next = draft.hostEnabled[key];
+          if (typeof next !== 'boolean') continue;
+          if (next !== (current[key] !== false)) {
+            changed[key] = next;
+          }
+        }
+        if (Object.keys(changed).length > 0) {
+          payload.hostEnabled = changed;
+        }
       }
 
       return payload;
@@ -2650,6 +2701,7 @@ hostWindow.__ModuleLoader__.load({
                   : null,
                 statusRows,
               ),
+              hostBlock,
             );
 
             // 页脚不属于 body：它要作为 sf-root 的最后一个子元素，才能
@@ -2728,6 +2780,83 @@ hostWindow.__ModuleLoader__.load({
           }
         }
 
+        // 宿主接入区：omp 与 Claude Code。
+        //
+        // 每张卡片回答一个问题：「这个 harness 现在真的在用 searchfuse 吗」。
+        // 它把两件事并排显示 —— 用户想不想接（开关）与实际接上了没（状态
+        // 徽章）—— 因为两者不同步正是最需要被看见的那类故障：开关写着开、
+        // 文件却没装，或者装着旧版本。
+        var hostBlock = null;
+        var hostsInfo = (summary && summary.hosts) || null;
+        if (hostsInfo !== null) {
+          var hostDefs = [
+            { key: 'claudeCode', label: 'Claude Code', status: hostsInfo.claudeCode },
+            { key: 'omp', label: 'omp', status: hostsInfo.omp },
+          ];
+          var hostCards = hostDefs.map((def) => {
+            var status = def.status || {};
+            var on =
+              typeof draft.hostEnabled?.[def.key] === 'boolean'
+                ? draft.hostEnabled[def.key]
+                : hostsInfo.enabled?.[def.key] !== false;
+            // 状态判定按「最具体的那个问题」优先：缺文件比过期更严重，
+            // 一个装了一半的宿主不该只被标成「过期」。
+            var badges: any[] = [];
+            if (status.missing?.length > 0) {
+              badges.push(
+                h('span', { key: 'b-missing', className: 'sf-badge sf-badge-muted' }, t.hostPartial),
+              );
+            } else if (status.stale?.length > 0) {
+              badges.push(h('span', { key: 'b-stale', className: 'sf-badge sf-badge-muted' }, t.hostStale));
+            } else if (status.installed === true) {
+              badges.push(h('span', { key: 'b-loaded', className: 'sf-badge' }, t.hostLoaded));
+            } else {
+              badges.push(
+                h('span', { key: 'b-notloaded', className: 'sf-badge sf-badge-muted' }, t.hostNotLoaded),
+              );
+            }
+            if (!on) {
+              badges.push(h('span', { key: 'b-off', className: 'sf-badge sf-badge-muted' }, t.badgeOff));
+            }
+            var needsSync =
+              on && ((status.missing?.length ?? 0) > 0 || (status.stale?.length ?? 0) > 0);
+            return h(
+              'div',
+              { key: 'host-' + def.key, className: 'sf-engine-card', 'data-host': def.key },
+              h(
+                'div',
+                { className: 'sf-card-head' },
+                h(
+                  'div',
+                  { className: 'sf-row-text' },
+                  h('span', { className: 'sf-row-name' }, def.label),
+                  h('div', { className: 'sf-badges' }, badges),
+                ),
+                h(Switch, {
+                  checked: on,
+                  label: t.hostToggleHint + ' ' + def.label,
+                  onChange: (next: any) => {
+                    draftState[1](
+                      Object.assign({}, draft, {
+                        hostEnabled: Object.assign({}, draft.hostEnabled, { [def.key]: next }),
+                      }),
+                    );
+                    noteState[1]('');
+                  },
+                }),
+              ),
+              needsSync ? h('p', { className: 'sf-hint' }, t.hostNeedsSync) : null,
+            );
+          });
+          hostBlock = h(
+            'section',
+            { key: 'host-section', className: 'sf-section', 'aria-labelledby': 'sf-host-title' },
+            h('h4', { id: 'sf-host-title', className: 'sf-section-title' }, t.hostsSection),
+            h('p', { className: 'sf-section-hint' }, t.hostsHint),
+            h('div', { style: { marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' } }, hostCards),
+          );
+        }
+
         // MCP 区块。结构照抄官方 settings-web-search：`section` + `h4`
         // 标题 + `.panel` 包裹逐项，每项用 `.row`（名字 + 状态徽标）。
         var mcpBlock = null;
@@ -2789,37 +2918,52 @@ hostWindow.__ModuleLoader__.load({
                 )
               : null;
 
+            // MCP \u5361\u7247\u4e0e\u5f15\u64ce\u5361\u7247\u540c\u4e00\u5f62\u6001\uff1a\u5361\u7247\u5934\u4e00\u884c\uff08\u540d\u5b57 + \u5fbd\u7ae0 + \u5f00\u5173 +
+            // \u5c55\u5f00\u7bad\u5934\uff09\uff0c\u5c55\u5f00\u540e\u662f\u7f16\u8f91\u5668\u3002\u7528\u540c\u4e00\u4e2a .sf-engine-card \u7c7b\uff0c\u4e24\u5f20
+            // \u5361\u7247\u5c31\u4e0d\u53ef\u80fd\u5728\u5706\u89d2\u3001\u63cf\u8fb9\u3001\u5185\u8fb9\u8ddd\u4e0a\u6f02\u79fb\u3002
             return h(
               'div',
               { key: 'mcp-' + name },
               h(
                 'div',
-                { className: 'sf-row' },
+                { className: 'sf-engine-card' },
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    'aria-expanded': isOpen,
-                    onClick: () => draftState[1](selectMcp(summary, draft, isOpen ? '' : name)),
-                    className: 'sf-row-title',
-                  },
-                  h('span', { className: 'sf-row-name' }, name),
+                  'div',
+                  { className: 'sf-card-head' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      'aria-expanded': isOpen,
+                      onClick: () => draftState[1](selectMcp(summary, draft, isOpen ? '' : name)),
+                      className: 'sf-row-title',
+                    },
+                    h(
+                      'div',
+                      { className: 'sf-row-text' },
+                      h('span', { className: 'sf-row-name' }, name),
+                      h(
+                        'div',
+                        { className: 'sf-badges' },
+                        isOpen && draft.mcpEnabled === false
+                          ? h('span', { className: 'sf-badge sf-badge-muted' }, t.mcpDisabled)
+                          : server.enabled === false
+                            ? h('span', { className: 'sf-badge sf-badge-muted' }, t.mcpDisabled)
+                            : h('span', { className: 'sf-badge' }, server.url || ''),
+                      ),
+                    ),
+                  ),
                   server.isDefault
-                    ? h('span', { className: 'sf-tag' }, t.mcpDefault)
+                    ? h('span', { className: 'sf-badge sf-badge-muted' }, t.mcpDefault)
                     : null,
                   h(
                     'span',
-                    { className: 'sf-tag', style: { borderColor: 'transparent' } },
-                    server.enabled === false ? t.mcpDisabled : server.url || '',
+                    { 'aria-hidden': 'true', className: 'sf-chevron' },
+                    isOpen ? '\u2191' : '\u2193',
                   ),
                 ),
-                h(
-                  'span',
-                  { 'aria-hidden': 'true', className: 'sf-chevron' },
-                  isOpen ? '\u2191' : '\u2193',
-                ),
+                editor,
               ),
-              editor,
             );
           });
 

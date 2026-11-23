@@ -142,8 +142,8 @@ interface RegisteredProvider {
 }
 
 async function load(config?: Record<string, unknown>) {
-  // The plugin is plain JS by design (no build step, no dsh type deps).
-  // @ts-expect-error untyped on purpose
+  // dsh/index.js 是 tsc 从 index.ts 编译出来的产物，类型就在同目录，
+  // 所以这里不需要再压制任何东西。
   const plugin = (await import('../dsh/index.js')) as {
     apply: (ctx: unknown, config?: Record<string, unknown>) => void;
   };
@@ -727,7 +727,6 @@ async function withConfig(
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   try {
-    // @ts-expect-error untyped on purpose
     const plugin = (await import('../dsh/index.js')) as {
       apply: (ctx: unknown, config?: Record<string, unknown>) => void;
     };
@@ -1102,8 +1101,7 @@ describe('dsh settings card route', () => {
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try {
-      // @ts-expect-error untyped on purpose
-      const plugin = (await import('../dsh/index.js')) as {
+        const plugin = (await import('../dsh/index.js')) as {
         apply: (ctx: unknown, config?: Record<string, unknown>) => void;
       };
       const stage = house();
@@ -1252,7 +1250,6 @@ describe('dsh settings card route', () => {
     // 0.1.7's settings service only projects volatile Config fields, and the
     // card has been keyed by package name since 0.1.6-alpha.2. Calling the
     // removed register put a TypeError in every harness log.
-    // @ts-expect-error untyped on purpose
     const plugin = (await import('../dsh/index.js')) as {
       apply: (ctx: unknown, config?: Record<string, unknown>) => void;
     };
@@ -1273,7 +1270,6 @@ describe('dsh settings card route', () => {
   it('keeps search and both tools on a host that serves no settings service', async () => {
     // The settings service is optional: a profile may leave it out, and the
     // scoped inject then never runs. Nothing else may hang on it.
-    // @ts-expect-error untyped on purpose
     const plugin = (await import('../dsh/index.js')) as {
       apply: (ctx: unknown, config?: Record<string, unknown>) => void;
     };
@@ -1290,7 +1286,6 @@ describe('dsh settings card route', () => {
     // The Plugins page switches a bundle off and on without restarting dsh.
     // A route left behind kept reading and writing the config file for a
     // plugin that was off, and made the next registration a duplicate.
-    // @ts-expect-error untyped on purpose
     const plugin = (await import('../dsh/index.js')) as {
       apply: (ctx: unknown, config?: Record<string, unknown>) => void;
     };
@@ -1647,7 +1642,6 @@ describe('dsh plugin config switches', () => {
   });
 
   it('stays a tools-only plugin when the web seam surface moved', async () => {
-    // @ts-expect-error untyped on purpose
     const plugin = (await import('../dsh/index.js')) as {
       apply: (ctx: unknown, config?: Record<string, unknown>) => void;
     };
