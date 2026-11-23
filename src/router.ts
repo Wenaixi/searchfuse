@@ -1,4 +1,4 @@
-import { chosenEngine, engineSettings, type ModsearchConfig, type Role } from './config.ts';
+import { chosenEngine, engineSettings, orderEngines, type ModsearchConfig, type Role } from './config.ts';
 import { coolingEngineEntry, type CooldownState } from './cooldown.ts';
 import {
   FETCH_FLOOR,
@@ -174,6 +174,29 @@ export function planRole(
     const floor = resolveEngine(FETCH_FLOOR);
     if (enabled(floor)) {
       add(floor);
+    }
+  }
+
+  // 用户排定的尝试顺序，作用在「基础顺序」之上：它决定先试谁。
+  //
+  // 位置在冷却重排之前是有意的。冷却是一种临时状态（配额用尽，一段时间后
+  // 自动回归），而用户顺序是长期偏好；先让用户表达偏好，再让冷却在偏好
+  // 内部做临时调整，两者各司其职。反过来（先按冷却排再让用户顺序覆盖）会
+  // 让一个冷却中的引擎因为被拖到前面而抢回第一顺位，那正是冷却想避免的。
+  //
+  // 只对 search 生效：fetch 链的末尾是本地取页器这个「地板」，把它拖到
+  // 任何位置都会改变「外部引擎抓不到时本地兜底」的语义；social 只有一个
+  // 引擎，顺序无从谈起。
+  if (role === 'search') {
+    const ordered = orderEngines(
+      chain.map((engine) => engine.name),
+      config.aggregate?.engineOrder,
+    );
+    const byName = new Map(chain.map((engine) => [engine.name, engine]));
+    chain.length = 0;
+    for (const name of ordered) {
+      const engine = byName.get(name);
+      if (engine !== undefined) chain.push(engine);
     }
   }
 

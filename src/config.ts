@@ -31,6 +31,18 @@ export interface AggregateConfig {
    * 运行带着已到达的部分继续。链式模式下忽略此项——那条路有自己的单引擎预算。
    */
   deadlineMs?: number;
+  /**
+   * 引擎尝试顺序，按引擎名排列。
+   *
+   * 只在 `mode: 'chain'` 下影响行为：那条路一次试一个引擎，顺序就是退避
+   * 顺序，靠前的先试、失败才轮到后面的。融合模式下所有引擎并发跑，顺序
+   * 不改变结果，但界面上仍按它排——用户拖动卡片得到的一致顺序在两种模式
+   * 下都是同一个值。
+   *
+   * 未列出的引擎排在这些之后，按注册顺序。只写一部分是合法的：用户把
+   * 三个常用引擎拖到前面，不必为此补全另外七个。
+   */
+  engineOrder?: string[];
 }
 
 /**
@@ -818,9 +830,44 @@ export function aggregateMode(config: ModsearchConfig): AggregateMode {
   return config.aggregate?.mode === 'chain' ? 'chain' : 'rrf';
 }
 
+/**
+ * 按用户排定的顺序给引擎名单排序。
+ *
+ * 用户只可能拖动几个常用引擎，所以这里做的是「名单里点过名的先按那个顺序
+ * 排，没点名的保持传入顺序」，而不是要求配置里写全所有引擎。配置里出现
+ * 名单之外的引擎名（拼错、或者已下线的引擎）会被静默忽略，而不是让整份
+ * 顺序失效：一个拼写错误不该把用户所有卡片都打乱。
+ *
+ * 这是纯函数，不读配置也不写配置，调用方各自决定名单从哪来。
+ */
+export function orderEngines(names: string[], order: string[] | undefined): string[] {
+  if (order === undefined || order.length === 0) {
+    return names;
+  }
+  const rank = new Map<string, number>();
+  for (let index = 0; index < order.length; index += 1) {
+    const name = order[index];
+    if (typeof name !== 'string') continue;
+    // 先出现者胜：重复项只认第一个位置。
+    if (!rank.has(name)) {
+      rank.set(name, index);
+    }
+  }
+  // 未名列者统一排到后面，彼此之间保持传入顺序。用两趟收集而不是把
+  // Infinity 塞进比较器：比较器里返回 Infinity 的行为在各引擎实现上并不
+  // 统一，而这里的语义本来就只是「分两批」。
+  const listed: string[] = [];
+  const rest: string[] = [];
+  for (const name of names) {
+    if (rank.has(name)) listed.push(name);
+    else rest.push(name);
+  }
+  listed.sort((a, b) => (rank.get(a) as number) - (rank.get(b) as number));
+  return listed.concat(rest);
+}
+
 /** 一次融合运行的总墙钟预算，单位为毫秒。 */
-export function aggregateDeadlineMs(config: ModsearchConfig): number {
-  const configured = config.aggregate?.deadlineMs;
+export function aggregateDeadlineMs(config: ModsearchConfig): number {  const configured = config.aggregate?.deadlineMs;
   if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
     return configured;
   }

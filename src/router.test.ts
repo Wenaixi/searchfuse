@@ -87,10 +87,7 @@ describe('engine chains per role', () => {
       'tavily',
       'exa',
     ]);
-  });
-
-  it('keeps firecrawl at the front of the search chain when keyed', () => {
-    const keyed = config({
+  });  it('keeps firecrawl at the front of the search chain when keyed', () => {    const keyed = config({
       engines: { tavily: { apiKey: 't' }, exa: { apiKey: 'e' }, firecrawl: { apiKey: 'f' } },
     });
     expect(names(planRole('search', keyed, undefined, WITH_AGY).chain)).toEqual([
@@ -135,6 +132,53 @@ describe('engine chains per role', () => {
       'anysearch',
       'youcom',
       'searxng',
+    ]);
+  });
+
+  it('follows the user order for search, keeping unlisted engines behind it', () => {
+    // 拖动排序改变的是「先试谁」，而不是「谁参与」：把 tavily 拖到最前，
+    // 只应移动它一个，其余引擎仍按原顺序留在链里。这台机器上没有 tavily
+    // 密钥，所以用 searxng 演示同一件事。
+    const ordered = config({ aggregate: { engineOrder: ['searxng'] } });
+    expect(names(planRole('search', ordered, undefined, WITH_AGY).chain)).toEqual([
+      'searxng',
+      'firecrawl',
+      'keenable',
+      'anysearch',
+      'youcom',
+    ]);
+  });
+
+  it('orders only the engines the user named, then falls back to the base order', () => {
+    const ordered = config({ aggregate: { engineOrder: ['youcom', 'searxng'] } });
+    expect(names(planRole('search', ordered, undefined, WITH_AGY).chain)).toEqual([
+      'youcom',
+      'searxng',
+      'firecrawl',
+      'keenable',
+      'anysearch',
+    ]);
+  });
+
+  it('ignores engine names in the order that are not in the chain', () => {
+    // 拼错一个名字不该把整份顺序打乱，只该让那条规则落空。
+    const ordered = config({ aggregate: { engineOrder: ['exa', 'nosuch'] } });
+    expect(names(planRole('search', ordered, undefined, WITH_AGY).chain)).toEqual([
+      'firecrawl',
+      'keenable',
+      'anysearch',
+      'youcom',
+      'searxng',
+    ]);
+  });
+
+  it('leaves the fetch chain in its base order, floor included', () => {
+    // fetch 链末尾是本地取页器这个地板，拖动它会让「外部抓不到就本地兜底」
+    // 的语义失效，所以顺序只作用于 search。
+    const ordered = config({ aggregate: { engineOrder: ['exa', 'firecrawl'] } });
+    expect(names(planRole('fetch', ordered, undefined, WITH_AGY).chain)).toEqual([
+      'firecrawl',
+      'local',
     ]);
   });
 
