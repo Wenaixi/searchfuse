@@ -35,6 +35,10 @@ interface EngineSummary {
   mcp?: Record<string, Bag>;
   readiness?: Bag;
   searxng?: Bag;
+  /** 文件里写下的引擎尝试顺序，只含用户亲手排过的名字。 */
+  engineOrder?: string[];
+  /** 当前的聚合模式；未写等于 'rrf'。 */
+  aggregateMode?: string;
   [others: string]: any;
 }
 
@@ -68,6 +72,10 @@ interface CardDraft {
   searxngScope: string;
   searxngShowAll: boolean;
   searxngEngineName: string;
+  /** 卡片上拖动与序号输入共同维护的那份顺序。 */
+  engineOrder: string[];
+  /** 'rrf' 并发融合，'chain' 一次试一个。 */
+  aggregateMode: string;
   [others: string]: any;
 }
 
@@ -189,6 +197,24 @@ hostWindow.__ModuleLoader__.load({
         keySetLabel: 'key set',
         envBadge: 'env',
         autoToggleHint: 'Include this engine in automatic routing',
+        // 卡片表面的状态徽章：只说明「现在是什么状态」，不解释怎么改。
+        badgeNoKey: 'no key',
+        badgeProxy: 'proxy',
+        badgeDirect: 'direct',
+        badgeLoggedIn: 'signed in',
+        badgeLoggedOut: 'not signed in',
+        badgeLoaded: 'loaded',
+        badgeNotLoaded: 'not loaded',
+        badgeOff: 'off',
+        // 顺序与聚合模式。
+        orderHint: 'Drag the card, or type a number, to change the try order.',
+        rankLabel: 'Try order',
+        rankInvalid: 'Enter a position between 1 and {n}.',
+        modeLabel: 'Run mode',
+        modeRrf: 'Fuse in parallel',
+        modeChain: 'One at a time',
+        modeRrfHint: 'Ask every enabled engine at once and merge the answers.',
+        modeChainHint: 'Try one engine; only move on when it fails. Order matters.',
         // 状态总览与引擎分组（设置界面重构）。
         overviewEngines: '{n} engines ready',
         overviewNoEngines: 'no engine ready',
@@ -318,6 +344,24 @@ hostWindow.__ModuleLoader__.load({
         keySetLabel: '已存密钥',
         envBadge: '环境变量',
         autoToggleHint: '让这个引擎参与自动故障转移',
+        // 卡片表面的状态徽章：只说明「现在是什么状态」，不解释怎么改。
+        badgeNoKey: '未配密钥',
+        badgeProxy: '走代理',
+        badgeDirect: '直连',
+        badgeLoggedIn: '已登录',
+        badgeLoggedOut: '未登录',
+        badgeLoaded: '已加载',
+        badgeNotLoaded: '未加载',
+        badgeOff: '已关闭',
+        // 顺序与聚合模式。
+        orderHint: '拖动卡片，或直接输入序号，调整尝试顺序。',
+        rankLabel: '尝试顺序',
+        rankInvalid: '请输入 1 到 {n} 之间的名次。',
+        modeLabel: '运行方式',
+        modeRrf: '并发融合',
+        modeChain: '逐个退避',
+        modeRrfHint: '同时向所有已启用引擎提问，再融合答案。',
+        modeChainHint: '一次只试一个引擎，失败才轮到下一个。顺序有意义。',
         // 状态总览与引擎分组（设置界面重构）。
         overviewEngines: '{n} 个引擎可用',
         overviewNoEngines: '没有可用的引擎',
@@ -506,11 +550,18 @@ hostWindow.__ModuleLoader__.load({
 
     // 引擎切换或新的摘要到达时的下一份草稿。那些字段属于新选中的引擎，
     // 所以切换引擎永远不会把一个引擎的接口地址拷贝到另一个引擎上。
-    function nextDraft(summary: EngineSummary, engine: string, keepEnabled?: Bag): CardDraft {
+    //
+    // `carry` 是上一份草稿，里面那些「与具体引擎无关」的用户改动要带过来：
+    // 勾选、拖动顺序、聚合模式。不带的话，用户把三个引擎拖好、接着去改
+    // 一个密钥，顺序就被悄悄还原了 —— 那是这张卡片最不该犯的错。
+    function nextDraft(summary: EngineSummary, engine: string, carry?: CardDraft): CardDraft {
       // engine 为 '' 本身就是一种答案：未固定，由可用性决定。此时不存在
       // 某个引擎的密钥该放进这些字段，于是它们保持为空，卡片再说明怎么把
       // 它们找回来。
       var current = (summary.engines?.[engine] as Bag) || { baseURL: '', model: '' };
+      // 当前生效的完整顺序：文件里写过的按那个名次，其余按展示顺序补在后面。
+      // 卡片显示的、拖动改的、序号框写的，都是这一份。
+      var order = effectiveOrder(summary);
       return {
         engine: engine,
         apiKey: '',
@@ -521,10 +572,11 @@ hostWindow.__ModuleLoader__.load({
         proxy: '',
         toolName: current.toolName || '',
         exposeState: exposeState(summary, engine),
+        engineOrder: carry && Array.isArray(carry.engineOrder) ? carry.engineOrder.slice() : order,
+        aggregateMode: carry ? carry.aggregateMode : (summary.aggregateMode || 'rrf'),
         enabled: Object.assign(
           {},
-          keepEnabled ||
-            Object.fromEntries(
+          (carry && carry.enabled) ||            Object.fromEntries(
               ENGINES.map((name) => [name, summary.engines?.[name]?.enabled !== false]),
             ),
         ),
@@ -553,31 +605,126 @@ hostWindow.__ModuleLoader__.load({
         //
         // 它是 SearXNG 实例选择的**唯一真源**。早先还并存一个布尔字段
         // `searxngEmbedded`，两处各存一份状态，保存时按哪个算就成了运气。
-        searxngMode: searxngModeOf(summary),
+        searxngMode: carry ? carry.searxngMode : searxngModeOf(summary),
         // 外部实例的地址与代理（草稿值，空表示不改动文件）。
-        searxngExternalURL: (summary?.engines?.searxng?.baseURL || ''),
-        searxngExternalProxy: '',
+        searxngExternalURL: carry
+          ? carry.searxngExternalURL
+          : (summary?.engines?.searxng?.baseURL || ''),
+        searxngExternalProxy: carry ? carry.searxngExternalProxy : '',
         // 默认代理（outgoing.proxies.all://），作用于没有单独配置的上游引擎。
-        searxngDefaultProxy: proxiesToText(summary?.searxng?.outgoing),
+        searxngDefaultProxy: carry
+          ? carry.searxngDefaultProxy
+          : proxiesToText(summary?.searxng?.outgoing),
         // 上游引擎清单的过滤词与筛选档位，只描述这张卡片此刻怎么显示。
-        searxngFilter: '',
-        searxngScope: 'enabled',
-        searxngShowAll: false,
-        searxngEngineName: '',
+        searxngFilter: carry ? carry.searxngFilter : '',
+        searxngScope: carry ? carry.searxngScope : 'enabled',
+        searxngShowAll: carry ? carry.searxngShowAll : false,
+        searxngEngineName: carry ? carry.searxngEngineName : '',
         // 逐引擎的启用/禁用与代理草稿，按引擎名索引。
-        searxngRules: Object.assign(
-          {},
-          ...Object.entries(((summary?.searxng?.engines) || {}) as Bag).map(([name, rawRule]) => {
-            const rule = rawRule as Bag | undefined;
-            return {
-              [name]: {
-                enabled: rule?.disabled !== true,
-                proxy: proxiesToText(rule?.proxies),
-              },
-            };
-          }),
+        searxngRules: carry
+          ? carry.searxngRules
+          : Object.assign(
+              {},
+              ...Object.entries(((summary?.searxng?.engines) || {}) as Bag).map(([name, rawRule]) => {
+                const rule = rawRule as Bag | undefined;
+                return {
+                  [name]: {
+                    enabled: rule?.disabled !== true,
+                    proxy: proxiesToText(rule?.proxies),
+                  },
+                };
+              }),
         ),
       };
+    }
+
+    /**
+     * 当前生效的完整引擎顺序。
+     *
+     * 文件里只记用户亲手排过的几个，其余引擎没点过名。卡片要显示一个完整
+     * 的列表，所以把没名列的按展示顺序补在后面 —— 与 src/config.ts 的
+     * orderEngines() 同一个语义，只是那边排的是引擎链、这边排的是卡片。
+     *
+     * 补齐的东西留在卡片里，不回写文件：用户根本没排过的引擎不该因为打开
+     * 一次卡片就被写进 engineOrder。
+     */
+    function effectiveOrder(summary: EngineSummary): string[] {
+      var listed = Array.isArray(summary.engineOrder) ? summary.engineOrder : [];
+      var rank: Record<string, number> = {};
+      listed.forEach((name, index) => {
+        if (typeof name === 'string' && rank[name] === undefined) rank[name] = index;
+      });
+      var known: string[] = [];
+      var rest: string[] = [];
+      ENGINES.forEach((name) => {
+        // `local` 只抓取交给它的一个 URL，不参与搜索排序，所以不出现在这里。
+        if (name === 'local') return;
+        if (rank[name] !== undefined) known.push(name);
+        else rest.push(name);
+      });
+      // 文件里的名字若不在当前引擎表里（拼错或引擎已下线），静默跳过，
+      // 与 orderEngines() 一致：一个拼写错误不该让整份顺序失效。
+      known.sort((a, b) => rank[a] - rank[b]);
+      return known.concat(rest);
+    }
+
+    /** 某个引擎在当前顺序里的名次，从 1 开始；不在顺序里返回 0。 */
+    function rankOf(order: string[], name: string): number {
+      var index = order.indexOf(name);
+      return index < 0 ? 0 : index + 1;
+    }
+
+    /**
+     * 把某个引擎挪到指定名次（从 1 开始），其余引擎依次让位。
+     *
+     * 拖动与序号输入共用这一个函数，所以两种操作不可能得出两种结果。
+     * 名次会被夹到合法区间，而不是报错：用户在一个 8 项的列表里填 12，
+     * 想说的显然是「放到最后」。
+     */
+    function moveToRank(order: string[], name: string, target: number): string[] {
+      var from = order.indexOf(name);
+      if (from < 0) return order;
+      var to = Math.min(Math.max(target - 1, 0), order.length - 1);
+      if (to === from) return order;
+      var next = order.slice();
+      next.splice(from, 1);
+      next.splice(to, 0, name);
+      return next;
+    }
+
+    /**
+     * 交换两个位置 —— 拖动实现用的版本。
+     *
+     * 与 moveToRank 分开是因为它们的语义真的不同：把第一项拖到第三项的位置，
+     * 「交换」让原第三项来到第一，「后移并让位」让原第二项来到第一。桌面端
+     * 拖放的手感是后者，所以拖动最终也调用 moveToRank；这个函数留给将来可能
+     * 出现的「两两调换」按钮。
+     */
+    function swapRank(order: string[], a: number, b: number): string[] {
+      if (a < 0 || b < 0 || a >= order.length || b >= order.length || a === b) return order;
+      var next = order.slice();
+      var held = next[a];
+      next[a] = next[b];
+      next[b] = held;
+      return next;
+    }
+
+    /**
+     * 这份草稿是否与摘要一致到「没有东西可保存」。
+     *
+     * 顺序按**生效后的完整顺序**比，不是按文件里那份短名单：用户把 A 拖到
+     * 第三位再拖回原位，文件里的名单可能一次都没变过，这时不该亮起保存
+     * 按钮。反过来，把文件里从未列名的引擎拖到最前，虽然名单从 [] 变成
+     * ['x', ...]，也是真的改动。
+     */
+    function orderChanged(summary: EngineSummary, draft: CardDraft): boolean {
+      var original = effectiveOrder(summary);
+      var current = draft.engineOrder;
+      if (!Array.isArray(current) || current.length !== original.length) return true;
+      for (var index = 0; index < original.length; index += 1) {
+        if (current[index] !== original[index]) return true;
+      }
+      return false;
     }
 
     /** 展开某个 MCP server 的编辑区，把它的当前值填进去。 */
@@ -608,7 +755,7 @@ hostWindow.__ModuleLoader__.load({
      * 说明。
      */
     function selectEngine(summary: EngineSummary, draft: CardDraft, engine: string): CardDraft {
-      var next = nextDraft(summary, engine, draft.enabled);
+      var next = nextDraft(summary, engine, draft);
       if (engine !== '' && chainEngines(summary).indexOf(engine) >= 0) {
         next.enabled[engine] = true;
       }
@@ -638,6 +785,15 @@ hostWindow.__ModuleLoader__.load({
      */
     function isDirty(summary: EngineSummary, draft: CardDraft): boolean {
       if (draft.engine !== summary.engine) {
+        return true;
+      }
+      // 拖动顺序与聚合模式是两项全局设置，与「正在编辑哪个引擎」无关，
+      // 所以放在最前面判断：只把卡片收起来看看、什么也没动，按钮就该
+      // 灰着。
+      if (orderChanged(summary, draft)) {
+        return true;
+      }
+      if ((draft.aggregateMode || 'rrf') !== (summary.aggregateMode || 'rrf')) {
         return true;
       }
       var enabledChanged = Object.keys(draft.enabled || {}).some(
@@ -852,6 +1008,23 @@ hostWindow.__ModuleLoader__.load({
       }
       if (Object.keys(rulePatch).length > 0) {
         payload.searxngRules = rulePatch;
+      }
+
+      // 拖动排序与聚合/退避模式是这张卡片的两项全局设置，与某个引擎无关。
+      //
+      // 只在真的变了时才发，理由同其余字段：一次只改密钥的保存不该顺手把
+      // 排序重写一遍，那会让文件的修改时间变动、触发宿主重载，而屏幕上
+      // 什么都没动。
+      //
+      // 比较用 orderChanged()，也就是与 isDirty 同一个判据。这里最容易犯
+      // 的错是拿 draft.engineOrder（完整名单，9 项）去比 summary.engineOrder
+      // （文件里的短名单，通常为空）—— 两者长度永远不等，于是每一次保存
+      // 都附带一份顺序，用户没碰过排序也会被写进文件。
+      if (orderChanged(summary, draft)) {
+        payload.engineOrder = draft.engineOrder;
+      }
+      if ((draft.aggregateMode || 'rrf') !== (summary.aggregateMode || 'rrf')) {
+        payload.aggregateMode = draft.aggregateMode;
       }
 
       return payload;
@@ -1180,6 +1353,115 @@ hostWindow.__ModuleLoader__.load({
 .sf-divider {
   border-top: 0.5px solid var(--dsw-alias-border-l2);
   margin: 2px 0;
+}
+
+/* 一张引擎卡片。
+   与 .sf-row 的差别只有两点：纵向堆叠、头尾各留一点呼吸。其余一律沿用
+   card-fill + 0.5px 描边，因为卡片的可读性约束与行块完全一样。
+   拖动中的卡片用半透明表示「正被搬走」，落点用虚线框表示「会放在这里」——
+   两种状态都不改底色，避免与壁纸主题下本就吃紧的对比度打架。 */
+.sf-engine-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-card-fill);
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  box-sizing: border-box;
+}
+.sf-engine-card.sf-dragging {
+  opacity: 0.5;
+}
+.sf-engine-card.sf-drop-target {
+  border-style: dashed;
+  border-color: var(--dsw-alias-label-secondary);
+}
+
+/* 卡片头：序号 + 名字 + 状态徽章 + 开关 + 展开箭头。
+   序号是「拖动之外的第二条排序路径」：输入一个数字就把卡片挪过去，
+   所以它必须是可编辑的输入框，而不是装饰性的数字。 */
+.sf-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sf-rank-input {
+  width: 34px;
+  flex: none;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  box-sizing: border-box;
+}
+/* 拖动手柄：整张卡片头都可以拖，这个图标只是告诉人「这里能拖」。
+   cursor: grab 是唯一的视觉提示，不再额外画点阵。 */
+.sf-drag-handle {
+  flex: none;
+  cursor: grab;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+/* 状态徽章行：把「有没有 key、有没有代理、登录了没、加载成没成」
+   压成一行小标签，不占卡片正文的位置。 */
+.sf-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.sf-badge {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+/* 未配置的状态用更淡的色，避免一片「未配置」抢走注意力。 */
+.sf-badge.sf-badge-muted {
+  color: var(--dsw-alias-label-tertiary);
+  border-color: var(--dsw-alias-border-l2);
+}
+
+/* 全局模式选择：融合 / 退避。两个选项是互斥的，所以用一组分段按钮，
+   而不是两个独立勾选框 —— 后者的读法是「可以同时开」，而它们不能。 */
+.sf-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sf-mode-label {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+}
+.sf-mode-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 3px 12px;
+  border-radius: 6px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.sf-mode-btn[aria-pressed='true'] {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-label-primary);
 }
 
 .sf-field {
@@ -1557,6 +1839,17 @@ hostWindow.__ModuleLoader__.load({
         var summaryState = react.useState(null);
         var draftState = react.useState(null);
         var noteState = react.useState('');
+        // 拖动状态：从哪张卡片开始拖、当前悬停在哪张卡片上。
+        //
+        // 放进 React state 而不是模块变量，是因为卡片会被卸载重建，一个活在
+        // 外面的「正在拖谁」会在重建后指向一张已不存在的卡片，拖动就再也
+        // 落不下去。'' 表示没有拖动 / 没有悬停。
+        var dragFromState = react.useState('');
+        var dragOverState = react.useState('');
+        var dragFrom = dragFromState[0];
+        var dragOver = dragOverState[0];
+        var setDragFrom = dragFromState[1];
+        var setDragOver = dragOverState[1];
         // 页面上已经有插件标题做表单的标题，所以那里的表单一开始就是展开
         // 的：标题底下一个折叠块，等于让人把同一次点击做两遍。
         var open = view === 'page' || openState[0];
@@ -1797,24 +2090,19 @@ hostWindow.__ModuleLoader__.load({
             // 「哪些我能直接用、哪些要配东西」。组内每个引擎一块，块标题
             // 行右侧放官方 Switch，低频字段收进 DisclosureRow —— 这样
             // 视觉噪音不会淹没核心操作（填密钥、切开关）。
-            const ENGINE_GROUPS: Array<{ key: string; title: string; hint: string; names: string[] }> = [
-              { key: 'keyed', title: t.groupKeyed, hint: t.groupKeyedHint, names: [] },
-              { key: 'keyless', title: t.groupKeyless, hint: t.groupKeylessHint, names: [] },
-              { key: 'cli', title: t.groupCli, hint: t.groupCliHint, names: [] },
-            ];
-            // 引擎组渲染全部可参与搜索的引擎，而不是只渲染 doctor 说就绪的。
-            // 隐藏一个本机暂时跑不了的引擎，会让用户既看不到它、也无法去修
-            // 它；就绪与否改用行内说明表达（见 D4）。
-            const listedEngines = CHAIN_ENGINES;
-            listedEngines.forEach((name) => {
-              if (name === 'antigravity-cli' || name === 'grok-cli') {
-                ENGINE_GROUPS[2].names.push(name);
-              } else if (KEYLESS_ENGINES.indexOf(name) >= 0) {
-                ENGINE_GROUPS[1].names.push(name);
-              } else {
-                ENGINE_GROUPS[0].names.push(name);
-              }
-            });
+            // 引擎卡片按用户排定的顺序渲染，而不是按「怎么才能用」分组。
+            //
+            // 分组曾经解决的是「哪些我能直接用」这个问题，但卡片形态本身
+            // 已经把答案写在表面了：密钥、代理、登录状态都是卡片头上的徽章，
+            // 扫一眼就知道。再按可用方式分组，等于把同一份信息说两遍，还
+            // 多出一层「拖动排序在组内生效还是在全局生效」的歧义 —— 用户
+            // 要的顺序是一个，不是每组一个。
+            //
+            // 对 draft.engineOrder 的读取一律先做 Array 检查：这个字段是新
+            // 加的，任何仍持有旧版草稿的宿主（以及测试里的裸对象）都可能给
+            // 出 undefined，而一个字段的缺席不该让整张卡片渲染不出来。
+            const orderList = Array.isArray(draft.engineOrder) ? draft.engineOrder : [];
+            const listedEngines: string[] = orderList.length > 0 ? orderList : CHAIN_ENGINES;
 
             // 改某个引擎的某个字段：若它还不是编辑目标，先把它的真值灌进
             // draft，再落这次改动。这样九个引擎共用一个 draft 也不会串。
@@ -1827,7 +2115,7 @@ hostWindow.__ModuleLoader__.load({
               noteState[1]('');
             };
 
-            const statusRows = listedEngines.map((name) => {
+            const statusRows = listedEngines.map((name: string) => {
               const settings = summary.engines?.[name] || {};
               const checked = draft.enabled?.[name] !== false;
               const canKey = keyed(summary, name);
@@ -1860,17 +2148,12 @@ hostWindow.__ModuleLoader__.load({
               const isEditing = draft.editTarget === name;
               const pick = () => {
                 if (isEditing) return;
-                var next = nextDraft(summary, name);
+                // 一次切换编辑目标。nextDraft 的 carry 参数负责把「与引擎
+                // 无关」的用户改动（勾选、拖动顺序、聚合模式、SearXNG 草稿）
+                // 全部带过来 —— 早先这里是逐字段手工搬运，加一个字段就得
+                // 改两处，漏一个就出现「换个引擎看看，顺序被还原了」。
+                var next = nextDraft(summary, name, draft);
                 next.editTarget = name;
-                // 保留用户已做的勾选与 SearXNG 草稿。
-                next.enabled = Object.assign({}, draft.enabled);
-                next.searxngMode = draft.searxngMode;
-                next.searxngExternalURL = draft.searxngExternalURL;
-                next.searxngExternalProxy = draft.searxngExternalProxy;
-                next.searxngDefaultProxy = draft.searxngDefaultProxy;
-                next.searxngRules = draft.searxngRules;
-                next.searxngFilter = draft.searxngFilter;
-                next.searxngScope = draft.searxngScope;
                 draftState[1](next);
                 noteState[1]('');
               };
@@ -1882,26 +2165,98 @@ hostWindow.__ModuleLoader__.load({
                 settings.hasKey === true,
               ].filter(Boolean).length;
 
-              // 一行引擎：左侧两行文字（名字 + 状态说明），右侧官方 Switch。
-              // 形态照抄官方风格插件的列表行，不自绘复选框与展开箭头。
+              // 卡片头：拖动把手 + 序号 + 名字/说明 + 状态徽章 + 开关。
+              //
+              // 序号与拖动是两条并存的排序路径，指向同一个 draft.engineOrder：
+              // 有人习惯拖，有人在键盘上敲一个数字更快，两种操作最后都落到
+              // 同一份顺序上，所以不会出现「拖了之后序号没变」这种自相矛盾。
+              const rank = rankOf(orderList, name);
+              const setRank = (raw: string) => {
+                const parsed = Number.parseInt(String(raw || ''), 10);
+                if (!Number.isFinite(parsed)) {
+                  noteState[1](t.rankInvalid.replace('{n}', String(orderList.length)));
+                  return;
+                }
+                const next = moveToRank(orderList, name, parsed);
+                draftState[1](Object.assign({}, draft, { engineOrder: next }));
+                noteState[1]('');
+              };
+
+              // 徽章：只报状态，不解释原因。解释在展开后的编辑区里。
+              //
+              // 「没配密钥」这条只在真的可配密钥时才出现（keyed），否则
+              // 一个免密钥引擎会一直挂着一个让人误以为必须去填的灰标。
+              const badges: any[] = [];
+              if (settings.enabled === false) {
+                badges.push(h('span', { key: 'b-off', className: 'sf-badge sf-badge-muted' }, t.badgeOff));
+              }
+              if (keyed(summary, name)) {
+                badges.push(
+                  settings.hasKey === true
+                    ? h('span', { key: 'b-key', className: 'sf-badge' }, t.keySetLabel)
+                    : h('span', { key: 'b-nokey', className: 'sf-badge sf-badge-muted' }, t.badgeNoKey),
+                );
+              }
+              // 代理：直连与跟随系统代理是两件不同的事，所以分开表达。
+              // `direct`/`none` 是这张卡片自己认的直连写法。
+              if (settings.proxy === 'direct' || settings.proxy === 'none') {
+                badges.push(h('span', { key: 'b-direct', className: 'sf-badge' }, t.badgeDirect));
+              } else if (typeof settings.proxy === 'string' && settings.proxy !== '') {
+                badges.push(h('span', { key: 'b-proxy', className: 'sf-badge' }, t.badgeProxy));
+              }
+              // CLI 引擎的登录状态由 doctor 给出（readiness 里的 ready），
+              // 与「本机能不能跑」是同一个探测结果，所以不再单独问一次。
+              if (name === 'grok-cli' || name === 'antigravity-cli') {
+                badges.push(
+                  isReady === true
+                    ? h('span', { key: 'b-login', className: 'sf-badge' }, t.badgeLoggedIn)
+                    : isReady === false
+                      ? h('span', { key: 'b-logout', className: 'sf-badge sf-badge-muted' }, t.badgeLoggedOut)
+                      : null,
+                );
+              }
+              // grok-cli 只能搜 X，不能搜网页。这不是一句可有可无的补充：
+              // 用户把它拖到第一位、期望它回答一般问题时，这条徽章正是
+              // 那个「为什么答案不对」的答案。
+              if (name === 'grok-cli') {
+                badges.push(h('span', { key: 'b-social', className: 'sf-badge' }, t.socialOnly));
+              }
+              if (isReady === false) {
+                badges.push(
+                  h('span', { key: 'b-notready', className: 'sf-badge sf-badge-muted' }, t.notReadyLabel),
+                );
+              }
+
               const headerRow = h(
                 'div',
-                { key: 'row-' + name, className: 'sf-row sf-engine-head', 'data-engine-row': name },
+                { key: 'row-' + name, className: 'sf-card-head', 'data-engine-row': name },
+                h(
+                  'span',
+                  // 用 aria-label 而不是 title：拖动把手的说明属于无障碍
+                  // 名称，而不是悬停浮层。卡片上不出现任何 tooltip 是一条
+                  // 既有约束 —— 它挡的是把 doctor 的英文诊断原文糊到界面上，
+                  // 而悬停浮层正是那类文本最爱漏出来的地方。
+                  { className: 'sf-drag-handle', 'aria-hidden': 'true', 'aria-label': t.orderHint },
+                  '≡',
+                ),
+                h('input', {
+                  type: 'number',
+                  min: 1,
+                  max: orderList.length,
+                  value: String(rank),
+                  className: 'sf-rank-input',
+                  'data-rank-input': name,
+                  'aria-label': t.rankLabel + ' ' + name,
+                  onChange: (event: Bag) => setRank(event.target.value),
+                  onClick: (event: Bag) => event.stopPropagation(),
+                }),
                 h(
                   'div',
                   { className: 'sf-row-text' },
                   h('span', { className: 'sf-row-name' }, name),
-                  h(
-                    'span',
-                    { className: 'sf-row-desc' },
-                    [
-                      readinessLabel,
-                      keyStatus ? t.keySetLabel : '',
-                      name === 'grok-cli' ? t.socialOnly : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · '),
-                  ),
+                  badges.length === 0
+                    ? null
+                    : h('div', { className: 'sf-badges' }, badges),
                 ),
                 h(Switch, {
                   checked,
@@ -2074,25 +2429,66 @@ hostWindow.__ModuleLoader__.load({
                 children: editorRow,
               });
 
+              // 卡片本体。拖动用 HTML5 drag-and-drop 的原生事件，不引入
+              // 任何拖放库：这张卡片只需要「把 A 拖到 B 的位置」，而那正是
+              // draggable + dragover 默认就提供的东西。
+              //
+              // 拖动状态放进了这张卡片自己的 React state（dragFrom），而不是
+              // 模块级的变量：卡片会被卸载重建，一个活在外面的「正在拖谁」
+              // 会在重建后指向一张不存在的卡片。
               return h(
                 'div',
-                { key: name, className: 'sf-engine-block', 'data-engine': name },
+                {
+                  key: name,
+                  className:
+                    'sf-engine-card' +
+                    (dragFrom === name ? ' sf-dragging' : '') +
+                    (dragOver === name && dragFrom !== name ? ' sf-drop-target' : ''),
+                  'data-engine-card': name,
+                  draggable: true,
+                  onDragStart: (event: Bag) => {
+                    setDragFrom(name);
+                    // 必须写一点数据，否则 Firefox 不会开始拖动。
+                    if (event.dataTransfer) {
+                      event.dataTransfer.setData('text/plain', name);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }
+                  },
+                  onDragOver: (event: Bag) => {
+                    // preventDefault 是「这里可以放下」的唯一信号。
+                    if (event.preventDefault) event.preventDefault();
+                    if (dragFrom !== name) setDragOver(name);
+                  },
+                  onDragLeave: () => {
+                    if (dragOver === name) setDragOver('');
+                  },
+                  onDrop: (event: Bag) => {
+                    if (event.preventDefault) event.preventDefault();
+                    const from = dragFrom;
+                    setDragFrom('');
+                    setDragOver('');
+                    if (from === '' || from === name) return;
+                    // 「后移并让位」而不是「交换」：把第一项拖到第三项，
+                    // 第二项应该上来，而不是与第一项对调。这个手感与序号
+                    // 输入一致，因为两者最后都走 moveToRank。
+                    const target = orderList.indexOf(name) + 1;
+                    draftState[1](
+                      Object.assign({}, draft, {
+                        engineOrder: moveToRank(orderList, from, target),
+                      }),
+                    );
+                    noteState[1]('');
+                  },
+                  onDragEnd: () => {
+                    setDragFrom('');
+                    setDragOver('');
+                  },
+                },
                 headerRow,
                 keyRow,
                 advanced,
               );
             });
-
-            const engineGroupBlock = (group: Bag) =>
-              group.names.length === 0
-                ? null
-                : h(
-                    'div',
-                    { key: group.key, className: 'sf-engine-group' },
-                    h('h5', { className: 'sf-group-title' }, group.title),
-                    h('p', { className: 'sf-group-hint' }, group.hint),
-                    group.names.map((name: string) => statusRows[listedEngines.indexOf(name)]),
-                  );
 
             // 保存失败是一句需要被打断的报错，成功只是确认。两者的
             // aria-live 强度不同，所以先算出来给页脚用。
@@ -2196,16 +2592,55 @@ hostWindow.__ModuleLoader__.load({
               ),
             );
 
+            // 聚合/退避是两种互斥的运行方式，所以用一组分段按钮，而不是
+            // 两个独立勾选框：后者读起来像「可以同时开」。
+            //
+            // 它放在引擎卡片之前，因为它决定那些卡片怎么被使用；放进某张
+            // 卡片里，就等于把一个全局选择塞进一个局部容器。
+            const modeBlock = h(
+              'div',
+              { key: 'mode', className: 'sf-section' },
+              h('h4', { className: 'sf-section-title' }, t.modeLabel),
+              h(
+                'div',
+                { className: 'sf-mode-row' },
+                ['rrf', 'chain'].map((mode) =>
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      key: mode,
+                      'aria-pressed': (draft.aggregateMode || 'rrf') === mode,
+                      className: 'sf-mode-btn',
+                      'data-mode': mode,
+                      onClick: () => {
+                        draftState[1](Object.assign({}, draft, { aggregateMode: mode }));
+                        noteState[1]('');
+                      },
+                    },
+                    mode === 'rrf' ? t.modeRrf : t.modeChain,
+                  ),
+                ),
+              ),
+              h(
+                'p',
+                { className: 'sf-section-hint' },
+                (draft.aggregateMode || 'rrf') === 'rrf' ? t.modeRrfHint : t.modeChainHint,
+              ),
+              h('p', { className: 'sf-hint' }, t.orderHint),
+            );
+
             body = h(
               'div',
               { key: 'engine-body' },
               overviewRow,
               strategyBlock,
+              modeBlock,
               h(
                 'div',
                 { key: 'engine-section', className: 'sf-section' },
                 h('h4', { className: 'sf-section-title' }, t.engine),
-                // 就绪状态是一句提示，不是筛选：引擎表照常全列，这行只
+                // 就绪状态是一句提示，不是筛选：引擎卡片照常全列，这行只
                 // 说明「现在没有一个能直接搜」。
                 readyEngines === 0
                   ? h('p', { className: 'sf-section-hint' }, t.autoEmpty)
@@ -2213,7 +2648,7 @@ hostWindow.__ModuleLoader__.load({
                 readinessArr === null
                   ? h('p', { className: 'sf-section-hint' }, t.autoUnknown)
                   : null,
-                ENGINE_GROUPS.map((group) => engineGroupBlock(group)),
+                statusRows,
               ),
             );
 
@@ -2909,6 +3344,12 @@ hostWindow.__ModuleLoader__.load({
       isDirty: isDirty,
       secretFieldProps: secretFieldProps,
       ConfigCard: ConfigCard,
+      // 排序相关的纯函数，暴露给测试。它们不依赖 DOM 也不依赖 React，
+      // 所以能单独钉住「拖动与序号输入得出同一个结果」这条契约。
+      effectiveOrder: effectiveOrder,
+      moveToRank: moveToRank,
+      orderChanged: orderChanged,
+      rankOf: rankOf,
     };
     // `slots` 与 `locale` 都是可选的，所以这里不要求任何一个：registerCard
     // 各自用一次自范围的 inject 取用。

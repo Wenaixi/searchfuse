@@ -1028,7 +1028,8 @@ function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessE
     var fromFile = isPlainObject(configuredMcp[name]) ? configuredMcp[name] : {};
     var fromDefault = (defaultMcp as Bag)[name] || {};
     var enabled = fromFile.enabled !== false;
-    mcp[name] = {      url: typeof fromFile.url === 'string' && fromFile.url !== '' ? fromFile.url : fromDefault.url || '',
+    mcp[name] = {
+      url: typeof fromFile.url === 'string' && fromFile.url !== '' ? fromFile.url : fromDefault.url || '',
       transport: typeof fromFile.transport === 'string' ? fromFile.transport : 'streamable-http',
       // 三态代理：'' = 跟随环境变量，'direct' = 直连，URL = 用该代理。
       // 空串与「没配」必须区分，所以文件里的 null 报成 'direct'。
@@ -1053,6 +1054,16 @@ function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessE
     endpoints: ENDPOINT_ENGINES,
     models: MODEL_ENGINES,
     mcp,
+    // 卡片要展示拖动排序与「聚合/退避」选择，所以两者都得下发。
+    //
+    // 顺序下发的是文件里写的那份**原始名单**，不是补齐后的完整顺序：卡片要
+    // 区分「用户亲手排过的」与「从没排过的」，补全之后就看不出来了。卡片
+    // 自己知道全部引擎是谁，补齐是它的事。
+    engineOrder: Array.isArray(config.aggregate?.engineOrder)
+      ? config.aggregate.engineOrder.filter((name: unknown) => typeof name === 'string')
+      : [],
+    // 未写 mode 等于融合，与 src/config.ts 的 aggregateMode() 同一判据。
+    aggregateMode: config.aggregate?.mode === 'chain' ? 'chain' : 'rrf',
     // SearXNG 的抓取配置。卡片要能逐引擎配代理，所以这里原样交出去，
     // 保存时由 applyCardSettings 校验并写回。
     //
@@ -1092,6 +1103,49 @@ function applyCardSettings(patch: Bag): void {
       }
       config.engine = engine;
     }
+  }
+  // 拖动排序写回：整份名单替换，而不是逐项追加。
+  //
+  // 顺序就是它本来的样子，不能用 merge 语义：把 A 拖到 B 前面，本质上是
+  // 「A 和 B 的相对位置变了」，而任何只增不减的合并都表达不了这一点。
+  // 名单过长的部分被截掉，重复项去重，未知引擎名直接拒绝 —— 它只可能来自
+  // 一个过期的卡片，而静默丢弃会让用户看着屏幕上的顺序与文件里的不符。
+  if (patch?.engineOrder !== undefined) {
+    if (!Array.isArray(patch.engineOrder)) {
+      throw new Error('engineOrder must be an array of engine names');
+    }
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const raw of patch.engineOrder) {
+      const engine = canonicalEngine(raw);
+      if (!CARD_ENGINES.includes(engine)) {
+        throw new Error(`unknown engine in engineOrder: ${String(raw)}`);
+      }
+      // 重复项保留第一次出现的位置，不报错：拖动实现里重复态是中间态，
+      // 用户没有为此做错什么。
+      if (seen.has(engine)) continue;
+      seen.add(engine);
+      order.push(engine);
+    }
+    if (order.length === 0) {
+      // 空名单等于「没排过」，删键而不是写一个空数组：后者在文件里看起来
+      // 像一次刻意的设置，而它其实只是用户把卡片收了起来。
+      if (config.aggregate !== undefined) {
+        delete config.aggregate.engineOrder;
+        if (Object.keys(config.aggregate).length === 0) delete config.aggregate;
+      }
+    } else {
+      config.aggregate = Object.assign({}, config.aggregate, { engineOrder: order });
+    }
+  }
+  // 聚合与退避二选一。写 'chain' 或 'rrf' 都落成显式值；'rrf' 是默认，
+  // 但删键与写键的读回结果相同，写显式值让文件自己说明当前行为。
+  if (patch?.aggregateMode !== undefined) {
+    const mode = patch.aggregateMode;
+    if (mode !== 'rrf' && mode !== 'chain') {
+      throw new Error(`aggregateMode must be "rrf" or "chain", got: ${String(mode)}`);
+    }
+    config.aggregate = Object.assign({}, config.aggregate, { mode });
   }
   // 引擎字段一次编辑一个引擎，由 `target` 点名。缺失意味着这次保存没有碰任何
   // 引擎设置，这正是「只改钉住项」的保存的样子。

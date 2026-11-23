@@ -29,6 +29,14 @@ interface Card {
   isDirty: (summary: unknown, draft: unknown) => boolean;
   secretFieldProps: () => Record<string, unknown>;
   ConfigCard: (react: unknown, ui: unknown, localeRef?: unknown) => () => unknown;
+  /** 文件里的短名单补齐成完整顺序。 */
+  effectiveOrder: (summary: unknown) => string[];
+  /** 把某个引擎挪到第 n 位（从 1 开始），其余让位。 */
+  moveToRank: (order: string[], name: string, target: number) => string[];
+  /** 草稿顺序是否与摘要不同。 */
+  orderChanged: (summary: unknown, draft: unknown) => boolean;
+  /** 某个引擎在当前顺序里的名次，从 1 开始。 */
+  rankOf: (order: string[], name: string) => number;
 }
 
 interface Definition {
@@ -238,7 +246,13 @@ describe('on the Plugins page the card is a section of the page, not a block of 
         nodes.push(node);
         return node;
       },
-      useState: () => [states[index++], () => {}],
+      // 超出固定槽位时返回空串（卡片后续新增的拖动状态就属于这一档），
+      // 用 index 越界判断而不是 `??`：后者会把合法的 null 一并吞掉，
+      // 而 summary 初值恰恰就是 null。
+      useState: () => {
+        const slot = index++;
+        return [slot < states.length ? states[slot] : '', () => {}];
+      },
       useEffect: (fn: () => void) => {
         if (effects) {
           fn();
@@ -407,6 +421,21 @@ describe('a save carries only what the save is about', () => {
       searxngShowAll: false,
       searxngEngineName: '',
       searxngRules: {},
+      // 拖动顺序与聚合模式：卡片的两项全局设置，跟着 draft 一起走。
+      // 顺序是从摘要补齐后的完整名单（本地取页器不在其中），模式在摘要
+      // 没写时默认融合。
+      engineOrder: [
+        'antigravity-cli',
+        'tavily',
+        'exa',
+        'firecrawl',
+        'keenable',
+        'anysearch',
+        'youcom',
+        'searxng',
+        'grok-cli',
+      ],
+      aggregateMode: 'rrf',
     });
   });
 
@@ -416,6 +445,114 @@ describe('a save carries only what the save is about', () => {
     draft.enabled.tavily = false;
     draft.enabled.exa = true;
     expect(savePayload(SUMMARY, draft).enabled).toEqual({ tavily: false, exa: true });
+  });
+
+  describe('拖动的顺序与数字输入指向同一份状态', () => {
+    it('pads a short list in the file with the engines it never named', () => {
+      const { effectiveOrder } = card();
+      // 文件里只写了两个名字：它们按名次在前，其余按展示顺序补在后面。
+      const summary = { ...SUMMARY, engineOrder: ['tavily', 'youcom'] };
+      const order = effectiveOrder(summary);
+      expect(order.slice(0, 2)).toEqual(['tavily', 'youcom']);
+      expect(order).toContain('firecrawl');
+      // local 只抓取交给它的一个 URL，不参与搜索排序。
+      expect(order).not.toContain('local');
+    });
+
+    it('ignores names in the file that are not engines any more', () => {
+      const { effectiveOrder } = card();
+      const summary = { ...SUMMARY, engineOrder: ['nosuch', 'tavily'] };
+      expect(effectiveOrder(summary)).not.toContain('nosuch');
+    });
+
+    it('moves an engine up and pushes the ones it passed down a slot', () => {
+      const { moveToRank } = card();
+      const order = ['a', 'b', 'c', 'd'];
+      // 把 d 拖到第 1 位：a、b、c 各让一格，而不是与 d 对调。
+      expect(moveToRank(order, 'd', 1)).toEqual(['d', 'a', 'b', 'c']);
+      expect(moveToRank(order, 'a', 3)).toEqual(['b', 'c', 'a', 'd']);
+      // 原位不动：返回同一份内容，调用方据此不再触发保存。
+      expect(moveToRank(order, 'b', 2)).toBe(order);
+    });
+
+    it('clamps a rank past the end instead of refusing it', () => {
+      const { moveToRank } = card();
+      const order = ['a', 'b', 'c'];
+      // 在一个 3 项的列表里填 9，想说的显然是「放到最后」。
+      expect(moveToRank(order, 'a', 9)).toEqual(['b', 'c', 'a']);
+      expect(moveToRank(order, 'c', 0)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('reports no change when the order matches the padded list', () => {
+      const { nextDraft, orderChanged } = card();
+      expect(orderChanged(SUMMARY, nextDraft(SUMMARY, 'tavily'))).toBe(false);
+    });
+
+    it('reports a change once a card is dragged, and none after it is dragged back', () => {
+      const { nextDraft, orderChanged, moveToRank, effectiveOrder } = card();
+      const draft = nextDraft(SUMMARY, 'tavily');
+      const original = effectiveOrder(SUMMARY);
+      const moved = moveToRank(draft.engineOrder, original[0], original.length);
+      expect(orderChanged(SUMMARY, { ...draft, engineOrder: moved })).toBe(true);
+      // 拖回原位：文件里的名单一个字都没变过，按钮就该灰着。
+      const restored = moveToRank(moved, original[0], 1);
+      expect(orderChanged(SUMMARY, { ...draft, engineOrder: restored })).toBe(false);
+    });
+
+    it('numbers cards from 1, and 0 for one that is not in the order', () => {
+      const { rankOf } = card();
+      expect(rankOf(['a', 'b', 'c'], 'a')).toBe(1);
+      expect(rankOf(['a', 'b', 'c'], 'c')).toBe(3);
+      expect(rankOf(['a', 'b', 'c'], 'local')).toBe(0);
+    });
+
+    it('keeps the dragged order when the editor switches to another engine', () => {
+      // 这是最容易被漏掉的一条：pick() 重建草稿，早先逐字段手工搬运，
+      // 漏掉一个就会出现「只是点开另一个引擎看看，顺序被还原了」。
+      const { nextDraft, selectEngine } = card();
+      const draft = nextDraft(SUMMARY, 'tavily');
+      const reordered = { ...draft, engineOrder: ['youcom', 'firecrawl', 'tavily'] };
+      const switched = selectEngine(SUMMARY, reordered, 'exa');
+      expect(switched.engineOrder).toEqual(['youcom', 'firecrawl', 'tavily']);
+      expect(switched.aggregateMode).toBe('rrf');
+    });
+
+    it('carries the run mode across an engine switch too', () => {
+      const { nextDraft, selectEngine } = card();
+      const draft = { ...nextDraft(SUMMARY, 'tavily'), aggregateMode: 'chain' };
+      expect(selectEngine(SUMMARY, draft, 'exa').aggregateMode).toBe('chain');
+    });
+  });
+
+  describe('一次保存只带它真正在保存的东西', () => {
+    it('sends the order only when a card actually moved', () => {
+      const { nextDraft, savePayload, moveToRank } = card();
+      const draft = nextDraft(SUMMARY, 'tavily');
+      expect(savePayload(SUMMARY, draft).engineOrder).toBeUndefined();
+      // 把最后一项拖到最前，这才是一次真正的排序改动。
+      const moved = moveToRank(draft.engineOrder, draft.engineOrder[draft.engineOrder.length - 1], 1);
+      expect(savePayload(SUMMARY, { ...draft, engineOrder: moved }).engineOrder).toEqual(moved);
+    });
+
+    it('sends the run mode only when it was switched', () => {
+      const { nextDraft, savePayload } = card();
+      const draft = nextDraft(SUMMARY, 'tavily');
+      expect(savePayload(SUMMARY, draft).aggregateMode).toBeUndefined();
+      expect(savePayload(SUMMARY, { ...draft, aggregateMode: 'chain' }).aggregateMode).toBe('chain');
+    });
+
+    it('counts a moved card as dirty, so the save button lights up', () => {
+      const { nextDraft, isDirty, moveToRank } = card();
+      const draft = nextDraft(SUMMARY, 'tavily');
+      expect(isDirty(SUMMARY, draft)).toBe(false);
+      const moved = moveToRank(draft.engineOrder, draft.engineOrder[0], draft.engineOrder.length);
+      expect(isDirty(SUMMARY, { ...draft, engineOrder: moved })).toBe(true);
+    });
+
+    it('counts a switched run mode as dirty', () => {
+      const { nextDraft, isDirty } = card();
+      expect(isDirty(SUMMARY, { ...nextDraft(SUMMARY, 'tavily'), aggregateMode: 'chain' })).toBe(true);
+    });
   });
 
   it('leaves the file alone when a preference is switched away and back', () => {
@@ -548,14 +685,21 @@ describe('the API key field is masked without being a password field', () => {
     for (const css of [{ supports: () => true }, { supports: () => false }, undefined]) {
       const built: Array<{ type: unknown; props: Record<string, unknown> }> = [];
       const draft = { engine: 'tavily', apiKey: '', baseURL: '', model: '' };
-      const states = [true, SUMMARY, draft, ''];
-      let index = 0;
+      // 三个固定的「种子」值对应卡片前三次 useState：展开态、摘要、草稿。
+      // 之后的 useState（便签、拖动状态……）一律拿到各自的初始值 —— 用
+      // 「传什么返回什么」的通用实现，而不是按调用序号轮流取，否则每新增
+      // 一个 state 就会把后面所有的值整体错位一格，测试以看不懂的方式崩。
+      let seed = 0;
+      const seeds = [true, SUMMARY, draft, ''];
       const react = {
         createElement: (type: unknown, props: Record<string, unknown>, ...kids: unknown[]) => {
           built.push({ type, props: props ?? {} });
           return { type, props, kids };
         },
-        useState: () => [states[index++ % states.length], () => {}],
+        useState: (initial?: unknown) => {
+          if (seed < seeds.length) return [seeds[seed++], () => {}];
+          return [initial, () => {}];
+        },
         useEffect: () => {},
         useCallback: (fn: unknown) => fn,
       };
@@ -634,7 +778,11 @@ function render(
       built.push(node);
       return node;
     },
-    useState: () => [states[index++ % states.length], () => {}],
+    // 同上：越界才兜底，null 是 summary 的合法初值，不能被 `??` 吞掉。
+    useState: () => {
+      const slot = index++;
+      return [slot < states.length ? states[slot] : '', () => {}];
+    },
     useEffect: () => {},
     useCallback: (fn: unknown) => fn,
   };
@@ -1041,7 +1189,10 @@ describe('a save re-reads what the machine can do now', () => {
       useState: () => {
         const slot = index++;
         return [
-          [true, summary, draft, ''][slot],
+          // 前四个是卡片固定的展开/摘要/草稿/便签，之后是拖动状态等
+          // 后续新增的 state —— 越界才兜底空串。用下标判断而不是 `??`：
+          // summary 的合法初值就是 null，不能被空串替换掉。
+          slot < 4 ? [true, summary, draft, ''][slot] : '',
           (value: unknown) => {
             if (slot === 1) {
               summaries.push(value as Record<string, unknown>);
@@ -1093,7 +1244,8 @@ describe('a save re-reads what the machine can do now', () => {
       useState: () => {
         const slot = index++;
         return [
-          [true, SUMMARY, draft, ''][slot],
+          // 同上：越界才兜底空串，null 是合法初值。
+          slot < 4 ? [true, SUMMARY, draft, ''][slot] : '',
           (value: unknown) => {
             if (slot === 3) {
               notes.push(String(value));
@@ -1275,7 +1427,8 @@ describe('a failed load or save speaks the reader’s language', () => {
       useState: () => {
         const slot = index++;
         return [
-          options.states[slot],
+          // 同上：越界才兜底空串，null 是合法初值。
+          slot < options.states.length ? options.states[slot] : '',
           (value: unknown) => {
             // The note is the fourth useState, after open, summary and draft.
             if (slot === 3) {
