@@ -81,17 +81,55 @@ const MCP_RETRY_DELAY_MS = 30_000;
 const PROVIDER_TIMEOUT_MS = 40_000;
 const PROVIDER_DEADLINE_MS = 55_000;
 
+/**
+ * 宽松的对象类型别名。
+ *
+ * 这个文件原本是手写 JavaScript，大量用法是「先建一个空对象，再逐键往里
+ * 填」——比如 `const mcp = {}` 之后 `mcp[name] = {...}`。转成 TypeScript 后
+ * `{}` 会被推断成「没有属性的空类型」，于是每个属性赋值都报错。
+ *
+ * 这里不逐个写精确接口，因为那是把整个文件重写一遍：这些对象大多是把配置
+ * 文件的内容原样搬运、透传给宿主，形状由外部的 JSON 决定，写死在类型里
+ * 只会让下一个人改配置字段时还要同步改类型。`Bag` 表达的就是这个事实：
+ * 键是字符串，值是未知的，使用处自己收窄。
+ */
+type Bag = Record<string, any>;
+
+/**
+ * 把 catch 抓到的未知值收窄成「有 message 的错误」。
+ *
+ * 严格模式下 catch 的绑定推断不出 `.message`（它被推成一个空对象类型），
+ * 而抛出来的东西什么形状都可能是：Error、字符串、带 code 的 Node 错误。
+ * 直接读 `.message` 在类型层面被拒绝，在运行层面则对字符串抛异常得出一片空白。
+ */
+function caughtMessage(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return String(error);
+}
+
+/** 读取 catch 变量上的 `code`（Node 的 ENOENT 之类），没有就返回空串。 */
+function caughtCode(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return '';
+}
+
 export const name = 'modsearch';
 export const inject = ['tools', 'web'];
 
-export function apply(ctx, config = {}) {
+export function apply(ctx: any, config: Bag = {}): void {
   if (config.searchProvider !== false) {
     registerSearchProvider(ctx, config);
   }
   // 两条热重载入口。它们登记在下面唯一的那套监视器上：插件自己拥有
   // ~/.searchfuse/config.json，宿主的 profile 重载信号永远不会为它触发，所以
   // 只能自己定时看一看。
-  const reloaders = [];
+  const reloaders: Array<() => void> = [];
   // MCP 服务器，在 ~/.searchfuse/config.json 的 `mcp` 下配置。协议实现作为
   // 独立的构建模块发布，因为本文件是手写的 JavaScript，无法导入 TypeScript
   // 源码。
@@ -128,7 +166,7 @@ export function apply(ctx, config = {}) {
         try {
           reload();
         } catch (error) {
-          console.error(`[searchfuse] config reload failed: ${error?.message ?? error}`);
+          console.error(`[searchfuse] config reload failed: ${caughtMessage(error)}`);
         }
       }
     });
@@ -143,7 +181,7 @@ export function apply(ctx, config = {}) {
   // 服务不存在的地方它根本不运行。headless profile 则原样保留插件的工具和
   // 搜索 provider。
   if (config.settingsCard !== false && typeof ctx.inject === 'function') {
-    ctx.inject(['webServer'], (scope) => {
+    ctx.inject(['webServer'], (scope: any) => {
       try {
         registerConfigRoute(scope);
       } catch (error) {
@@ -160,12 +198,14 @@ export function apply(ctx, config = {}) {
     // 它的 settings 服务只列出 `.volatile()` 的 Config 字段，而本插件一个都没
     // 有。没有 register 的宿主在这里没什么可服务的，于是这个命名空间被静默
     // 跳过。
-    ctx.inject(['settings'], (scope) => {
+    ctx.inject(['settings'], (scope: any) => {
       if (typeof scope.settings.register !== 'function') {
         return;
       }
       try {
-        const passThrough = (value) => ({ ...(value ?? {}) });
+        const passThrough: Bag & { toJSON?: () => unknown } = (value: unknown) => ({
+          ...((value ?? {}) as Bag),
+        });
         passThrough.toJSON = () => ({
           uid: 0,
           refs: { 0: { type: 'object', meta: { default: {} }, dict: {} } },
@@ -193,7 +233,7 @@ export function apply(ctx, config = {}) {
  * 就都用它，而不是出现两个互相打架的数。内置默认值是三者中最宽的：在 web
  * seam 之下，调用方是一个正在等模型回答的人，比终端能容忍更长的等待。
  */
-function providerBudgets(config) {
+function providerBudgets(config: Bag): Bag {
   const fromPlugin = {
     timeoutMs:
       typeof config?.providerTimeoutMs === 'number' && config.providerTimeoutMs > 0
@@ -221,7 +261,7 @@ function providerBudgets(config) {
   return { timeoutMs, deadlineMs };
 }
 
-function registerSearchProvider(ctx, config) {
+function registerSearchProvider(ctx: any, config: Bag): void {
   if (typeof ctx.web?.registerSearchProvider !== 'function') {
     // developer-preview 阶段的一次接口迁移：降级成「只有工具」的插件，但要在
     // harness 日志里说出来，而不是无声消失。
@@ -232,7 +272,7 @@ function registerSearchProvider(ctx, config) {
   ctx.web.registerSearchProvider({
     id: 'modsearch',
     available: () => true,
-    async search(request, signal) {
+    async search(request: Bag, signal?: AbortSignal): Promise<Bag> {
       const args = [
         '-q',
         request.query,
@@ -267,7 +307,7 @@ function registerSearchProvider(ctx, config) {
  * 已登录时，CLI 把请求路由给它；否则由一个 web 引擎顶替，答案被标记为降级，
  * 于是「二手证据」在权威值里是显式的，绝不静默。
  */
-function registerXSearchTool(ctx) {
+function registerXSearchTool(ctx: any): void {
   ctx.tools.register({
     name: 'x_search',
     description:
@@ -288,27 +328,27 @@ function registerXSearchTool(ctx) {
     },
     output: {
       schema: SEARCH_OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: renderSearchEvidence(value) }],
+      render: (_args: Bag, value: Bag) => [{ type: 'text', text: renderSearchEvidence(value) }],
       // 给原生引用卡片用的持久投影；只从权威值派生，所以回放时无需重跑任何
       // 东西。
-      presentationMeta: (_args, value) => ({ sources: toSources(value.items) }),
+      presentationMeta: (_args: Bag, value: Bag) => ({ sources: toSources(value.items) }),
     },
     // CLI 自己会执行 deadline；这里只是协作式的兜底。
     timeoutMs: OWN_TOOL_BACKSTOP_MS,
     isConcurrencySafe: () => true,
-    presentCall: (args) => ({
+    presentCall: (args: Bag) => ({
       card: 'generic',
       title: 'x_search',
       kind: 'search',
       rawInput: args,
     }),
-    presentResult: (_args, result) => {
+    presentResult: (_args: Bag, result: Bag) => {
       if (result.isError || !result.meta || !Array.isArray(result.meta.sources)) {
         return undefined;
       }
       return { card: 'web', kind: 'search', sources: result.meta.sources, truncated: false };
     },
-    async execute(args, exec) {
+    async execute(args: Bag, exec: Bag) {
       if (typeof args?.query !== 'string' || args.query.trim() === '') {
         throw new Error('x_search needs a non-empty string "query".');
       }
@@ -338,7 +378,7 @@ function registerXSearchTool(ctx) {
  * CLI 默认拦截私网目标，本工具不提供任何绕过它的方式。dsh 默认也暴露它自己的
  * 原始 web_fetch，所以描述里点明了二者的分工。
  */
-function registerReadPageTool(ctx) {
+function registerReadPageTool(ctx: any): void {
   ctx.tools.register({
     name: 'read_page',
     description:
@@ -360,17 +400,17 @@ function registerReadPageTool(ctx) {
     },
     output: {
       schema: FETCH_OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: renderFetchEvidence(value) }],
+      render: (_args: Bag, value: Bag) => [{ type: 'text', text: renderFetchEvidence(value) }],
     },
     timeoutMs: OWN_TOOL_BACKSTOP_MS,
     isConcurrencySafe: () => true,
-    presentCall: (args) => ({
+    presentCall: (args: Bag) => ({
       card: 'generic',
       title: 'read_page',
       kind: 'fetch',
       rawInput: args,
     }),
-    async execute(args, exec) {
+    async execute(args: Bag, exec: Bag) {
       if (typeof args?.url !== 'string' || !/^https?:\/\//i.test(args.url.trim())) {
         throw new Error('read_page needs an http(s) "url".');
       }
@@ -467,8 +507,8 @@ function readServeRuntime() {
  * 短式（`-q`/`-u`）与长式（`--query`/`--url`）都认：插件自有工具用的是短式，
  * 而 provider seam 走的是长式；按位置下标取参数则会读到 flag 本身。
  */
-function toServeRequest(args) {
-  const flag = (...names) => {
+function toServeRequest(args: string[]): Bag | undefined {
+  const flag = (...names: string[]): string | undefined => {
     for (const name of names) {
       const index = args.indexOf(name);
       if (index !== -1) return args[index + 1];
@@ -481,7 +521,7 @@ function toServeRequest(args) {
   if (timeout !== undefined) budgets.set('timeout', timeout);
   const deadline = flag('--deadline');
   if (deadline !== undefined) budgets.set('deadline', deadline);
-  const withBudgets = (params) => {
+  const withBudgets = (params: URLSearchParams): URLSearchParams => {
     for (const [key, value] of budgets) params.set(key, value);
     return params;
   };
@@ -501,7 +541,7 @@ function toServeRequest(args) {
 }
 
 /** 调一次服务；拿到文本就返回，否则 undefined。 */
-async function tryServe(args, signal) {
+async function tryServe(args: string[], signal?: AbortSignal): Promise<string | undefined> {
   const runtime = readServeRuntime();
   if (runtime === undefined) return undefined;
   const request = toServeRequest(args);
@@ -537,7 +577,7 @@ async function tryServe(args, signal) {
 const SERVE_FAILURE_PREFIX = 'searchfuse service error: ';
 
 /** 把服务端的错误正文转成宿主可读的消息。 */
-function describeServeFailure(status, body) {
+function describeServeFailure(status: number | string, body: string): string {
   let detail = body.trim();
   try {
     const parsed = JSON.parse(body);
@@ -558,7 +598,7 @@ function describeServeFailure(status, body) {
  *
  * 返回是否**这次真的把它拉起来了**（供上层的重试判断）。
  */
-async function wakeServe(signal) {
+async function wakeServe(signal?: AbortSignal): Promise<boolean> {
   // `cliPath()` 抛出的「构建缺失」是一个能直接照做的指示（重装），不能被
   // 下面的 catch 吞成一句笼统的「不可达」。
   const cli = cliPath();
@@ -584,7 +624,7 @@ async function wakeServe(signal) {
  * 唤醒本身要起一个进程（`serve --ensure`），这是服务的入口，不是
  * 兜底的重复实现。
  */
-async function fetchOrSpawn(args, signal) {
+async function fetchOrSpawn(args: string[], signal?: AbortSignal): Promise<string> {
   const first = await tryServe(args, signal);
   if (first !== undefined) return first;
 
@@ -601,7 +641,7 @@ async function fetchOrSpawn(args, signal) {
   );
 }
 
-async function runCli(args, signal) {
+async function runCli(args: string[], signal?: AbortSignal): Promise<Bag> {
   const stdout = await fetchOrSpawn(args, signal);
   let parsed;
   try {
@@ -615,7 +655,7 @@ async function runCli(args, signal) {
   }
   if (entry.status === 'unavailable') {
     const attempts = (Array.isArray(entry.attempts) ? entry.attempts : [])
-      .map((attempt) => `${attempt.engine}: ${attempt.error ?? 'skipped'}`)
+      .map((attempt: Bag) => `${attempt.engine}: ${attempt.error ?? 'skipped'}`)
       .join('; ');
     throw new Error(
       `modsearch could not reach the requested source${attempts ? ` (${attempts})` : ''}. ` +
@@ -626,13 +666,13 @@ async function runCli(args, signal) {
 }
 
 /** 把 CLI 的结果条目映射成 seam 的可引用来源结构，顺手丢掉垃圾项。 */
-function toSources(items) {
+function toSources(items: unknown): Bag[] {
   if (!Array.isArray(items)) {
     return [];
   }
   return items
-    .filter((item) => item && typeof item.url === 'string' && item.url !== '')
-    .map((item) => ({
+    .filter((item: Bag) => item && typeof item.url === 'string' && item.url !== '')
+    .map((item: Bag) => ({
       url: item.url,
       ...(typeof item.title === 'string' && item.title !== '' ? { title: item.title } : {}),
       ...(typeof item.snippet === 'string' && item.snippet !== '' ? { snippet: item.snippet } : {}),
@@ -642,8 +682,8 @@ function toSources(items) {
     }));
 }
 
-function renderSearchEvidence(value) {
-  const lines = [];
+function renderSearchEvidence(value: Bag): string {
+  const lines: string[] = [];
   if (value.status === 'degraded') {
     lines.push(
       `[X was unreachable; a ${value.source} search answered second-hand. Treat as indirect evidence.]`,
@@ -653,7 +693,7 @@ function renderSearchEvidence(value) {
   const items = value.items ?? [];
   if (items.length > 0) {
     lines.push('', 'Results:');
-    items.forEach((item, index) => {
+    items.forEach((item: Bag, index: number) => {
       const dated = item.published_at ? ` (${item.published_at})` : '';
       lines.push(`${index + 1}. ${item.title}${dated} — ${item.url}`);
       if (item.snippet) {
@@ -671,8 +711,8 @@ function renderSearchEvidence(value) {
 const RENDER_CONTENT_CAP = 20_000;
 const RENDER_LINK_CAP = 20;
 
-function renderFetchEvidence(value) {
-  const lines = [value.summary];
+function renderFetchEvidence(value: Bag): string {
+  const lines: string[] = [value.summary];
   const content = value.content?.trim();
   if (content) {
     lines.push(
@@ -715,16 +755,20 @@ const BASE_TOOL_NAMES = ['x_search', 'read_page'];
 function engineToolNames() {
   try {
     const config = readModsearchConfig();
-    const engines = isPlainObject(config.engines) ? config.engines : {};
+    const engines = (isPlainObject(config.engines) ? config.engines : {}) as Bag;
     return Object.entries(engines)
       .filter(
-        ([, settings]) =>
-          isPlainObject(settings) &&
-          isPlainObject(settings.expose) &&
-          settings.expose.tool === true &&
-          // 与 registerEngineTools 遵循的规则相同：被关掉的引擎不是工具，所以
-          // 它的名字可以被别人占用。
-          coerceBoolean(settings.enabled) !== false,
+        ([, rawSettings]) => {
+          const settings = rawSettings as Bag;
+          return (
+            isPlainObject(settings) &&
+            isPlainObject(settings.expose) &&
+            (settings.expose as Bag).tool === true &&
+            // 与 registerEngineTools 遵循的规则相同：被关掉的引擎不是工具，所以
+            // 它的名字可以被别人占用。
+            coerceBoolean(settings.enabled) !== false
+          );
+        },
       )
       .map(([rawName, settings]) =>
         typeof settings.toolName === 'string' && settings.toolName.trim() !== ''
@@ -797,7 +841,7 @@ const ENGINE_ENV_BINDINGS = {
 };
 
 /** 一个存储名所指的规范引擎；它什么都不指时返回 ''。 */
-function canonicalEngine(name) {
+function canonicalEngine(name: unknown): string {
   if (typeof name !== 'string') {
     return '';
   }
@@ -807,16 +851,18 @@ function canonicalEngine(name) {
   }
   // 只查自有属性：裸下标会走原型链，于是 "constructor" 会以一个函数的身份
   // 返回来，并被当成一个引擎。
-  return Object.hasOwn(ENGINE_ALIASES, trimmed) ? ENGINE_ALIASES[trimmed] : '';
+  return Object.hasOwn(ENGINE_ALIASES, trimmed)
+    ? (ENGINE_ALIASES as Bag)[trimmed]
+    : '';
 }
 
 /** 只认 JSON 对象：null、数组和原型上的成员都不算设置。 */
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is Bag {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 对齐 CLI 对手改布尔值的处理方式，但不迁移文件。 */
-function coerceBoolean(value) {
+function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') {
     return value;
   }
@@ -840,7 +886,7 @@ function coerceBoolean(value) {
  * 压过默认。宿主半边必须自己判一遍，因为它不能 import TypeScript 源码，而
  * 判错一次就是「卡片上打开的引擎其实从来没被用过」。
  */
-function engineEnabled(name, settings) {
+function engineEnabled(name: string, settings: Bag = {}): boolean {
   const explicit = coerceBoolean(settings.enabled);
   if (explicit !== undefined) {
     return explicit;
@@ -849,7 +895,7 @@ function engineEnabled(name, settings) {
 }
 
 /** 逗号分隔的 API 密钥值里是否至少含一个真实密钥。 */
-function hasApiKeys(value) {
+function hasApiKeys(value: unknown): boolean {
   return (
     typeof value === 'string' &&
     value
@@ -880,16 +926,16 @@ function readModsearchConfig() {
   try {
     raw = readFileSync(file, 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') {
+    if (caughtCode(error) === 'ENOENT') {
       return {};
     }
-    throw new Error(`cannot read ${file}: ${error?.message ?? error}`);
+    throw new Error(`cannot read ${file}: ${caughtMessage(error)}`);
   }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`${file} is not valid JSON: ${error?.message ?? error}`);
+    throw new Error(`${file} is not valid JSON: ${caughtMessage(error)}`);
   }
   if (!isPlainObject(parsed)) {
     throw new Error(`${file} does not hold a JSON object`);
@@ -898,7 +944,7 @@ function readModsearchConfig() {
 }
 
 /** 持有某个引擎设置的文件条目键：它自己的，加上别名。 */
-function fileKeysFor(engine, config) {
+function fileKeysFor(engine: string, config: Bag): string[] {
   const engines = isPlainObject(config.engines) ? config.engines : {};
   return Object.keys(engines).filter((key) => canonicalEngine(key) === engine);
 }
@@ -907,9 +953,9 @@ function fileKeysFor(engine, config) {
  * 某个引擎的文件设置，别名条目按 CLI 的方式合并：按文件顺序，所以靠后的
  * 条目胜出，正是 migrateLegacyConfig 折叠它们的方式。
  */
-function fileSettingsFor(engine, config) {
-  const engines = isPlainObject(config.engines) ? config.engines : {};
-  let settings = {};
+function fileSettingsFor(engine: string, config: Bag): Bag {
+  const engines = (isPlainObject(config.engines) ? config.engines : {}) as Bag;
+  let settings: Bag = {};
   for (const key of fileKeysFor(engine, config)) {
     if (isPlainObject(engines[key])) {
       settings = { ...settings, ...engines[key] };
@@ -919,11 +965,14 @@ function fileSettingsFor(engine, config) {
 }
 
 /** 某个引擎的环境设置，按字段，与 engineSettings 应用它们的方式一致。 */
-function envSettingsFor(engine, env = process.env) {
-  const settings = {};
-  const bindings = Object.hasOwn(ENGINE_ENV_BINDINGS, engine) ? ENGINE_ENV_BINDINGS[engine] : {};
+function envSettingsFor(engine: string, env: NodeJS.ProcessEnv = process.env): Bag {
+  const settings: Bag = {};
+  const bindings = (Object.hasOwn(ENGINE_ENV_BINDINGS, engine)
+    ? (ENGINE_ENV_BINDINGS as Bag)[engine]
+    : {}) as Bag;
   for (const [field, variable] of Object.entries(bindings)) {
-    const value = typeof env[variable] === 'string' ? env[variable].trim() : '';
+    const raw = env[variable as string];
+    const value = typeof raw === 'string' ? raw.trim() : '';
     if (value !== '' && (field !== 'apiKey' || hasApiKeys(value))) {
       settings[field] = value;
     }
@@ -936,8 +985,8 @@ function envSettingsFor(engine, env = process.env) {
  * 哪里，且永远不包括密钥本身。读不到秘密的浏览器泄漏不了秘密，也写不回一个
  * 空白值把它盖掉。
  */
-function engineSummary(config = readModsearchConfig(), env = process.env) {
-  const engines = {};
+function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessEnv = process.env): Bag {
+  const engines: Bag = {};
   for (const name of CARD_ENGINES) {
     const fromFile = fileSettingsFor(name, config);
     const fromEnv = envSettingsFor(name, env);
@@ -965,7 +1014,7 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
   }
   // MCP server：卡片要能单独给每一个配代理。默认集合（context7/grep）
   // 即使文件里没写也要列出来——用户正是要给它们配代理才需要这张表。
-  var mcp = {};
+  const mcp: Bag = {};
   var configuredMcp = isPlainObject(config.mcp) ? config.mcp : {};
   var defaultMcp = {
     context7: { transport: 'streamable-http', url: 'https://mcp.context7.com/mcp' },
@@ -977,10 +1026,9 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
   }
   for (var name of mcpNames) {
     var fromFile = isPlainObject(configuredMcp[name]) ? configuredMcp[name] : {};
-    var fromDefault = defaultMcp[name] || {};
+    var fromDefault = (defaultMcp as Bag)[name] || {};
     var enabled = fromFile.enabled !== false;
-    mcp[name] = {
-      url: typeof fromFile.url === 'string' && fromFile.url !== '' ? fromFile.url : fromDefault.url || '',
+    mcp[name] = {      url: typeof fromFile.url === 'string' && fromFile.url !== '' ? fromFile.url : fromDefault.url || '',
       transport: typeof fromFile.transport === 'string' ? fromFile.transport : 'streamable-http',
       // 三态代理：'' = 跟随环境变量，'direct' = 直连，URL = 用该代理。
       // 空串与「没配」必须区分，所以文件里的 null 报成 'direct'。
@@ -1030,7 +1078,7 @@ function engineSummary(config = readModsearchConfig(), env = process.env) {
  * 缺失或空的 `apiKey` 不动已存的那一个：卡片从不收到密钥，所以它也绝不能被
  * 一个它自己显示出来的空白字段给清掉。
  */
-function applyCardSettings(patch) {
+function applyCardSettings(patch: Bag): void {
   const config = readModsearchConfig();
   if (patch?.engine !== undefined) {
     const pin = typeof patch.engine === 'string' ? patch.engine.trim() : '';
@@ -1117,7 +1165,7 @@ function applyCardSettings(patch) {
     if (isPlainObject(patch.expose)) {
       const aggregate = coerceBoolean(patch.expose.aggregate);
       const tool = coerceBoolean(patch.expose.tool);
-      const next = {};
+      const next: Bag = {};
       if (aggregate !== undefined) {
         next.aggregate = aggregate;
       }
@@ -1339,17 +1387,18 @@ function applyCardSettings(patch) {
       if (!isPlainObject(ruleValue)) {
         throw new Error(`searxngRules.${ruleKey} must be an object`);
       }
-      var existing = isPlainObject(rulesEngines[ruleKey]) ? { ...rulesEngines[ruleKey] } : {};
-      if (ruleValue.enabled !== undefined) {
-        if (ruleValue.enabled === true) {
+      var existing: Bag = isPlainObject(rulesEngines[ruleKey]) ? { ...(rulesEngines[ruleKey] as Bag) } : {};
+      const rule = ruleValue as Bag;
+      if (rule.enabled !== undefined) {
+        if (rule.enabled === true) {
           // 「启用」是默认态，删掉 disabled 而不是写 false——与既有写法一致。
           delete existing.disabled;
         } else {
           existing.disabled = true;
         }
       }
-      if (ruleValue.proxy !== undefined) {
-        var proxyLines = proxiesFromPatch(ruleValue.proxy, `searxngRules.${ruleKey}.proxy`);
+      if (rule.proxy !== undefined) {
+        var proxyLines = proxiesFromPatch(rule.proxy, `searxngRules.${ruleKey}.proxy`);
         if (Object.keys(proxyLines).length === 0) {
           delete existing.proxies;
         } else {
@@ -1498,7 +1547,7 @@ function applyCardSettings(patch) {
  * 改名就位。writeFileSync 的 mode 只在它「创建」文件时生效，所以重写一个已存在
  * 的 0644 配置，会让新密钥以全局可读的权限落地，直到 chmod 才收紧。
  */
-function writeConfigFile(config) {
+function writeConfigFile(config: Bag): void {
   const file = modsearchConfigPath();
   // 这里的符号链接会穿透到它指向的任何地方去写，所以直接拒绝而不是跟随：
   // CLI 写的是真实文件，别的形态都是这张卡片不该默默接受的安排。
@@ -1507,7 +1556,7 @@ function writeConfigFile(config) {
       throw new Error(`${file} is a symlink; edit the file it points at instead`);
     }
   } catch (error) {
-    if (error?.code !== 'ENOENT') {
+    if (caughtCode(error) !== 'ENOENT') {
       throw error;
     }
   }
@@ -1544,7 +1593,7 @@ const READINESS_TTL_MS = 60_000;
 const READINESS_TIMEOUT_MS = 20_000;
 /** 搜索角色优先：卡片讲的是搜索，而且这也是被配置的那个角色。 */
 const READINESS_ROLES = ['search', 'social', 'fetch'];
-let readinessCache = null;
+let readinessCache: { cli: string; at: number; value: Bag } | null = null;
 
 async function engineReadiness() {
   const cli = process.env.MODSEARCH_DSH_CLI || DOCTOR_CLI_PATH;
@@ -1620,14 +1669,15 @@ async function engineReadiness() {
  * 对应实现：插件文件不能 import TypeScript 源码，所以规则在这里复写一遍，
  * 由 src/dshPlugin.test.ts 的锁步测试保证两边的错误消息与判定一致。
  */
-function validateSearxngSection(section) {
+function validateSearxngSection(section: unknown): string | null {
   if (!isPlainObject(section)) return null;
   const outgoingError = validateProxiesShape(section.outgoing, 'searxng.outgoing');
   if (outgoingError !== null) return outgoingError;
 
-  const networks = isPlainObject(section.networks) ? section.networks : {};
-  for (const [name, network] of Object.entries(networks)) {
+  const networks = (isPlainObject(section.networks) ? section.networks : {}) as Bag;
+  for (const [name, rawNetwork] of Object.entries(networks)) {
     if (name.trim() === '') return 'searxng.networks: a network name is empty';
+    const network = rawNetwork as Bag | undefined;
     const error = validateProxiesShape(network?.proxies, `searxng.networks.${name}.proxies`);
     if (error !== null) return error;
   }
@@ -1641,12 +1691,13 @@ function validateSearxngSection(section) {
     }
   }
 
-  const upstream = isPlainObject(section.engines) ? section.engines : {};
-  for (const [name, rule] of Object.entries(upstream)) {
+  const upstream = (isPlainObject(section.engines) ? section.engines : {}) as Bag;
+  for (const [name, rawRule] of Object.entries(upstream)) {
     if (name.trim() === '') return 'searxng.engines: an engine name is empty';
-    if (rule?.network !== undefined && !Object.hasOwn(networks, rule.network)) {
+    const rule = rawRule as Bag | undefined;
+    if (rule?.network !== undefined && !Object.hasOwn(networks, String(rule.network))) {
       const known = Object.keys(networks);
-      return `searxng.engines.${name}.network "${rule.network}" is not defined in searxng.networks (known: ${
+      return `searxng.engines.${name}.network "${String(rule.network)}" is not defined in searxng.networks (known: ${
         known.length > 0 ? known.join(', ') : 'none'
       })`;
     }
@@ -1657,7 +1708,7 @@ function validateSearxngSection(section) {
 }
 
 /** 校验一个已经写进文件的 `proxies` 形状。 */
-function validateProxiesShape(proxies, where) {
+function validateProxiesShape(proxies: unknown, where: string): string | null {
   if (proxies === undefined) return null;
   if (!isPlainObject(proxies)) return `${where}: must be an object of protocols`;
   for (const key of Object.keys(proxies)) {
@@ -1693,7 +1744,7 @@ function validateProxiesShape(proxies, where) {
  * 校验与 `parseProxiesPatch` 同源：协议只认 http(s)/socks5(h)，
  * 缺 scheme 或主机都当场报错，而不是等实例启动时才炸。
  */
-function proxiesFromPatch(text, where) {
+function proxiesFromPatch(text: unknown, where: string): Bag {
   var raw = typeof text === 'string' ? text : '';
   var lines = raw
     .split(/\r?\n/)
@@ -1733,12 +1784,12 @@ function proxiesFromPatch(text, where) {
  * `''` 或空对象表示「这一协议不要代理」；返回对象里不出现该键，渲染时也就
  * 不会写出去。
  */
-function parseProxiesPatch(raw, where) {
+function parseProxiesPatch(raw: unknown, where: string): Bag {
   if (!isPlainObject(raw)) {
     throw new Error(`${where} must be an object like { "all://": "http://127.0.0.1:7890" }`);
   }
   const allowed = ['http', 'https', 'all://'];
-  const result = {};
+  const result: Bag = {};
   for (const [rawKey, rawValue] of Object.entries(raw)) {
     if (rawValue === undefined || rawValue === null) continue;
     if (!allowed.includes(rawKey)) {
@@ -1746,7 +1797,7 @@ function parseProxiesPatch(raw, where) {
     }
     // 数组表示同一协议下轮询使用；单个字符串是它的简写。
     const list = Array.isArray(rawValue) ? rawValue : [rawValue];
-    const proxies = [];
+    const proxies: string[] = [];
     for (const entry of list) {
       if (typeof entry !== 'string') {
         throw new Error(`${where}.${rawKey}: proxy must be a string`);
@@ -1780,7 +1831,7 @@ function parseProxiesPatch(raw, where) {
   return result;
 }
 
-function isValidProxyValue(value) {
+function isValidProxyValue(value: string): boolean {
   if (value === 'direct' || value === 'none') {
     return true;
   }
@@ -1807,9 +1858,9 @@ function isValidProxyValue(value) {
  *
  * @returns 停止监视的函数。正常路径用不到它——ctx 卸载时会自己停掉。
  */
-function watchModsearchConfigFile(ctx, onChange) {
+function watchModsearchConfigFile(ctx: any, onChange: () => void): () => void {
   const file = modsearchConfigPath();
-  let lastMtime;
+  let lastMtime: number | undefined;
   try {
     lastMtime = statSync(file).mtimeMs;
   } catch {
@@ -1858,25 +1909,28 @@ function watchModsearchConfigFile(ctx, onChange) {
  * 注册是异步的，而 `apply` 是同步的。工作启动后，等它落定工具才出现；在一台
  * 服务器慢或不可达的机器上，搜索立刻可用，而不是等一个来回之后才可用。
  */
-function registerMcpTools(ctx) {
-  let result;
+function registerMcpTools(ctx: any): () => void {
+  let result: Bag | undefined;
   let disposed = false;
   let lastSignature = '';
   let inFlight = false;
   /** 失败后的自动重试定时器；null 表示没有排队的重试。 */
-  let retryTimer = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 配置里决定「哪些工具存在」的那一部分。 */
-  const signatureOf = (servers) => {
+  const signatureOf = (servers: Bag) => {
     const shape = Object.entries(servers)
       .filter(([, server]) => isPlainObject(server))
-      .map(([key, server]) => [
-        key,
-        server.enabled !== false,
-        Array.isArray(server.allowTools) ? [...server.allowTools].sort() : null,
-        isPlainObject(server.toolNames) ? Object.entries(server.toolNames).sort() : null,
-        typeof server.url === 'string' ? server.url : null,
-      ])
+      .map(([key, rawServer]) => {
+        const server = rawServer as Bag;
+        return [
+          key,
+          server.enabled !== false,
+          Array.isArray(server.allowTools) ? [...(server.allowTools as unknown[])].sort() : null,
+          isPlainObject(server.toolNames) ? Object.entries(server.toolNames as Bag).sort() : null,
+          typeof server.url === 'string' ? server.url : null,
+        ];
+      })
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     return JSON.stringify(shape);
   };
@@ -1886,17 +1940,17 @@ function registerMcpTools(ctx) {
       return;
     }
     inFlight = true;
-    let config;
+    let config: Bag;
     try {
       config = readModsearchConfig();
     } catch (error) {
-      console.error(`[searchfuse] mcp skipped: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp skipped: ${caughtMessage(error)}`);
       inFlight = false;
       return;
     }
-    const servers = isPlainObject(config.mcp) ? config.mcp : {};
+    const servers = (isPlainObject(config.mcp) ? config.mcp : {}) as Bag;
     const enabled = Object.entries(servers).filter(
-      ([, server]) => isPlainObject(server) && server.enabled !== false,
+      ([, rawServer]) => isPlainObject(rawServer) && (rawServer as Bag).enabled !== false,
     );
     const signature = signatureOf(servers);
     // 自上一趟以来没有任何变化：已注册的工具正是对这一份配置的应答，替换它们
@@ -1921,11 +1975,14 @@ function registerMcpTools(ctx) {
     }
     // 注册表自己产出它要的东西；宿主接受裸 JSON-Schema 定义，所以本插件仍然
     // 不导入任何 @deepseek-ai 包。
-    let mod;
+    let mod: Bag;
     try {
+      // 这是构建产物，随包发布而不在本仓库的编译范围里；它没有 .d.ts，
+      // 官方文档也没有承诺导出形状，所以这里显式忽略缺失的声明。
+      // @ts-expect-error -- 生成的 JS 模块没有类型声明
       mod = await import('../dist/mcp-registry.js');
     } catch (error) {
-      console.error(`[searchfuse] mcp client unavailable: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp client unavailable: ${caughtMessage(error)}`);
       inFlight = false;
       return;
     }
@@ -1934,7 +1991,7 @@ function registerMcpTools(ctx) {
       return;
     }
     try {
-      result = await mod.registerMcpServers(ctx, {
+      const registered: Bag = await mod.registerMcpServers(ctx, {
         servers: Object.fromEntries(enabled),
         allowTools: collectMcpAllowLists(servers),
         toolNames: collectMcpToolNames(servers),
@@ -1942,19 +1999,23 @@ function registerMcpTools(ctx) {
         // 了，一个服务器悄悄占用其中一个，等于把一个能用的工具换成别人的。
         reservedNames: [...BASE_TOOL_NAMES, ...engineToolNames()],
       });
+      result = registered;
     } catch (error) {
-      console.error(`[searchfuse] mcp registration failed: ${error?.message ?? error}`);
+      console.error(`[searchfuse] mcp registration failed: ${caughtMessage(error)}`);
       inFlight = false;
       return;
     }
     inFlight = false;
+    // 从这一行起，`result` 就是这一代注册的会话；上面的 try/catch 已保证失败
+    // 路径提前返回，所以这里用一个局部常量把「可能未定义」收窄掉。
+    const session = result as Bag;
     if (disposed) {
       // 插件在它进行中时消失了：它刚注册的工具已经随 fiber 一起拆除，但 session
       // 是这一次调用自己的责任。
-      await result.closeAll().catch(() => undefined);
+      await session.closeAll().catch(() => undefined);
       return;
     }
-    for (const report of result.reports) {
+    for (const report of session.reports) {
       if (report.error) {
         console.error(`[searchfuse] mcp ${report.serverKey}: ${report.error}`);
       }
@@ -1970,7 +2031,7 @@ function registerMcpTools(ctx) {
     // 「配置没变还重连」，但它也意味着失败之后不会自己再试——用户得改点什么
     // 才会触发下一轮。这里补上自动重试，并给一个足够长的间隔：立刻重试只会
     // 撞上同一个故障，而太长的等待又让恢复显得像卡住了。
-    const failed = result.reports.filter((r) => r.error !== undefined);
+    const failed = session.reports.filter((r: Bag) => r.error !== undefined);
     if (failed.length > 0 && !disposed && retryTimer === null) {
       retryTimer = setTimeout(() => {
         retryTimer = null;
@@ -1983,7 +2044,7 @@ function registerMcpTools(ctx) {
         // 成立的路径，且只在有失败时才发生。
         lastSignature = '';
         settle().catch((error) => {
-          console.error(`[searchfuse] mcp retry failed: ${error?.message ?? error}`);
+          console.error(`[searchfuse] mcp retry failed: ${caughtMessage(error)}`);
         });
       }, MCP_RETRY_DELAY_MS);
       if (typeof retryTimer?.unref === 'function') {
@@ -2016,22 +2077,24 @@ function registerMcpTools(ctx) {
 }
 
 /** 服务器请求隐藏的 `<serverKey>/<toolName>` 条目。 */
-function collectMcpAllowLists(servers) {
-  const allow = {};
-  for (const [key, server] of Object.entries(servers)) {
+function collectMcpAllowLists(servers: Bag): Bag {
+  const allow: Bag = {};
+  for (const [key, rawServer] of Object.entries(servers)) {
+    const server = rawServer as Bag | undefined;
     if (Array.isArray(server?.allowTools)) {
-      allow[key] = server.allowTools.filter((name) => typeof name === 'string');
+      allow[key] = (server.allowTools as unknown[]).filter((name) => typeof name === 'string');
     }
   }
   return allow;
 }
 
 /** `<serverKey>/<rawName>` 映射到调用方选定的工具名。 */
-function collectMcpToolNames(servers) {
-  const names = {};
-  for (const [key, server] of Object.entries(servers)) {
+function collectMcpToolNames(servers: Bag): Bag {
+  const names: Bag = {};
+  for (const [key, rawServer] of Object.entries(servers)) {
+    const server = rawServer as Bag | undefined;
     if (isPlainObject(server?.toolNames)) {
-      for (const [raw, chosen] of Object.entries(server.toolNames)) {
+      for (const [raw, chosen] of Object.entries((server.toolNames ?? {}) as Bag)) {
         if (typeof chosen === 'string' && chosen !== '') {
           names[`${key}/${raw}`] = chosen;
         }
@@ -2051,10 +2114,10 @@ function collectMcpToolNames(servers) {
  * 注册是同步的，而且直接读配置文件，所以配置问题会在加载时暴露，并点名是哪
  * 个文件，而不是变成一个莫名其妙什么都不做的工具。
  */
-function registerEngineTools(ctx) {
+function registerEngineTools(ctx: any): () => void {
   /** 上一轮注册的撤销句柄，以及那一轮对应的配置签名。 */
-  const registered = [];
-  let lastSignature;
+  const registered: Array<() => void> = [];
+  let lastSignature: string | undefined;
 
   /**
    * 配置里决定「哪些引擎工具存在」的那一部分：名字、引擎、以及开关。
@@ -2062,7 +2125,7 @@ function registerEngineTools(ctx) {
    * 密钥、代理、baseURL 之类刻意不进签名：换一把密钥不该让工具在屏幕上消失
    * 又出现一次，而用户是看着那个列表点下去的。
    */
-  const signatureOf = (engines) => {
+  const signatureOf = (engines: Bag): string => {
     // 遍历全部已知引擎而不是只遍历文件里那些条目：被默认关闭的引擎（在
     // OFF_UNLESS_ENABLED 里的那些）在配置里往往没有条目，只遍历文件会让
     // 签名看不出用户把它打开了——热重载于是不会重新注册它的工具。
@@ -2097,7 +2160,7 @@ function registerEngineTools(ctx) {
     } catch (error) {
       // 配置文件坏了：保留现有工具，而不是先把它们撤掉再发现没东西可注册。
       // 一份写着半截 JSON 的文件不该让模型手里的工具突然消失。
-      console.error(`[searchfuse] engine tools reload skipped: ${error?.message ?? error}`);
+      console.error(`[searchfuse] engine tools reload skipped: ${caughtMessage(error)}`);
       return;
     }
     const engines = isPlainObject(config.engines) ? config.engines : {};
@@ -2155,7 +2218,7 @@ function registerEngineTools(ctx) {
 }
 
 /** 把一个引擎做成独立工具：它自己的 source、它自己的引擎钉住项。 */
-function engineToolDefinition({ name, engine, describe }) {
+function engineToolDefinition({ name, engine, describe }: { name: string; engine: string; describe: string }): Bag {
   return {
     name,
     description: describe,
@@ -2172,24 +2235,24 @@ function engineToolDefinition({ name, engine, describe }) {
     },
     output: {
       schema: SEARCH_OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: renderSearchEvidence(value) }],
-      presentationMeta: (_args, value) => ({ sources: toSources(value.items) }),
+      render: (_args: Bag, value: Bag) => [{ type: 'text', text: renderSearchEvidence(value) }],
+      presentationMeta: (_args: Bag, value: Bag) => ({ sources: toSources(value.items) }),
     },
     timeoutMs: OWN_TOOL_BACKSTOP_MS,
     isConcurrencySafe: () => true,
-    presentCall: (args) => ({
+    presentCall: (args: Bag) => ({
       card: 'generic',
       title: name,
       kind: 'search',
       rawInput: args,
     }),
-    presentResult: (_args, result) => {
+    presentResult: (_args: Bag, result: Bag) => {
       if (result.isError || !result.meta || !Array.isArray(result.meta.sources)) {
         return undefined;
       }
       return { card: 'web', kind: 'search', sources: result.meta.sources, truncated: false };
     },
-    async execute(args, exec) {
+    async execute(args: Bag, exec: Bag) {
       if (typeof args?.query !== 'string' || args.query.trim() === '') {
         throw new Error(`${name} needs a non-empty string "query".`);
       }
@@ -2218,20 +2281,20 @@ function engineToolDefinition({ name, engine, describe }) {
 }
 
 /** 一个孤立的引擎工具向模型描述它自己的方式。 */
-function engineDescription(engine) {
+function engineDescription(engine: string): string {
   const base = `Search the web through the ${engine} engine alone, pinned to it with no fallback. Use it when you want exactly this engine's index rather than a fused answer. Returns structured evidence with a summary, per-item results, and an uncertainty list.`;
   // 浏览器那一半有它自己的免密钥清单；这一半没有理由仅仅为了加一句话就复制
   // 一份，而对一个有密钥的用户来说，那句话在哪种情况下都成立。
   return base;
 }
 
-function registerConfigRoute(ctx) {
+function registerConfigRoute(ctx: any): void {
   const route = {
     name: 'modsearch-config',
     kind: 'exact',
     path: '/searchfuse/config',
-    handler: async (req, res) => {
-      const send = (status, body) => {
+    handler: async (req: Bag, res: Bag) => {
+      const send = (status: number, body: Bag): void => {
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(body));
       };
@@ -2241,7 +2304,7 @@ function registerConfigRoute(ctx) {
       //  - Origin 若存在必须同源，挡掉跨站读取响应。
       //  - POST 必须是 application/json：浏览器对非 JSON 的跨站 POST 可走
       //    “简单请求”绕开 CORS 预检，强制 JSON 会让它在预检阶段就被拒。
-      const sameOrigin = (value) => {
+      const sameOrigin = (value: unknown): boolean => {
         if (typeof value !== 'string' || value === '') return true; // 非浏览器客户端没有 Origin
         try {
           const origin = new URL(value)
@@ -2264,14 +2327,14 @@ function registerConfigRoute(ctx) {
       }
       if (req.method === 'GET') {
         try {
-          const summary = engineSummary();
+          const summary = engineSummary() as Bag;
           if (new URL(req.url, 'http://localhost').searchParams.has('doctor')) {
             // 探测失败时为 null：卡片于是不显示就绪区，而不是凭空编出一份。
             summary.readiness = await engineReadiness();
           }
           send(200, summary);
         } catch (error) {
-          send(409, { error: String(error?.message ?? error) });
+          send(409, { error: caughtMessage(error) });
         }
         return;
       }
@@ -2288,9 +2351,9 @@ function registerConfigRoute(ctx) {
         return;
       }
       try {
-        const chunks = [];
+        const chunks: Buffer[] = [];
         let total = 0;
-        for await (const chunk of req) {
+        for await (const chunk of req as AsyncIterable<Buffer>) {
           total += chunk.length;
           if (total > 64 * 1024) {
             send(413, { error: 'config payload too large' });
@@ -2305,7 +2368,7 @@ function registerConfigRoute(ctx) {
         readinessCache = null;
         send(200, engineSummary());
       } catch (error) {
-        send(400, { error: String(error?.message ?? error) });
+        send(400, { error: caughtMessage(error) });
       }
     },
   };
@@ -2317,8 +2380,19 @@ function registerConfigRoute(ctx) {
 // 测试的，而不是只通过 HTTP 路由测。
 export const __config = { engineSummary, applyCardSettings, modsearchConfigPath };
 
-function run(command, args, signal, env) {
-  return new Promise((resolve, reject) => {
+interface RunResult {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+}
+
+function run(
+  command: string,
+  args: string[],
+  signal?: AbortSignal,
+  env?: NodeJS.ProcessEnv,
+): Promise<RunResult> {
+  return new Promise<RunResult>((resolve, reject) => {
     const child = spawnHidden(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       signal,
@@ -2326,10 +2400,10 @@ function run(command, args, signal, env) {
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk;
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk;
     });
     child.on('error', reject);

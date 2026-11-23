@@ -1,5 +1,10 @@
 # build output
 dist/
+# dsh 的两个入口是 tsc 从 dsh/*.ts 编译出来的产物，不进仓库；
+# 同目录下 search-schema.json / fetch-schema.json / spawnHidden.js 是手写源码，
+# 必须照常跟踪，所以这里只点名两个文件，不整目录忽略。
+dsh/index.js
+dsh/client.js
 # generated types
 .astro/
 

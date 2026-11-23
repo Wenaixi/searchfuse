@@ -11,11 +11,98 @@
 // 按 lazy-CJS 包协议手写（window.__ModuleLoader__.load，工厂函数返回
 // cordis-plugin 的导出），所以没有构建步骤，也不从 dsh 客户端包里 import：
 // 与宿主半边同样的零依赖立场。
-window.__ModuleLoader__.load({
+
+/**
+ * 宽松对象类型。理由与 dsh/index.ts 里的同名类型一样：这个文件里大量
+ * 「先建空对象再逐键填空」的写法，`{}` 会被推断成没有属性的空类型。
+ * 这些对象的形状由宿主下发的 JSON 决定，写死只会让改字段时还要改类型。
+ */
+type Bag = Record<string, any>;
+
+/**
+ * 宿主下发给卡片的那份摘要。字段全部来自服务端 `/modsearch/config` 的应答，
+ * 这里只记录卡片真的读到的键；多出来的键由 `[others: string]: any` 兜住。
+ *
+ * 这些字段全部可选：老版本宿主、或某次应答缺了某一段，卡片都应该继续渲染，
+ * 只是把对应的控件退化成空值，而不是整张卡片崩掉。
+ */
+interface EngineSummary {
+  engine?: string;
+  keyed?: string[];
+  endpoints?: string[];
+  models?: string[];
+  engines?: Record<string, Bag>;
+  mcp?: Record<string, Bag>;
+  readiness?: Bag;
+  searxng?: Bag;
+  [others: string]: any;
+}
+
+/**
+ * 卡片内存里那份待保存的草稿。
+ *
+ * 与 `EngineSummary` 的关系是「用户改到一半的值」对「文件里此刻的值」。引擎
+ * 维度的字段只有正在编辑的那一个引擎用得上（`editTarget`），其余引擎共用同一
+ * 份草稿，所以每个字段都必须允许空串这个「不改动」的哨兵值。
+ */
+interface CardDraft {
+  engine: string;
+  enabled: Bag;
+  editTarget: string;
+  exposeState: string;
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  proxy: string;
+  toolName: string;
+  mcpTarget: string;
+  mcpUrl: string;
+  mcpProxy: string;
+  mcpEnabled: boolean;
+  searxngMode: string;
+  searxngExternalURL: string;
+  searxngExternalProxy: string;
+  searxngDefaultProxy: string;
+  searxngRules: Bag;
+  searxngFilter: string;
+  searxngScope: string;
+  searxngShowAll: boolean;
+  searxngEngineName: string;
+  [others: string]: any;
+}
+
+/**
+ * 把 catch 抓到的未知值收窄成「有 message 的错误」。
+ *
+ * `catch` 的绑定在严格模式下是 unknown，而抛出来的东西什么形状都可能是：
+ * Error、字符串、带 code 的 Node 错误、甚至 null。直接读 `.message` 会在类型
+ * 层面被拒绝，在运行层面则对字符串抛异常得出一片空白。
+ */
+function caughtMessage(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return String(error);
+}
+
+/** 读取 catch 变量上的 `code`（Node 的 ENOENT 之类），没有就返回空串。 */
+function caughtCode(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return '';
+}
+
+/** dsh 的浏览器端按 lazy-CJS 包协议加载插件，这个全局由宿主注入。 */
+const hostWindow = window as unknown as Bag;
+
+hostWindow.__ModuleLoader__.load({
   id: '@wenaixi/searchfuse',
-  factory: (require) => {
-    var module = { exports: {} };
-    var exports = module.exports;
+  factory: (require: (id: string) => any) => {
+    var module: { exports: Bag } = { exports: {} };
+    var exports: Bag = module.exports;
 
     // 卡片提供的引擎，按文档介绍它们的顺序排列。宿主半边带着同一份列表；
     // 两边各自写明自己要展示的东西。
@@ -94,6 +181,9 @@ window.__ModuleLoader__.load({
         searxngAdvancedHint: 'Groups of proxies that engine rules can reference by name.',
         searxngTorBadge: 'Tor',
         searxngNetworkBadge: 'network',
+        searxngEngineDisabled: 'disabled',
+        searxngEngineName: 'Engine name',
+        searxngEngineAdd: 'Add rule',
         readyLabel: 'ready',
         notReadyLabel: 'not ready',
         keySetLabel: 'key set',
@@ -220,6 +310,9 @@ window.__ModuleLoader__.load({
         searxngAdvancedHint: '实体代理组，引擎规则可以按名字引用它们。',
         searxngTorBadge: 'Tor',
         searxngNetworkBadge: '网络',
+        searxngEngineDisabled: '已禁用',
+        searxngEngineName: '引擎名',
+        searxngEngineAdd: '添加规则',
         readyLabel: '就绪',
         notReadyLabel: '未就绪',
         keySetLabel: '已存密钥',
@@ -298,7 +391,7 @@ window.__ModuleLoader__.load({
     // index.html 把 `<html lang="zh-CN">` 冻死了，从不重写，于是设为英文的
     // 用户仍会读到一张中文卡片。服务缺席时（老版本宿主、不带 locale 的
     // profile），才由页面语言、再退到浏览器语言来定。
-    function labels(active) {
+    function labels(active: string | undefined): Bag {
       var lang = (
         active ||
         document.documentElement.lang ||
@@ -312,7 +405,7 @@ window.__ModuleLoader__.load({
     // （'unknown engine: x'、某个路径错误）：那是诊断信息，把它映射成错误码
     // 换来的会是一张翻译表，接触面远大于这张卡片本身的价值。只有静默的
     // 情况——没有任何细节可显示——才给一行本地化文案。
-    function noteFrom(error, fallback) {
+    function noteFrom(error: any, fallback: string): string {
       // message 为空的 Error 属于「没有细节」那一类，不该被字符串化：
       // 对它调 String(error) 只会得到 'Error'。
       var detail =
@@ -321,18 +414,18 @@ window.__ModuleLoader__.load({
     }
 
     /** 这个引擎是否根本就有密钥和接口地址可配。 */
-    function keyed(summary, engine) {
+    function keyed(summary: Bag, engine: string): boolean {
       return engine !== '' && (summary.keyed || []).indexOf(engine) >= 0;
     }
 
     /** 这个引擎是否接受 base URL（需要密钥的引擎与 SearXNG）。 */
-    function endpointable(summary, engine) {
+    function endpointable(summary: Bag, engine: string): boolean {
       return engine !== '' && (summary.endpoints || []).indexOf(engine) >= 0;
     }
 
     /**
      * 某次运行是否读取这个引擎的 `model` 设置。 */
-    function modelled(summary, engine) {
+    function modelled(summary: Bag, engine: string): boolean {
       return engine !== '' && (summary.models || []).indexOf(engine) >= 0;
     }
 
@@ -346,7 +439,7 @@ window.__ModuleLoader__.load({
      */
     var EXPOSE_STATES = ['both', 'aggregate', 'tool', 'off'];
 
-    function exposeState(summary, engine) {
+    function exposeState(summary: Bag, engine: string): string {
       var settings = (summary.engines && summary.engines[engine]) || {};
       var expose = settings.expose || {};
       var aggregate = expose.aggregate !== false;
@@ -369,7 +462,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 某个状态所代表的 `enabled`/`expose`。 */
-    function stateToSetting(state) {
+    function stateToSetting(state: string): Bag {
       if (state === 'off') {
         return { enabled: false, expose: { aggregate: false, tool: false } };
       }
@@ -383,7 +476,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 状态包含独立工具时显示的工具名。 */
-    function toolNameFor(summary, engine) {
+    function toolNameFor(summary: Bag, engine: string): string {
       var settings = (summary.engines && summary.engines[engine]) || {};
       return settings.toolName || engine + '_search';
     }
@@ -401,7 +494,7 @@ window.__ModuleLoader__.load({
      * 开着；又把「段缺席」判成关闭，与后端默认相反。两种错都指向同一件事：
      * 卡片必须在「用户看到什么」与「运行时真的做什么」之间保持一致。
      */
-    function searxngModeOf(summary) {
+    function searxngModeOf(summary: Bag): string {
       var base = (summary?.engines?.searxng?.baseURL || '').trim();
       if (base !== '') return 'external';
       var searxng = summary?.searxng;
@@ -413,11 +506,11 @@ window.__ModuleLoader__.load({
 
     // 引擎切换或新的摘要到达时的下一份草稿。那些字段属于新选中的引擎，
     // 所以切换引擎永远不会把一个引擎的接口地址拷贝到另一个引擎上。
-    function nextDraft(summary, engine, keepEnabled) {
+    function nextDraft(summary: EngineSummary, engine: string, keepEnabled?: Bag): CardDraft {
       // engine 为 '' 本身就是一种答案：未固定，由可用性决定。此时不存在
       // 某个引擎的密钥该放进这些字段，于是它们保持为空，卡片再说明怎么把
       // 它们找回来。
-      var current = summary.engines?.[engine] || { baseURL: '', model: '' };
+      var current = (summary.engines?.[engine] as Bag) || { baseURL: '', model: '' };
       return {
         engine: engine,
         apiKey: '',
@@ -474,18 +567,21 @@ window.__ModuleLoader__.load({
         // 逐引擎的启用/禁用与代理草稿，按引擎名索引。
         searxngRules: Object.assign(
           {},
-          ...Object.entries((summary?.searxng?.engines) || {}).map(([name, rule]) => ({
-            [name]: {
-              enabled: rule?.disabled !== true,
-              proxy: proxiesToText(rule?.proxies),
-            },
-          })),
+          ...Object.entries(((summary?.searxng?.engines) || {}) as Bag).map(([name, rawRule]) => {
+            const rule = rawRule as Bag | undefined;
+            return {
+              [name]: {
+                enabled: rule?.disabled !== true,
+                proxy: proxiesToText(rule?.proxies),
+              },
+            };
+          }),
         ),
       };
     }
 
     /** 展开某个 MCP server 的编辑区，把它的当前值填进去。 */
-    function selectMcp(summary, draft, name) {
+    function selectMcp(summary: EngineSummary, draft: CardDraft, name: string): CardDraft {
       var next = Object.assign({}, draft, { mcpTarget: name });
       if (name === '') {
         next.mcpUrl = '';
@@ -511,7 +607,7 @@ window.__ModuleLoader__.load({
      * 值：偏好照旧传递过去，而路由在被固定的引擎处于关闭状态时会明确
      * 说明。
      */
-    function selectEngine(summary, draft, engine) {
+    function selectEngine(summary: EngineSummary, draft: CardDraft, engine: string): CardDraft {
       var next = nextDraft(summary, engine, draft.enabled);
       if (engine !== '' && chainEngines(summary).indexOf(engine) >= 0) {
         next.enabled[engine] = true;
@@ -520,7 +616,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 更改自动参与状态，同时清掉一个不可能成立的偏好。 */
-    function toggleEngine(draft, engine, enabled) {
+    function toggleEngine(draft: CardDraft, engine: string, enabled: boolean): CardDraft {
       var next = Object.assign({}, draft, { enabled: Object.assign({}, draft.enabled) });
       next.enabled[engine] = enabled;
       if (!enabled && next.engine === engine) {
@@ -540,7 +636,7 @@ window.__ModuleLoader__.load({
      * 引擎」，后者是「首选哪个引擎」。两者独立，用错一个就会出现「改 exa
      * 的端点、首选却是 tavily，于是按钮不亮」。
      */
-    function isDirty(summary, draft) {
+    function isDirty(summary: EngineSummary, draft: CardDraft): boolean {
       if (draft.engine !== summary.engine) {
         return true;
       }
@@ -598,9 +694,9 @@ window.__ModuleLoader__.load({
     // 只在被编辑过时带上，而且只带那个引擎真正拥有的字段。若每次都把全部
     // 内容一并提交，就会固定一个没人选过的引擎，还会把卡片加载时读到的
     // 值写回文件，覆盖文件此刻的内容。
-    function savePayload(summary, draft) {
-      var payload = {};
-      var enabled = {};
+    function savePayload(summary: EngineSummary, draft: CardDraft): Bag {
+      var payload: Bag = {};
+      var enabled: Bag = {};
       // 只处理链上真正渲染出勾选框的引擎。没有勾选框的引擎本就没有改动的
       // 途径，把它写在这里，只可能携带一次卡片对自己做的编辑。
       chainEngines(summary).forEach((name) => {
@@ -736,14 +832,14 @@ window.__ModuleLoader__.load({
 
       // 上游引擎：批量提交**变过的**条目。未变的绝不重发，这样后端那份
       // 「先复制旧规则再逐字段覆盖」的保护不会因为一次无关保存被触发。
-      var rulePatch = {};
+      var rulePatch: Bag = {};
       var rulesDraft = isPlainObject(draft.searxngRules) ? draft.searxngRules : {};
       for (var ruleName of Object.keys(rulesDraft)) {
         var before = (searxngCurrent.engines || {})[ruleName] || {};
         var after = rulesDraft[ruleName] || {};
         var beforeProxy = proxiesToText(before.proxies);
         var beforeEnabled = before.disabled !== true;
-        var changed = {};
+        var changed: Bag = {};
         if (after.enabled !== beforeEnabled) {
           changed.enabled = after.enabled === true;
         }
@@ -769,11 +865,11 @@ window.__ModuleLoader__.load({
      * 劳动。需要分协议时，用户直接在配置文件里写。
      */
     /** 判断一个值是不是普通对象（排除 null、数组、类实例）。 */
-    function isPlainObject(value) {
+    function isPlainObject(value: unknown): value is Bag {
       return value !== null && typeof value === 'object' && !Array.isArray(value);
     }
 
-    function proxiesFromText(text) {
+    function proxiesFromText(text: unknown): Bag {
       var lines = String(text || '')
         .split('\n')
         .map((line) => line.trim())
@@ -783,11 +879,11 @@ window.__ModuleLoader__.load({
     }
 
     /** 把一份 proxies 摊平成一行的代理清单，每行一个。 */
-    function proxiesToText(proxies) {
+    function proxiesToText(proxies: unknown): string {
       if (!proxies || typeof proxies !== 'object') return '';
-      var lines = [];
+      var lines: string[] = [];
       Object.keys(proxies).forEach((key) => {
-        var raw = proxies[key];
+        var raw = (proxies as Bag)[key];
         var list = Array.isArray(raw) ? raw : [raw];
         list.forEach((entry) => {
           if (typeof entry === 'string' && entry !== '') lines.push(entry);
@@ -804,7 +900,7 @@ window.__ModuleLoader__.load({
      * 实际配置的内容。把这一项去掉，别的引擎就会看似偏好地停在框里，
      * 那便是卡片对它正在编辑的文件撒谎。
      */
-    function preferable(summary, draft) {
+    function preferable(summary: EngineSummary, draft: CardDraft): string[] {
       if (summary.engine === 'local' || draft.engine === 'local') {
         return ENGINES;
       }
@@ -823,13 +919,14 @@ window.__ModuleLoader__.load({
      * 这份列表同时也是保存时允许对 `enabled` 说些什么的范围：从未显示在
      * 屏幕上的，从未被编辑过。
      */
-    function chainEngines(summary) {
-      var probes = Array.isArray(summary.readiness) ? summary.readiness : null;
+    function chainEngines(summary: EngineSummary): string[] {
+      var probes: Bag[] | null = Array.isArray(summary.readiness) ? summary.readiness : null;
       if (probes === null) {
         return CHAIN_ENGINES;
       }
+      const ready = probes;
       return CHAIN_ENGINES.filter((name) =>
-        probes.some((entry) => entry.engine === name && entry.ready === true),
+        ready.some((entry: Bag) => entry.engine === name && entry.ready === true),
       );
     }
 
@@ -887,7 +984,7 @@ window.__ModuleLoader__.load({
     // 原生 <select> 的弹出层遵循 color-scheme，不继承 color。WebView2 在
     // 未声明配色方案时仍会把该弹出层画成浅色，所以控件必须设置一个方案，
     // 并给每个选项单独设置背景。
-    function parseCssColor(value) {
+    function parseCssColor(value: unknown) {
       if (typeof value !== 'string') {
         return null;
       }
@@ -1374,7 +1471,7 @@ window.__ModuleLoader__.load({
       ) {
         return;
       }
-      var tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(CARD_CSS_ID) + ']');
+      var tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(CARD_CSS_ID) + ']') as HTMLStyleElement | null;
       if (!tag) {
         tag = document.createElement('style');
         tag.dataset.pluginCss = CARD_CSS_ID;
@@ -1389,7 +1486,7 @@ window.__ModuleLoader__.load({
     // 本身：它是可选的，还可能在卡片构建之后才到位，所以要在渲染时读取，
     // 而不是在这里捕获。服务缺席时，下面两个辅助函数都返回空，labels()
     // 走它原有的路径。
-    function ConfigCard(react, ui, localeRef) {
+    function ConfigCard(react: Bag, ui: Bag, localeRef: Bag | undefined): Bag {
       var h = react.createElement;
       var Input = ui.Input;
       // 官方原子组件。ponytail 这类官方风格插件的设置面板一律复用它们，
@@ -1404,7 +1501,7 @@ window.__ModuleLoader__.load({
 
       // 每张卡片只构建一次，免得 useSyncExternalStore 每次渲染都拿到新的
       // 订阅函数，从而每次都重新订阅。
-      var subscribeLocale = (onChange) => {
+      var subscribeLocale = (onChange: () => void) => {
         var locale = localeRef?.current;
         return locale ? locale.subscribe(onChange) : () => {};
       };
@@ -1416,7 +1513,7 @@ window.__ModuleLoader__.load({
       // 外壳照搬原生插件卡片，逐值对齐（描边、各层背景、12px 圆角、
       // 带旋转箭头的头部行、含放弃幽灵按钮与保存主按钮的页脚），让这张
       // 卡片读起来像内置卡片的同类，而不是借住的外来户。
-      var chevron = (open) =>
+      var chevron = (open: boolean) =>
         h(
           'svg',
           {
@@ -1443,7 +1540,7 @@ window.__ModuleLoader__.load({
       // `view` 是插件页提出的问题（dsh 0.1.6-alpha.2 起）：'page' 表示
       // bundle 页面上的表单，'summary' 表示一句话摘要。更老的宿主不传，
       // 得到的是可折叠卡片。
-      return function ModsearchCard(props) {
+      return function ModsearchCard(props: Bag) {
         var view = props ? props.view : undefined;
         // 订阅而不是采样：语言是活设置，一张开着的卡片必须跟着切换。
         // getSnapshot 与 subscribe 是 dsh 文档里认定对
@@ -1500,7 +1597,7 @@ window.__ModuleLoader__.load({
         // 就绪列表，所以字段保留已保存的值，屏幕上也没有任何东西闪回
         // 加载状态。探测失败时保留上一个答案与已保存的提示不动：保存
         // 已经落地，后续失败不是它的消息。
-        var refreshReadiness = react.useCallback((saved) => {
+        var refreshReadiness = react.useCallback((saved: Bag) => {
           fetch('/searchfuse/config?doctor=1')
             .then((r) => (r.ok ? r.json() : null))
             .then((fresh) => {
@@ -1526,7 +1623,7 @@ window.__ModuleLoader__.load({
          * 把默认值藏起来不是隐藏信息，而是让第一次打开的人先看清主线：
          * 选引擎、填密钥、看哪些引擎可用。
          */
-        var disclosure = (key, label, openFlag, children, note) => {
+        var disclosure = (key: string, label: any, openFlag: any, children: any, note: any) => {
           var toggle = h(
             'button',
             {
@@ -1573,7 +1670,7 @@ window.__ModuleLoader__.load({
         // 只有包住单个控件时才用 <label>，因为 label 会成为那个控件的可访问
         // 名称；包住一组控件时必须退成具名分组，否则整段说明会被第一个控件
         // 吞掉。
-        var fieldRow = (label, control, key, groupName) =>
+        var fieldRow = (label: any, control: any, key?: string, groupName?: string) =>
           h(
             groupName ? 'div' : 'label',
             {
@@ -1587,7 +1684,7 @@ window.__ModuleLoader__.load({
           );
 
         // 纯说明文字，不是字段，因此不占据 `.field` 的上半层。
-        var hint = (text, key) =>
+        var hint = (text: any, key: string) =>
           text === null || text === undefined
             ? null
             : h('p', { key: key, className: 'sf-hint' }, text);
@@ -1645,7 +1742,7 @@ window.__ModuleLoader__.load({
             // 是自动路由是否可以使用它。未启用的引擎保留它的行：取消启用
             // 不该成为撤走开关的理由，而 dsh 的 Web 用户没有终端把它撤销
             // 回去。
-            const set = (key, value) => {
+            const set = (key: string, value: any) => {
               var next = Object.assign({}, draft);
               next[key] = value;
               draftState[1](next);
@@ -1660,19 +1757,19 @@ window.__ModuleLoader__.load({
             // 每个引擎的字段都必须绑到**那个引擎自己的**草稿值上，所以
             // 这里不做「隐式读 draft[key]」的便捷封装：键名是全局唯一的
             // 槽位，但引擎有九个，显式传值与回调才不会串行。
-            const textInput = (value, placeholder, onEdit, extra) =>
+            const textInput = (value: any, placeholder: any, onEdit?: any, extra?: any) =>
               h(
                 Input,
                 Object.assign({}, extra, {
                   type: 'text',
                   value: value,
                   placeholder: placeholder,
-                  onChange: (event) => onEdit(event.target.value),
+                  onChange: (event: Bag) => onEdit(event.target.value),
                   className: 'sf-control',
                   'aria-label': extra && extra['aria-label'] ? extra['aria-label'] : placeholder,
                 }),
               );
-            const textField = (label, value, placeholder, onEdit, fieldId) =>
+            const textField = (label: string, value: string, placeholder: string, onEdit?: any, fieldId?: string) =>
               fieldRow(label, textInput(value, placeholder, onEdit), fieldId);
 
             // 引擎清单：每个引擎一块，看得见全部，就地可编辑。
@@ -1700,7 +1797,7 @@ window.__ModuleLoader__.load({
             // 「哪些我能直接用、哪些要配东西」。组内每个引擎一块，块标题
             // 行右侧放官方 Switch，低频字段收进 DisclosureRow —— 这样
             // 视觉噪音不会淹没核心操作（填密钥、切开关）。
-            const ENGINE_GROUPS = [
+            const ENGINE_GROUPS: Array<{ key: string; title: string; hint: string; names: string[] }> = [
               { key: 'keyed', title: t.groupKeyed, hint: t.groupKeyedHint, names: [] },
               { key: 'keyless', title: t.groupKeyless, hint: t.groupKeylessHint, names: [] },
               { key: 'cli', title: t.groupCli, hint: t.groupCliHint, names: [] },
@@ -1721,7 +1818,7 @@ window.__ModuleLoader__.load({
 
             // 改某个引擎的某个字段：若它还不是编辑目标，先把它的真值灌进
             // draft，再落这次改动。这样九个引擎共用一个 draft 也不会串。
-            const editField = (name, key, value) => {
+            const editField = (name: string, key: string, value: any) => {
               var base =
                 draft.editTarget === name ? Object.assign({}, draft) : nextDraft(summary, name);
               base.editTarget = name;
@@ -1736,7 +1833,7 @@ window.__ModuleLoader__.load({
               const canKey = keyed(summary, name);
               const canModel = modelled(summary, name);
               const isReady = Array.isArray(summary.readiness)
-                ? summary.readiness.some((entry) => entry.engine === name && entry.ready === true)
+                ? summary.readiness.some((entry: Bag) => entry.engine === name && entry.ready === true)
                 : undefined;
               // 就绪状态只用三种词，不把 doctor 的整句原因抄进来 ——
               // 那是英文诊断文本，混进中文界面会被读成乱码。未就绪时
@@ -1748,7 +1845,7 @@ window.__ModuleLoader__.load({
                     ? t.readyLabel
                     : t.notReadyLabel;
               const readinessEntry = Array.isArray(summary.readiness)
-                ? summary.readiness.filter((entry) => entry.engine === name)[0]
+                ? summary.readiness.filter((entry: Bag) => entry.engine === name)[0]
                 : null;
               const fixText =
                 readinessEntry && readinessEntry.ready === false
@@ -1809,7 +1906,7 @@ window.__ModuleLoader__.load({
                 h(Switch, {
                   checked,
                   label: t.autoToggleHint + ' ' + name,
-                  onChange: (next) => {
+                  onChange: (next: any) => {
                     draftState[1](toggleEngine(draft, name, next));
                     noteState[1]('');
                   },
@@ -1844,7 +1941,7 @@ window.__ModuleLoader__.load({
                             ? t.keyPlaceholderSet
                             : t.unset,
                       onFocus: pick,
-                      onChange: (event) => editField(name, 'apiKey', event.target.value),
+                      onChange: (event: Bag) => editField(name, 'apiKey', event.target.value),
                       className: 'sf-control',
                       'aria-label': name + ' ' + t.apiKey,
                       'data-key-field': name,
@@ -1894,7 +1991,7 @@ window.__ModuleLoader__.load({
                           t.baseUrl,
                           isEditing ? draft.baseURL : (settings.baseURL || ''),
                           t.endpointFallback,
-                          (value) => editField(name, 'baseURL', value),
+                          (value: string) => editField(name, 'baseURL', value),
                           'endpoint-' + name,
                         )
                       : null,
@@ -1903,7 +2000,7 @@ window.__ModuleLoader__.load({
                           t.model,
                           isEditing ? draft.model : (settings.model || ''),
                           t.modelFallback,
-                          (value) => editField(name, 'model', value),
+                          (value: string) => editField(name, 'model', value),
                           'model-' + name,
                         )
                       : null,
@@ -1911,7 +2008,7 @@ window.__ModuleLoader__.load({
                       t.proxyLabel,
                       isEditing ? draft.proxy : '',
                       t.proxyFallback,
-                      (value) => editField(name, 'proxy', value),
+                      (value: string) => editField(name, 'proxy', value),
                       'proxy-' + name,
                     ),
                     hint(t.proxyHint, 'proxyhint-' + name),
@@ -1924,7 +2021,7 @@ window.__ModuleLoader__.load({
                         {
                           value: isEditing ? draft.exposeState : exposeState(summary, name),
                           'data-select': 'expose',
-                          onChange: (event) => editField(name, 'exposeState', event.target.value),
+                          onChange: (event: Bag) => editField(name, 'exposeState', event.target.value),
                           className: 'sf-control',
                           style: { appearance: 'none', colorScheme: darkCard ? 'dark' : 'light' },
                         },
@@ -1945,7 +2042,7 @@ window.__ModuleLoader__.load({
                           t.toolNameLabel,
                           isEditing ? draft.toolName : (settings.toolName || ''),
                           toolNameFor(summary, name),
-                          (value) => editField(name, 'toolName', value),
+                          (value: string) => editField(name, 'toolName', value),
                           'toolname-' + name,
                         )
                       : null,
@@ -1986,7 +2083,7 @@ window.__ModuleLoader__.load({
               );
             });
 
-            const engineGroupBlock = (group) =>
+            const engineGroupBlock = (group: Bag) =>
               group.names.length === 0
                 ? null
                 : h(
@@ -1994,7 +2091,7 @@ window.__ModuleLoader__.load({
                     { key: group.key, className: 'sf-engine-group' },
                     h('h5', { className: 'sf-group-title' }, group.title),
                     h('p', { className: 'sf-group-hint' }, group.hint),
-                    group.names.map((name) => statusRows[listedEngines.indexOf(name)]),
+                    group.names.map((name: string) => statusRows[listedEngines.indexOf(name)]),
                   );
 
             // 保存失败是一句需要被打断的报错，成功只是确认。两者的
@@ -2011,7 +2108,7 @@ window.__ModuleLoader__.load({
             // 再往下改，比一上来就给下拉框更贴近真实使用顺序。
             const readinessArr = Array.isArray(summary.readiness) ? summary.readiness : null;
             const readyEngines = readinessArr
-              ? readinessArr.filter((entry) => entry.ready === true).length
+              ? readinessArr.filter((entry: Bag) => entry.ready === true).length
               : null;
             const mcpEnabled = Object.keys(summary.mcp || {}).filter(
               (name) => (summary.mcp[name] || {}).enabled !== false,
@@ -2078,7 +2175,7 @@ window.__ModuleLoader__.load({
                   'select',
                   {
                     value: draft.engine,
-                    onChange: (event) => {
+                    onChange: (event: Bag) => {
                       draftState[1](selectEngine(summary, draft, event.target.value));
                       noteState[1]('');
                     },
@@ -2219,7 +2316,7 @@ window.__ModuleLoader__.load({
                       placeholder: server.url || '',
                       className: 'sf-control',
                       'aria-label': t.mcpUrl,
-                      onChange: (event) =>
+                      onChange: (event: Bag) =>
                         draftState[1](Object.assign({}, draft, { mcpUrl: event.target.value })),
                     }),
                   ),
@@ -2233,7 +2330,7 @@ window.__ModuleLoader__.load({
                       placeholder: t.mcpProxyHint,
                       className: 'sf-control',
                       'aria-label': t.mcpProxy,
-                      onChange: (event) =>
+                      onChange: (event: Bag) =>
                         draftState[1](Object.assign({}, draft, { mcpProxy: event.target.value })),
                     }),
                     h('p', { className: 'sf-hint' }, t.mcpProxyHint),
@@ -2248,7 +2345,7 @@ window.__ModuleLoader__.load({
                         type: 'checkbox',
                         className: 'sf-check',
                         checked: draft.mcpEnabled,
-                        onChange: (event) =>
+                        onChange: (event: Bag) =>
                           draftState[1](Object.assign({}, draft, { mcpEnabled: event.target.checked })),
                       }),
                       h('span', { className: 'sf-label' }, t.mcpEnabled),
@@ -2338,7 +2435,7 @@ window.__ModuleLoader__.load({
             return am - bm || a.localeCompare(b);
           });
 
-          var scopeOf = (name) => {
+          var scopeOf = (name: string) => {
             var before = (section.engines || {})[name] || {};
             var parts = [];
             if (before.network) parts.push(t.searxngNetworkBadge + ' ' + before.network);
@@ -2349,7 +2446,7 @@ window.__ModuleLoader__.load({
             return parts.join(' · ');
           };
 
-          var setRule = (name, patch) => {
+          var setRule = (name: string, patch: Bag) => {
             var nextRules = Object.assign({}, draft.searxngRules);
             var current = Object.assign({ enabled: true, proxy: '' }, nextRules[name] || {});
             nextRules[name] = Object.assign({}, current, patch);
@@ -2359,7 +2456,7 @@ window.__ModuleLoader__.load({
 
           // 一行上游引擎：名字（带非默认标记）| 代理 | 开关。
           // 单行 40px，横向栅格；窄容器下退化为纵向（见 CSS 的 520px 断点）。
-          var upstreamRow = (name) => {
+          var upstreamRow = (name: string) => {
             var rule = (draft.searxngRules || {})[name] || { enabled: true, proxy: '' };
             var badges = scopeOf(name);
             return h(
@@ -2377,12 +2474,12 @@ window.__ModuleLoader__.load({
                 placeholder: t.searxngFollowDefault,
                 'aria-label': name + ' ' + t.searxngExternalProxy,
                 className: 'sf-control',
-                onChange: (event) => setRule(name, { proxy: event.target.value }),
+                onChange: (event: Bag) => setRule(name, { proxy: event.target.value }),
               }),
               h(Switch, {
                 checked: rule.enabled !== false,
                 label: name + ' ' + t.searxngEngineDisabled,
-                onChange: (next) => setRule(name, { enabled: next }),
+                onChange: (next: boolean) => setRule(name, { enabled: next }),
               }),
             );
           };
@@ -2407,7 +2504,7 @@ window.__ModuleLoader__.load({
                     placeholder: 'http://127.0.0.1:7890',
                     className: 'sf-control sf-textarea',
                     'aria-label': t.searxngDefaultProxy,
-                    onChange: (event) =>
+                    onChange: (event: Bag) =>
                       draftState[1](
                         Object.assign({}, draft, { searxngDefaultProxy: event.target.value }),
                       ),
@@ -2428,7 +2525,7 @@ window.__ModuleLoader__.load({
                         value: draft.searxngFilter || '',
                         placeholder: t.searxngFilterPlaceholder,
                         'aria-label': t.searxngFilterPlaceholder,
-                        onChange: (event) =>
+                        onChange: (event: Bag) =>
                           draftState[1](
                             Object.assign({}, draft, { searxngFilter: event.target.value }),
                           ),
@@ -2497,7 +2594,7 @@ window.__ModuleLoader__.load({
                         value: draft.searxngEngineName || '',
                         placeholder: t.searxngEngineName,
                         'aria-label': t.searxngEngineName,
-                        onChange: (event) =>
+                        onChange: (event: Bag) =>
                           draftState[1](
                             Object.assign({}, draft, { searxngEngineName: event.target.value }),
                           ),
@@ -2546,7 +2643,7 @@ window.__ModuleLoader__.load({
                     placeholder: 'https://searx.example.com',
                     'aria-label': t.searxngExternalURL,
                     className: 'sf-control',
-                    onChange: (event) =>
+                    onChange: (event: Bag) =>
                       draftState[1](
                         Object.assign({}, draft, { searxngExternalURL: event.target.value }),
                       ),
@@ -2562,7 +2659,7 @@ window.__ModuleLoader__.load({
                     placeholder: t.searxngFollowDefault,
                     'aria-label': t.searxngExternalProxy,
                     className: 'sf-control',
-                    onChange: (event) =>
+                    onChange: (event: Bag) =>
                       draftState[1](
                         Object.assign({}, draft, { searxngExternalProxy: event.target.value }),
                       ),
@@ -2584,7 +2681,7 @@ window.__ModuleLoader__.load({
                 label: t.searxngModeLabel,
                 value: draft.searxngMode,
                 options: modeOptions,
-                onChange: (next) => {
+                onChange: (next: any) => {
                   draftState[1](Object.assign({}, draft, { searxngMode: next }));
                   noteState[1]('');
                 },
@@ -2723,7 +2820,7 @@ window.__ModuleLoader__.load({
       };
     }
 
-    function registerCard(ctx) {
+    function registerCard(ctx: any): void {
       // 在 cordis 里伸手去拿一个未声明的服务会抛异常，所以每个可选依赖
       // 各走一次自己范围的 ctx.inject：闭包在服务存在的地方运行，在不存在
       // 的地方绝不运行，与宿主半边取 webServer 的做法完全一致。
@@ -2736,7 +2833,7 @@ window.__ModuleLoader__.load({
       // 点名的每一个服务，于是在一个从不提供 locale 的宿主上，卡片根本
       // 不会注册。放在这里，服务缺失只是让句柄空着，卡片退回页面语言。
       var localeRef = { current: null };
-      ctx.inject(['locale'], (scope) => {
+      ctx.inject(['locale'], (scope: any) => {
         localeRef.current = scope.locale;
         if (typeof scope.effect === 'function') {
           scope.effect(
@@ -2748,7 +2845,7 @@ window.__ModuleLoader__.load({
         }
       });
 
-      ctx.inject(['slots'], (scope) => {
+      ctx.inject(['slots'], (scope: any) => {
         // 卡片与它的路由同生共死：宿主路由关掉时（settingsCard: false，
         // 或没有 web profile），卡片只能渲染一个错误，而那不是「关掉一项
         // 功能」的含义。任何响应都证明路由存在；只有 404 或网络失败才
@@ -2768,7 +2865,7 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function mountCard(ctx, localeRef) {
+    function mountCard(ctx: any, localeRef: Bag): void {
       var react;
       try {
         react = require('react');
@@ -2795,7 +2892,7 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function apply(ctx) {
+    function apply(ctx: any): void {
       // 样式先注入：卡片渲染前必须已经存在，否则第一帧会闪一下无样式
       // 的裸布局。
       injectCardCss();
