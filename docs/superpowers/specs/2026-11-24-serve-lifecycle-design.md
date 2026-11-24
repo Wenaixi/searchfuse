@@ -59,8 +59,23 @@ export async function ensureServeRunning(
 
 1. 读 `runtime.json`。文件不存在 → 直接进入第 3 步。
 2. 用文件里的端口探 `/healthz`（2 秒超时，`Connection: close`）。200 就返回 `{ started: false, port }`。
-3. spawn `node <dist/main.js> serve --ensure`，`stdio: 'ignore'`、`windowsHide: true`、带超时。进程退出码 0 视为成功。
-4. 成功后再读一次 `runtime.json` 拿端口；拿不到就返回 `{ started: false, reason: 'runtime.json not written' }`。
+3. spawn `node <dist/main.js> serve --ensure`，`stdio: 'ignore'`、`windowsHide: true`、**`detached: true` 并 `unref()`**。
+4. **轮询 `/healthz`**（每 500ms，总上限 20 秒），直到通了或超时。
+5. 通了就再读一次 `runtime.json` 拿端口；拿不到返回 `{ started: false, reason: 'runtime.json not written' }`。
+
+**为什么不能等子进程退出码（2026-11-24 实测纠正）：**
+
+`serve --ensure` 有两种退出行为。服务已在跑时它 `process.exit(0)` 立刻退出；
+服务不在跑时它打印 `Listening on ...` 之后**常驻不退出**（`src/main.ts:326-333` 只写 stdout，没有 exit）。
+
+所以「等退出码」在真正需要起服务的那条路上**永远等不到**，超时到点杀掉子进程，
+杀掉的正是刚起来的服务——服务白起一次、被判失败、还被干掉，三重错误。
+
+实测证据：隔离 `HOME` 下 spawn `serve --ensure`，8 秒后进程仍活、`/healthz` 返 200、
+`runtime.json` 已写出。
+
+**子进程必须 detached 且不杀。** 它本来就是常驻服务，杀掉它是本设计的自相矛盾。
+残留由下次 `--ensure` 复用：它先探 `/healthz`，通了就 exit 0。
 
 **为什么复用 `serve --ensure` 而不是自己起服务**：`--ensure` 已经处理了「端口 0 由内核分配」「已在跑就退 0」两个边界，自己在插件里重写一遍就会漂移。这条命令是唯一真源。
 
@@ -71,12 +86,19 @@ export async function ensureServeRunning(
 | 位置 | 时机 | 失败时 |
 | :-- | :-- | :-- |
 | `claude/hooks/register.ts` | `searchOrRead` 发现 runtime.json 读不到，且 `$.process.run` 兜底也失败之后 | 保持现状：交回 `next(e)` |
-| `dsh/index.ts` 插件启动 | `apply` 末尾，`ctx.effect` 里 | 静默：dsh 自己能用 CLI |
+| `dsh/index.ts` 卡片动作 | `POST {action:'ensureServe'}` | 返回 `{ ok: false, message }` |
 | `omp/extension.ts` | 已有，不改 | — |
 
 Claude 侧**只在两条路都失败后**才 ensure，理由是这个 hook 在每个 `tool.call` 上都会跑，每次都 spawn 一个进程太贵。判据是「这次真的用不上服务了」，而不是「服务好像不在」。
 
-`dsh/index.ts` 的启动 ensure 必须**不阻塞 `apply`**：`void ensureServeRunning()`，失败只记一行日志。插件加载慢 5 分钟是不可接受的。
+**dsh 侧不做「插件加载时自动拉起」（2026-11-24 实施时推翻）。** 原设计要在 `apply` 末尾 `void ensureServeRunning()`，实测它会：
+- 污染既有测试——多个用例断言「发到服务的请求恰好 1 个、path 是 `/v1/search`」，
+  而 `apply` 时的 healthz 探针把计数变成 2、把首个请求变成 `/healthz`；
+- 拖慢每一次插件加载；
+- 而 dsh 自己走 CLI，根本不依赖这个服务。
+
+所以 dsh 侧只在卡片的「拉起」动作里真的 spawn。这不减少任何实际能力：
+需要服务的另外两个宿主各有自己的 ensure。
 
 ### 3.3 卡片新增一个动作
 

@@ -292,6 +292,20 @@ export function syncClaudeSettings(
   return decision.backup === undefined ? { changed: true } : { changed: true, backup: decision.backup };
 }
 
+/**
+ * 从 kernel 的绝对路径推出同目录下的 CLI 入口。
+ *
+ * 为什么从 kernel 推而不是各写一份：`hosts sync` 只往 settings 里写 kernelPath
+ * 这一个绝对路径，两处各推一次就会漂移。两个产物永远在同一个 dist 目录。
+ *
+ * 路径不像 kernel.js 时返回 undefined：那说明 settings 里写的不是我们以为
+ * 的那个文件，这时不猜，由调用方放弃。
+ */
+export function serveCliPathFromKernel(kernelPath: string): string | undefined {
+  if (!/kernel\.js$/.test(kernelPath)) return undefined;
+  return kernelPath.replace(/kernel\.js$/, 'main.js');
+}
+
 /** Claude Code 的用户级 settings。 */
 export function claudeSettingsPath(): string {
   return path.join(os.homedir(), '.claude', 'settings.json');

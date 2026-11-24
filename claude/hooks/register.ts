@@ -26,6 +26,8 @@ const moduleUrl = (import.meta as unknown as { url: string }).url;
 
 /** 一次搜索的墙钟上限。比聚合默认的 8 秒宽，留给慢引擎。 */
 const SEARCH_TIMEOUT_MS = 240_000;
+/** 唤醒服务的上限。与 omp 扩展侧的 WAKE_TIMEOUT_MS 保持一致。 */
+const WAKE_TIMEOUT_MS = 15_000;
 
 /**
  * 宿主在 hook 里注入的 `$` 的**最小形状**：只声明这个 hook 真正调用的方法。
@@ -238,14 +240,19 @@ async function callServe(
 }
 
 /**
- * 取一次搜索结果：**服务优先，子进程兜底**。
+ * 取一次搜索结果：**服务优先，子进程兜底，最后拉起服务再试一次**。
  *
- * 两条路：
+ * 三条路：
  * 1. 本地服务在跑 → `$.http.fetch` 打 `/v1/search`（快，省一次进程启动）
  * 2. 服务不在 → `$.process.run(['node', kernel.js])` 直接跑聚合器
+ * 3. 两条都失败 → 跑一次 `serve --ensure` 把服务拉起来，再走一次第 1 条
  *
  * 为什么两条都要：服务是可选加速器，不是必需品。只走 HTTP 的话，用户没起
  * 服务就等于没搜索；只走子进程的话，每次搜索都多一次 Node 启动（约 200ms）。
+ *
+ * 为什么第三级放在这里而不是每条路径内部：这两条路都失败，说明这次搜索本来
+ * 就要失败了，此刻多付一次 `serve --ensure` 的成本可以接受；若放在每条路径
+ * 内部，每次 tool.call 都会多 spawn 一个进程探一次，代价完全不同。
  *
  * 为什么 `$.process.run` 用裸名 `'node'`：mod 沙箱里没有 `globalThis.process`
  * （实测 undefined），拿不到 `process.execPath`。宿主会按 PATH 解析裸名。
@@ -267,9 +274,25 @@ async function fetchOrSpawn(
   // 路径二：子进程。kernel 的绝对路径同样来自 settings。
   const kernelPath = await kernelPathFromSettings($, next);
   if (kernelPath === undefined) return undefined;
+  const spawned = await runKernel($, next, kernelPath, target.kernelArgs);
+  if (spawned !== undefined) return spawned;
+
+  // 路径三：把服务拉起来，再试一次 HTTP。子进程能跑通说明 kernel 存在，
+  // 所以这次拉起用的 CLI 也一定在同一个 dist 目录里。
+  if (!(await wakeServe($, next, kernelPath))) return undefined;
+  return await callServe($, next, target.endpoint, target.params);
+}
+
+/** 跑一次 kernel 子进程；失败返回 undefined。 */
+async function runKernel(
+  $: HostDollar,
+  next: HostNext,
+  kernelPath: string,
+  kernelArgs: string[],
+): Promise<string | undefined> {
   try {
     const run = await $.process.run({
-      argv: ['node', kernelPath, ...target.kernelArgs],
+      argv: ['node', kernelPath, ...kernelArgs],
       timeoutMs: SEARCH_TIMEOUT_MS,
       signal: next.signal,
     });
@@ -277,6 +300,32 @@ async function fetchOrSpawn(
     return run.stdout;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * 拉起本地服务：跑 `serve --ensure`。
+ *
+ * CLI 入口从 kernel 的绝对路径推——两个产物永远在同一个 dist 目录，而
+ * settings 里只写了 kernelPath 这一个绝对路径，各推一次就会漂移。
+ *
+ * 沙箱里没有 `process`，所以与已有的子进程兜底用同一套：`$.process.run`
+ * 加裸名 `'node'`。
+ */
+async function wakeServe($: HostDollar, next: HostNext, kernelPath: string): Promise<boolean> {
+  const cliPath = kernelPath.replace(/kernel\.js$/, 'main.js');
+  // 路径里没有 kernel.js 说明 settings 里写的不是我们以为的那个文件，
+  // 这时不猜，直接放弃。
+  if (cliPath === kernelPath) return false;
+  try {
+    const run = await $.process.run({
+      argv: ['node', cliPath, 'serve', '--ensure'],
+      timeoutMs: WAKE_TIMEOUT_MS,
+      signal: next.signal,
+    });
+    return run.exitCode === 0;
+  } catch {
+    return false;
   }
 }
 

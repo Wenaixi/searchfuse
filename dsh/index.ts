@@ -23,6 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { request as httpRequest } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnHidden } from './spawnHidden.js';
@@ -34,6 +35,8 @@ const CLI_PATH = fileURLToPath(new URL('../dist/kernel.js', import.meta.url));
 // doctor 需要完整 CLI（子命令解析、config 读取），而 CLI_PATH 指向的是
 // 只认 --query 的搜索内核。两者不是同一个入口，不能共用一个常量。
 const DOCTOR_CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+/** 拉起服务的上限。与 omp 扩展侧的 WAKE_TIMEOUT_MS 保持一致。 */
+const SERVE_ENSURE_TIMEOUT_MS = 20_000;
 // 由仓库里的一个测试与 src/schema.ts 保持同步；插件文件无法导入 TS 源码，
 // 且要保持完全零依赖（只用 node 内置模块）。
 const SEARCH_OUTPUT_SCHEMA = JSON.parse(
@@ -295,7 +298,8 @@ export function apply(ctx: any, config: Bag = {}): void {
       } catch (error) {
         console.error(`[searchfuse] settings card route skipped: ${error}`);
       }
-    });    // 从 rc.7 到 0.1.6-alpha.1，设置页是按已服务的 settings 命名空间来分发插件
+    });
+    // 从 rc.7 到 0.1.6-alpha.1，设置页是按已服务的 settings 命名空间来分发插件
     // 卡片的：只有当卡片的槽位键匹配上宿主应答过的命名空间，卡片才会被渲染。
     // 这里注册的命名空间是个空的透传，因为它的全部职责就是让卡片可被分发。
     // 值仍然留在上面那条路由背后的配置文件里。schema 按这个 seam 实际会对它
@@ -579,12 +583,129 @@ function cliPath() {
 }
 
 /**
+ * 探一次 `/healthz`。返回是否 200。
+ *
+ * 探针必须带 `Connection: close`：服务走 keep-alive，不主动断开就会一直
+ * 等到超时，把一个健康实例误判成不通。
+ */
+function healthOnce(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/healthz',
+        method: 'GET',
+        timeout: 2000,
+        headers: { Connection: 'close' },
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      },
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+/**
+ * 拉起本地服务：跑 `serve --ensure`。
+ *
+ * 就绪的判据是 `/healthz` 通过，不是子进程退出码。实测：`serve --ensure`
+ * 只在「已经在跑」时以 0 退出；真正需要起服务时它会把服务拉起来并**常驻**，
+ * 永远等不到 close。等退出码会一路等到超时，然后杀掉刚起来的那个服务。
+ * 所以 spawn 之后就把子进程交出去（detached + unref），改为轮询健康检查。
+ *
+ * CLI 路径从 `PACKAGE_ROOT` 推，不假设与源码树同构——插件在 pnpm 的快照里
+ * 运行时，`../dist/main.js` 指向的是快照内的副本，那正是要用的那份。
+ */
+/**
+ * 拉起本地服务：跑 `serve --ensure`。
+ *
+ * 就绪的判据是 `/healthz` 通过，不是子进程退出码。实测：`serve --ensure`
+ * 只在「已经在跑」时以 0 退出；真正需要起服务时它会把服务拉起来并**常驻**，
+ * 永远等不到 close。等退出码会一路等到超时，然后杀掉刚起来的那个服务。
+ * 所以 spawn 之后就把子进程交出去（detached + unref），改为轮询健康检查。
+ *
+ * CLI 路径从 `PACKAGE_ROOT` 推，不假设与源码树同构——插件在 pnpm 的快照里
+ * 运行时，`../dist/main.js` 指向的是快照内的副本，那正是要用的那份。
+ *
+ * `SEARCHFUSE_SERVE_CLI` 可以让测试注入一个假 CLI：路由的 handler 没有
+ * 参数可传，而真 CLI 会留下一个常驻服务，测试不能那么干。
+ */
+async function startServe(
+  cliPath: string = process.env.SEARCHFUSE_SERVE_CLI ?? join(PACKAGE_ROOT, 'dist', 'main.js'),
+): Promise<{ started: boolean; port?: number; reason?: string }> {
+  let spawnError: unknown;
+  let exitedEarly: number | undefined;
+
+  try {
+    const child = spawnHidden('node', [cliPath, 'serve', '--ensure'], {
+      stdio: 'ignore',
+      // 让服务脱离父进程的会话：dsh 宿主退出时不该把服务带走。
+      detached: true,
+    });
+    child.unref();
+    child.on('error', (error) => {
+      spawnError = error;
+    });
+    child.on('close', (code) => {
+      exitedEarly = code === null ? undefined : code;
+    });
+  } catch (error) {
+    // spawn 本身同步抛出的情况。
+    return { started: false, reason: caughtMessage(error) };
+  }
+
+  const deadline = Date.now() + SERVE_ENSURE_TIMEOUT_MS;
+  for (;;) {
+    if (spawnError !== undefined) {
+      return { started: false, reason: caughtMessage(spawnError) };
+    }
+    // 非 0 退出是明确的启动失败，立刻收手；退出 0 不作终局，让健康检查说了算。
+    if (exitedEarly !== undefined && exitedEarly !== 0) {
+      return { started: false, reason: `serve --ensure exited ${exitedEarly}` };
+    }
+    const probe = readServeRuntime();
+    if (probe !== undefined && (await healthOnce(probe.port))) {
+      return { started: true, port: probe.port };
+    }
+    if (Date.now() >= deadline) {
+      return { started: false, reason: `serve did not become healthy within ${SERVE_ENSURE_TIMEOUT_MS} ms` };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+/**
+ * 本地服务在不在。
+ *
+ * 只报状态，不报诊断原文：卡片要的是一个答案。
+ */
+async function serveStatus(): Promise<{ running: boolean; port?: number }> {
+  const existing = readServeRuntime();
+  if (existing === undefined) return { running: false };
+  return (await healthOnce(existing.port))
+    ? { running: true, port: existing.port }
+    : { running: false };
+}
+
+/**
  * 读本地服务的运行时信息：`~/.searchfuse/runtime.json`。
  *
  * 返回 undefined 表示服务没起（文件不在、读不了、或不是我们要的形状）。
  * 调用方据此回退到子进程。
+ *
+ * 端口必须是整数：`typeof === 'number'` 会放过 `3.5` 与 `NaN`，拿它们去连
+ * 只会得到一个模棱两可的连接错误。判据与 `src/serveEnsure.ts` 的同名逻辑
+ * 必须一致——两处得出两种答案的话，卡片与运行时就会互相撒谎。
  */
-function readServeRuntime() {
+function readServeRuntime(): { port: number; token: string } | undefined {
   const file = join(homedir(), '.searchfuse', 'runtime.json');
   let raw;
   try {
@@ -599,7 +720,8 @@ function readServeRuntime() {
     return undefined;
   }
   if (!isPlainObject(parsed)) return undefined;
-  if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
+  if (typeof parsed.port !== 'number' || !Number.isInteger(parsed.port)) return undefined;
+  if (typeof parsed.token !== 'string' || parsed.token === '') return undefined;
   return { port: parsed.port, token: parsed.token };
 }
 
@@ -1092,8 +1214,13 @@ function envSettingsFor(engine: string, env: NodeJS.ProcessEnv = process.env): B
  * 卡片被允许知道的内容：每个引擎的端点和模型，外加是否存过密钥以及它来自
  * 哪里，且永远不包括密钥本身。读不到秘密的浏览器泄漏不了秘密，也写不回一个
  * 空白值把它盖掉。
+ *
+ * 是 async 的：`serve` 段要探一次 `/healthz`，那是网络动作。
  */
-function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessEnv = process.env): Bag {
+async function engineSummary(
+  config: Bag = readModsearchConfig(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Bag> {
   const engines: Bag = {};
   for (const name of CARD_ENGINES) {
     const fromFile = fileSettingsFor(name, config);
@@ -1179,6 +1306,10 @@ function engineSummary(config: Bag = readModsearchConfig(), env: NodeJS.ProcessE
     // 状态是「实际接上了没」。两者不同步正是最需要被看见的故障——
     // 开关写着 true、文件却没装，或者反过来。
     hosts: hostStatuses(config),
+    // 本地服务在不在。它决定 Claude Code 与 omp 的搜索走 HTTP 还是退回
+    // spawn 子进程，而那条降级路径用户完全感知不到——只在日志里留一条
+    // ENOENT。所以卡片必须把它报出来。
+    serve: await serveStatus(),
     // SearXNG 的抓取配置。卡片要能逐引擎配代理，所以这里原样交出去，
     // 保存时由 applyCardSettings 校验并写回。
     //
@@ -2518,7 +2649,7 @@ function registerConfigRoute(ctx: any): void {
       }
       if (req.method === 'GET') {
         try {
-          const summary = engineSummary() as Bag;
+          const summary = (await engineSummary()) as Bag;
           if (new URL(req.url, 'http://localhost').searchParams.has('doctor')) {
             // 探测失败时为 null：卡片于是不显示就绪区，而不是凭空编出一份。
             summary.readiness = await engineReadiness();
@@ -2553,11 +2684,23 @@ function registerConfigRoute(ctx: any): void {
           }
           chunks.push(chunk);
         }
-        applyCardSettings(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Bag;
+        // 独立动作，不走 applyCardSettings：它会 spawn 子进程，而
+        // applyCardSettings 的契约是「只写配置文件的那些段」。
+        if (body?.action === 'ensureServe') {
+          const outcome = await startServe();
+          send(200, {
+            ok: outcome.started || outcome.port !== undefined,
+            ...(outcome.port === undefined ? {} : { port: outcome.port }),
+            ...(outcome.reason === undefined ? {} : { message: outcome.reason }),
+          });
+          return;
+        }
+        applyCardSettings(body);
         // 缓存里的判定说的是这次保存刚刚重写之前的那个文件。继续用一分钟，
         // 会在设置它的密钥刚存进来之后，告诉卡片某个引擎仍未配置。
         readinessCache = null;
-        send(200, engineSummary());
+        send(200, await engineSummary());
       } catch (error) {
         send(400, { error: caughtMessage(error) });
       }
