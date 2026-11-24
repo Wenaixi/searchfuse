@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   installClaudeSkill,
   installOmpExtension,
+  ompStatus,
   removeOmpExtension,
   setYamlScalar,
   reportClaudeMcp,
@@ -313,5 +314,45 @@ describe('reportClaudeMcp', () => {
   it('没有 mcpServers 时返回空数组', () => {
     const file = tempFile('.claude.json', '{}');
     expect(reportClaudeMcp(file)).toEqual([]);
+  });
+});
+
+describe('ompStatus', () => {
+  // 这条守着一个真实踩过的坑：安装时模板里的占位符会被替换成真实路径，
+  // 所以「已安装文件」永远不等于「模板原文」。拿模板原文去比，就等于把
+  // 每一次正确的安装都报成陈旧——卡片会永久显示「需要更新」，
+  // 而这个提示永远消不掉。
+  it('模板占位符被渲染后不再判陈旧', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-omp-'));
+    created.push(dir);
+    const kernelPath = 'E:\\\\newCC\\\\aaa-dsh-go\\\\dsh-modsearch\\\\dist\\\\kernel.js';
+    const template = "const KERNEL_PATH = '__SEARCHFUSE_KERNEL_PATH__';\\n";
+    // 用与生产代码相同的渲染方式写出「已安装」的样子，确保比对口径一致。
+    const escaped = JSON.stringify(kernelPath).slice(1, -1);
+    fs.writeFileSync(
+      path.join(dir, 'searchfuse.ts'),
+      template.replaceAll('__SEARCHFUSE_KERNEL_PATH__', escaped),
+      'utf-8',
+    );
+    const status = ompStatus(template, dir, kernelPath);
+    expect(status.installed).toBe(true);
+    expect(status.stale).toEqual([]);
+  });
+
+  it('内容与当前模板确实不同时仍然报陈旧', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-omp-'));
+    created.push(dir);
+    fs.writeFileSync(path.join(dir, 'searchfuse.ts'), 'old implementation\\n', 'utf-8');
+    const status = ompStatus("const x = '__SEARCHFUSE_KERNEL_PATH__';\\n", dir, '/tmp/kernel.js');
+    expect(status.stale).toEqual(['searchfuse.ts']);
+  });
+
+  it('文件不存在时报缺失而不是陈旧', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-omp-'));
+    created.push(dir);
+    const status = ompStatus('template', dir, '/tmp/kernel.js');
+    expect(status.installed).toBe(false);
+    expect(status.missing).toEqual(['searchfuse.ts']);
+    expect(status.stale).toEqual([]);
   });
 });

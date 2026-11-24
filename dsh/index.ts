@@ -193,6 +193,10 @@ function claudeHostStatus(): HostStatus {
  *
  * 「装了但旧了」是最容易骗人的一种：文件明明在，行为却还是旧的 ——
  * 与 pnpm 把 `file:` 依赖复制成快照是同一类陷阱。所以内容比对单独报一栏。
+ *
+ * **比对前必须先把模板渲染一遍**，理由与 `src/hosts.ts` 的 `ompStatus`
+ * 完全相同：安装时占位符会被换成真实路径，拿模板原文比会让每一次正确的
+ * 安装都显示成陈旧。
  */
 function ompHostStatus(): HostStatus {
   const file = join(homedir(), '.omp', 'agent', 'extensions', 'searchfuse.ts');
@@ -201,8 +205,13 @@ function ompHostStatus(): HostStatus {
   const missing = current === undefined ? ['searchfuse.ts'] : [];
   const stale: string[] = [];
   if (current !== undefined) {
-    const expected = slurp(source);
-    if (expected !== undefined && current !== expected) stale.push('searchfuse.ts');
+    const template = slurp(source);
+    if (template !== undefined) {
+      const kernelPath = join(PACKAGE_ROOT, 'dist', 'kernel.js');
+      const escaped = JSON.stringify(kernelPath).slice(1, -1);
+      const expected = template.replaceAll('__SEARCHFUSE_KERNEL_PATH__', escaped);
+      if (current !== expected) stale.push('searchfuse.ts');
+    }
   }
   return { installed: current !== undefined, stale, missing };
 }

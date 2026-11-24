@@ -531,8 +531,17 @@ function ompWired(file = ompConfigPath()): boolean {
  * `installed` 看扩展文件在不在，`stale` 比对内容与传入的源文本——两者分开
  * 是因为它们对应两种不同的故障：「没装」要装，「装了但旧了」要重新同步，
  * 而后者最容易骗人：文件明明在，行为却还是旧的。
+ *
+ * **比对前必须先把源模板渲染一遍。** 安装时 `installOmpExtension` 会把
+ * `__SEARCHFUSE_KERNEL_PATH__` 换成真实路径，所以已安装文件的文本永远不等于
+ * 模板原文。直接拿模板比，就等于把每一次正确的安装都报成陈旧——卡片上的
+ * 「需要更新」会变成永远消不掉的假提示。渲染是同一个函数，口径就一致了。
  */
-export function ompStatus(source: string | undefined, dir = ompExtensionsDir()): HostStatus {
+export function ompStatus(
+  source: string | undefined,
+  dir = ompExtensionsDir(),
+  kernelPath = '',
+): HostStatus {
   const file = path.join(dir, OMP_EXTENSION_FILE);
   let current: string | undefined;
   try {
@@ -542,8 +551,11 @@ export function ompStatus(source: string | undefined, dir = ompExtensionsDir()):
   }
   const missing: string[] = current === undefined ? [OMP_EXTENSION_FILE] : [];
   const stale: string[] = [];
-  if (current !== undefined && source !== undefined && current !== source) {
-    stale.push(OMP_EXTENSION_FILE);
+  if (current !== undefined && source !== undefined) {
+    // 与 installOmpExtension 用同一套渲染，避免「装了却报旧」的假阳性。
+    const escaped = JSON.stringify(kernelPath).slice(1, -1);
+    const expected = source.replaceAll('__SEARCHFUSE_KERNEL_PATH__', escaped);
+    if (current !== expected) stale.push(OMP_EXTENSION_FILE);
   }
   return {
     installed: current !== undefined,
