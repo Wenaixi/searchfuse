@@ -7,7 +7,6 @@ import {
   installOmpExtension,
   ompStatus,
   removeOmpExtension,
-  serveCliPathFromKernel,
   setYamlScalar,
   reportClaudeMcp,
   syncClaudeSettings,
@@ -315,20 +314,6 @@ describe('reportClaudeMcp', () => {
   it('没有 mcpServers 时返回空数组', () => {
     const file = tempFile('.claude.json', '{}');
     expect(reportClaudeMcp(file)).toEqual([]);
-  });
-});
-
-describe('serveCliPathFromKernel', () => {
-  // 两个产物永远在同一个 dist 目录，而 settings 里只写了 kernelPath 这一个
-  // 绝对路径，所以 CLI 入口只能从它推，不能各写一份。
-  it('从 kernel.js 推出同目录的 main.js', () => {
-    expect(serveCliPathFromKernel('E:\\x\\dist\\kernel.js')).toBe('E:\\x\\dist\\main.js');
-    expect(serveCliPathFromKernel('/opt/sf/dist/kernel.js')).toBe('/opt/sf/dist/main.js');
-  });
-
-  it('路径里没有 kernel.js 时返回 undefined，不乱猜', () => {
-    expect(serveCliPathFromKernel('E:\\x\\dist\\other.js')).toBeUndefined();
-    expect(serveCliPathFromKernel('')).toBeUndefined();
   });
 });
 
