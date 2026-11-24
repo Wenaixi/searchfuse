@@ -59,8 +59,23 @@ export async function ensureServeRunning(
 
 1. 读 `runtime.json`。文件不存在 → 直接进入第 3 步。
 2. 用文件里的端口探 `/healthz`（2 秒超时，`Connection: close`）。200 就返回 `{ started: false, port }`。
-3. spawn `node <dist/main.js> serve --ensure`，`stdio: 'ignore'`、`windowsHide: true`、带超时。进程退出码 0 视为成功。
-4. 成功后再读一次 `runtime.json` 拿端口；拿不到就返回 `{ started: false, reason: 'runtime.json not written' }`。
+3. spawn `node <dist/main.js> serve --ensure`，`stdio: 'ignore'`、`windowsHide: true`、**`detached: true` 并 `unref()`**。
+4. **轮询 `/healthz`**（每 500ms，总上限 20 秒），直到通了或超时。
+5. 通了就再读一次 `runtime.json` 拿端口；拿不到返回 `{ started: false, reason: 'runtime.json not written' }`。
+
+**为什么不能等子进程退出码（2026-11-24 实测纠正）：**
+
+`serve --ensure` 有两种退出行为。服务已在跑时它 `process.exit(0)` 立刻退出；
+服务不在跑时它打印 `Listening on ...` 之后**常驻不退出**（`src/main.ts:326-333` 只写 stdout，没有 exit）。
+
+所以「等退出码」在真正需要起服务的那条路上**永远等不到**，超时到点杀掉子进程，
+杀掉的正是刚起来的服务——服务白起一次、被判失败、还被干掉，三重错误。
+
+实测证据：隔离 `HOME` 下 spawn `serve --ensure`，8 秒后进程仍活、`/healthz` 返 200、
+`runtime.json` 已写出。
+
+**子进程必须 detached 且不杀。** 它本来就是常驻服务，杀掉它是本设计的自相矛盾。
+残留由下次 `--ensure` 复用：它先探 `/healthz`，通了就 exit 0。
 
 **为什么复用 `serve --ensure` 而不是自己起服务**：`--ensure` 已经处理了「端口 0 由内核分配」「已在跑就退 0」两个边界，自己在插件里重写一遍就会漂移。这条命令是唯一真源。
 

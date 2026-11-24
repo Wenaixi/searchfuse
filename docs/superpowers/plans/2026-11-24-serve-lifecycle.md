@@ -199,6 +199,11 @@ function healthOnce(port: number): Promise<boolean> {
  *
  * 拉起复用 `serve --ensure` 而不是自己起服务：它已经处理了「端口 0 由内核
  * 分配」「已在跑就 exit 0」两个边界。在插件里重写一遍必然漂移。
+ *
+ * **不能等子进程退出码（2026-11-24 实测）。** `serve --ensure` 在服务不在跑时
+ * 会常驻不退出（`src/main.ts:326-333` 只写 stdout，没有 exit），所以等退出码
+ * 永远等不到；超时到点杀掉子进程，杀掉的正是刚起来的服务。改为 spawn 后
+ * 轮询 `/healthz`，子进程 detached 且不 kill。
  */
 export async function ensureServeRunning(options: EnsureOptions = {}): Promise<EnsureOutcome> {
   const file = runtimePath();
@@ -212,41 +217,36 @@ export async function ensureServeRunning(options: EnsureOptions = {}): Promise<E
   const nodeBinary = options.nodeBinary ?? 'node';
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const code = await new Promise<number | undefined>((resolve) => {
+  const spawned = await new Promise<boolean>((resolve) => {
     let child;
     try {
       child = spawn(nodeBinary, [cliPath, 'serve', '--ensure'], {
         stdio: 'ignore',
-        // dsh 可能跑在没有控制台的宿主里，Windows 会为每个子进程弹黑框。
         windowsHide: true,
+        // 它是常驻服务，不能跟着调用方的生命周期走。
+        detached: true,
       });
     } catch {
-      resolve(undefined);
+      resolve(false);
       return;
     }
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve(undefined);
-    }, timeoutMs);
-    timer.unref();
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(undefined);
-    });
-    child.on('close', (exit) => {
-      clearTimeout(timer);
-      resolve(exit === null ? undefined : exit);
-    });
+    // 不 kill、不等 close：它本来就不该退出。只处理起不来（如 node 不在 PATH）。
+    child.on('error', () => resolve(false));
+    child.unref();
+    resolve(true);
   });
+  if (!spawned) return { started: false, reason: 'could not start the serve process' };
 
-  if (code !== 0) {
-    return { started: false, reason: `serve --ensure exited ${code === undefined ? 'abnormally' : code}` };
+  // 轮询到通为止。500ms 一次，总上限与 spawn 超时同一个数。
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const probe = readServeRuntimeFile(file);
+    if (probe !== undefined && (await healthOnce(probe.port))) {
+      return { started: true, port: probe.port };
+    }
   }
-  const after = readServeRuntimeFile(file);
-  if (after === undefined) {
-    return { started: false, reason: 'serve --ensure succeeded but wrote no usable runtime.json' };
-  }
-  return { started: true, port: after.port };
+  return { started: false, reason: `serve did not become healthy within ${timeoutMs} ms` };
 }
 ```
 
@@ -386,41 +386,71 @@ async function serveStatus(): Promise<{ running: boolean; port?: number }> {
  *
  * CLI 路径从 `PACKAGE_ROOT` 推，不假设与源码树同构——插件在 pnpm 的快照里
  * 运行时，`../dist/main.js` 指向的是快照内的副本，那正是我们要用的那份。
+ *
+ * **不能等子进程退出码（2026-11-24 实测）。** 服务不在跑时 `serve --ensure`
+ * 常驻不退出，等退出码永远等不到，超时杀掉反而是刚起来的服务。它与
+ * `src/serveEnsure.ts` 的 `ensureServeRunning` 是同一个模型，改一处必须改另一处。
  */
 async function startServe(): Promise<{ started: boolean; port?: number; reason?: string }> {
   const cliPath = join(PACKAGE_ROOT, 'dist', 'main.js');
-  const code = await new Promise<number | undefined>((resolve) => {
+  const spawned = await new Promise<boolean>((resolve) => {
     let child;
     try {
-      child = spawnHidden('node', [cliPath, 'serve', '--ensure'], { stdio: 'ignore' });
+      child = spawnHidden('node', [cliPath, 'serve', '--ensure'], {
+        stdio: 'ignore',
+        detached: true,
+      });
     } catch {
-      resolve(undefined);
+      resolve(false);
       return;
     }
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve(undefined);
-    }, SERVE_ENSURE_TIMEOUT_MS);
-    timer.unref();
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(undefined);
-    });
-    child.on('close', (exit) => {
-      clearTimeout(timer);
-      resolve(exit === null ? undefined : exit);
-    });
+    // 不 kill、不等 close：它本来就不该退出。
+    child.on('error', () => resolve(false));
+    child.unref();
+    resolve(true);
   });
-  if (code !== 0) {
-    return { started: false, reason: `serve --ensure exited ${code === undefined ? 'abnormally' : code}` };
+  if (!spawned) return { started: false, reason: 'could not start the serve process' };
+
+  const deadline = Date.now() + SERVE_ENSURE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const probe = readServeRuntime();
+    if (probe !== undefined && (await healthOnce(probe.port))) {
+      return { started: true, port: probe.port };
+    }
   }
-  const after = readServeRuntime();
-  if (after === undefined) {
-    return { started: false, reason: 'serve --ensure succeeded but wrote no usable runtime.json' };
-  }
-  return { started: true, port: after.port };
+  return { started: false, reason: `serve did not become healthy within ${SERVE_ENSURE_TIMEOUT_MS} ms` };
+}
+
+/** 探一次 /healthz。返回是否 200。与 `src/serveEnsure.ts` 的同名逻辑一致。 */
+function healthOnce(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/healthz',
+        method: 'GET',
+        timeout: 2000,
+        // 探针必须主动断开，否则会等 keep-alive 超时。
+        headers: { Connection: 'close' },
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      },
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
 }
 ```
+
+`httpRequest` 需要从 `node:http` 导入（`dsh/index.ts` 顶部若还没有 `import { request as httpRequest } from 'node:http'` 就加上）。
 
 新增常量，紧邻已有的 `CLI_PATH` 声明：
 

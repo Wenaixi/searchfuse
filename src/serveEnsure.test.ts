@@ -33,6 +33,23 @@ function closedPort(): Promise<number> {
   });
 }
 
+/**
+ * 收掉假 CLI 留下的常驻子进程。
+ *
+ * `ensureServeRunning` 刻意不 kill 子进程（它就是常驻服务），所以测试必须
+ * 自己清理，否则每跑一次测试就多一个孤儿进程占着端口。
+ * 用 runtime.json 里的 pid 精确定位，不去猜端口归属。
+ */
+async function killChildOnPort(runtimeFile: string): Promise<void> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(runtimeFile, 'utf-8')) as { pid?: unknown };
+    if (typeof parsed.pid !== 'number') return;
+    process.kill(parsed.pid);
+  } catch {
+    // 文件不在、进程已经退出、或没有权限：都不影响测试结果。
+  }
+}
+
 describe('readServeRuntimeFile', () => {
   it('读回端口与 token', () => {
     const file = tempRuntime({ port: 61746, token: 'abc' });
@@ -101,6 +118,52 @@ describe('ensureServeRunning', () => {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     } finally {
+      restore();
+    }
+  });
+
+  it('子进程把服务拉起来后，轮询到健康并返回端口', async () => {
+    // 假 CLI：模拟 `serve --ensure` 在「服务不在跑」时的真实行为——
+    // 拉起一个服务、写出 runtime.json、然后**常驻不退出**。
+    // 这条守的是本函数唯一的成功路径：破坏轮询的成功分支后，它会红。
+    const { home, restore } = withTempHome();
+    const file = path.join(home, '.searchfuse', 'runtime.json');
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const fakeCli = path.join(home, 'fake-cli.cjs');
+      fs.writeFileSync(
+        fakeCli,
+        [
+          "const http = require('node:http');",
+          "const fs = require('node:fs');",
+          "const path = require('node:path');",
+          'const server = http.createServer((req, res) => {',
+          "  res.writeHead(200, { 'content-type': 'text/plain' });",
+          "  res.end('OK');",
+          '});',
+          'server.listen(0, "127.0.0.1", () => {',
+          '  const dir = path.join(process.env.HOME, ".searchfuse");',
+          '  fs.mkdirSync(dir, { recursive: true });',
+          '  fs.writeFileSync(path.join(dir, "runtime.json"),',
+          '    JSON.stringify({ port: server.address().port, token: "abc", pid: process.pid }));',
+          '});',
+          '// 常驻：真实 serve --ensure 在这里不会退出。',
+          'setInterval(() => {}, 1 << 30);',
+        ].join('\n'),
+        'utf-8',
+      );
+      const outcome = await ensureServeRunning({
+        nodeBinary: process.execPath,
+        cliPath: fakeCli,
+        timeoutMs: 5000,
+      });
+      expect(outcome.started).toBe(true);
+      expect(typeof outcome.port).toBe('number');
+      expect(outcome.reason).toBeUndefined();
+    } finally {
+      // 假 CLI 是个常驻子进程，测试结束要收掉它，否则会留下孤儿。
+      // ensureServeRunning 刻意不 kill 子进程，所以清理只能由调用方做。
+      await killChildOnPort(file);
       restore();
     }
   });
