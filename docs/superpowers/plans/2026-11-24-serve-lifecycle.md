@@ -270,9 +270,10 @@ rm -f .git-commit-msg.tmp
 ### Task 2: dsh 侧接入——摘要、动作、启动拉起
 
 **Files:**
-- Modify: `dsh/index.ts`（`engineSummary` 加 `serve` 段；`applyCardSettings` 旁新增动作分支；`apply` 末尾非阻塞拉起）
-- Modify: `dsh/client.ts`（服务状态行与「拉起」按钮）
+- Modify: `dsh/index.ts`（`engineSummary` 加 `serve` 段；`registerConfigRoute` 加动作分支；`apply` 末尾非阻塞拉起）
 - Test: `src/dshPlugin.test.ts`
+
+**注意：** 前端的服务状态行与「拉起」按钮属于 **Task 3**，本任务**不碰** `dsh/client.ts`。
 
 **Interfaces:**
 - Consumes: Task 1 的行为语义，但**不 import 它的模块**——见下方关键约束。
