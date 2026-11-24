@@ -168,14 +168,32 @@ describe('ensureServeRunning', () => {
     }
   });
 
-  it('spawn 成功但服务始终没起来时，超时后报告不健康', async () => {
-    // 假 CLI：什么都不做，立刻 exit 0。模拟「进程起来了，但没把服务拉起来」。
-    // 这专门守超时分支——实现若退回「等退出码」，这条会因为 exit 0 被误判成
-    // 成功（或拿不到端口）而红。
+  it('子进程以 0 退出却说不出端口时，立刻报 runtime.json 没写出', async () => {
+    // 假 CLI：立刻 exit 0（`serve --ensure` 发现「已在跑」时就是这样），
+    // 但没有写出 runtime.json。继续轮询只会白等满整个超时，所以应该
+    // 立刻报出来——这是 spec §3.1 第 5 步要求的那条 reason。
     const { home, restore } = withTempHome();
     try {
       const cli = path.join(home, 'fake-cli.js');
       fs.writeFileSync(cli, 'process.exit(0);\n', 'utf-8');
+      const t0 = Date.now();
+      const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs: 700 });
+      expect(outcome.started).toBe(false);
+      expect(outcome.reason).toBe('runtime.json not written');
+      // 立刻返回，没有等满超时。
+      expect(Date.now() - t0).toBeLessThan(700);
+    } finally {
+      restore();
+    }
+  });
+
+  it('子进程常驻但服务始终不健康时，超时后报告不健康', async () => {
+    // 假 CLI：一直活着、不写 runtime.json。这是「拉起了进程但服务没起来」
+    // 的形状，只有等满超时才能下结论。
+    const { home, restore } = withTempHome();
+    try {
+      const cli = path.join(home, 'fake-cli.js');
+      fs.writeFileSync(cli, 'setInterval(() => {}, 1 << 30);\n', 'utf-8');
       const t0 = Date.now();
       const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs: 700 });
       expect(outcome.started).toBe(false);

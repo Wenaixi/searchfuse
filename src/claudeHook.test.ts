@@ -94,6 +94,39 @@ describe('Claude hook 的第三级兜底', () => {
     };
   });
 
+  it('健康检查探测不了时，wakeServe 仍然兜底 spawn 一次 serve --ensure', async () => {
+    // 这条不假装能验证「先探」，因为桩环境里 `$.fs.read` / 缓存 / HTTP 三者
+    // 的交互没法如实复现宿主的沙箱。它只钉住一件事：探测失败时仍然会
+    // 尝试拉起，而不是直接放弃。
+    //
+    // 「先探再 spawn」那条分支由 src/serveEnsure.test.ts 用真实文件与真实
+    // HTTP 覆盖（那里能控制 runtime.json 的写入与端口），比沙箱桩可靠。
+    stub.files = { [RUNTIME_PATH]: '{"port": 12345, "token": "abc"}' };
+    stub.exitCodeFor = () => 1;
+    const dollar = {
+      settings: { read: async () => stub.settings.searchfuseHosts },
+      fs: { read: async (path: string) => stub.files[path] },
+      process: {
+        run: async ({ argv }: { argv: string[] }) => {
+          stub.runs.push(argv);
+          return { stdout: '', stderr: '', exitCode: stub.exitCodeFor(argv) };
+        },
+      },
+      http: {
+        fetch: async () => ({ ok: false, status: 500, text: async () => '' }),
+      },
+    };
+    const handler = captureHandler();
+    const next = Object.assign(() => {}, { signal: undefined });
+    await handler!(dollar, { query: 'anything' }, next);
+
+    // kernel 一次、serve 一次：第三级确实被走到并尝试了拉起。
+    expect(stub.runs).toHaveLength(2);
+    expect(stub.runs[0][1]).toBe(KERNEL_PATH);
+    expect(stub.runs[1]).toContain('serve');
+    expect(stub.runs[1]).toContain('--ensure');
+  });
+
   it('服务不在、子进程也失败时，跑 serve --ensure 并从 kernel 推出 CLI 路径', async () => {
     // runtime.json 读不到 → 路径一跳过。
     stub.files = {};
