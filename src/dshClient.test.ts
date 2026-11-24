@@ -39,6 +39,8 @@ interface Card {
   moveToRank: (order: string[], name: string, target: number) => string[];
   /** 草稿顺序是否与摘要不同。 */
   orderChanged: (summary: unknown, draft: unknown) => boolean;
+  /** 本地服务状态的三态：running / stopped / unknown。 */
+  serveLabel: (summary: unknown) => string;
   /** 某个引擎在当前顺序里的名次，从 1 开始。 */
   rankOf: (order: string[], name: string) => number;
 }
@@ -1767,5 +1769,46 @@ describe('the card’s stylesheet holds its design contracts', () => {
     // HMR 重跑工厂时必须更新已有标签，而不是再插一个。
     expect(SOURCE).toContain('tag.textContent = CARD_CSS');
     expect(SOURCE).toMatch(/if \(!tag\) \{/);
+  });
+});
+
+describe('服务状态的三态', () => {
+  // 三态而不是两态：把「不知道」报成「没在跑」会让卡片一直挂着拉起按钮，
+  // 而那可能只是一份旧版摘要。
+  it('服务在跑时报 running，并带上端口', () => {
+    const card = evaluate({}).factory(() => ({})).__card;
+    expect(card.serveLabel({ serve: { running: true, port: 52868 } })).toBe('running');
+  });
+
+  it('服务不在时报 stopped', () => {
+    const card = evaluate({}).factory(() => ({})).__card;
+    expect(card.serveLabel({ serve: { running: false } })).toBe('stopped');
+  });
+
+  it('旧版摘要没有 serve 段时报 unknown，而不是假装不在', () => {
+    const card = evaluate({}).factory(() => ({})).__card;
+    expect(card.serveLabel({})).toBe('unknown');
+    expect(card.serveLabel({ serve: null })).toBe('unknown');
+  });
+
+  it('服务在跑时渲染端口，且不出现拉起按钮', () => {
+    const summary = {
+      engine: 'exa',
+      engines: {},
+      aggregateMode: 'rrf',
+      serve: { running: true, port: 52868 },
+    };
+    const view = render(summary);
+    const text = textOf(view.nodes).replace(/\s+/g, ' ');
+    expect(text).toContain('52868');
+    expect(text).not.toContain('Start it');
+  });
+
+  it('服务不在时渲染拉起按钮', () => {
+    const summary = { engine: 'exa', engines: {}, aggregateMode: 'rrf', serve: { running: false } };
+    const view = render(summary);
+    const text = textOf(view.nodes).replace(/\s+/g, ' ');
+    expect(text).toContain('Not running');
+    expect(text).toContain('Start it');
   });
 });

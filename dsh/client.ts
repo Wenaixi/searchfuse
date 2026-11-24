@@ -220,6 +220,15 @@ hostWindow.__ModuleLoader__.load({
         // 宿主接入区。
         hostsSection: 'Host integration',
         hostsHint: 'Wire searchfuse into other harnesses, and see whether they loaded.',
+        // 本地服务。它决定其他宿主走 HTTP 还是退回子进程，而那条降级路径
+        // 用户完全感知不到，所以必须报出来。
+        serveSection: 'Local service',
+        serveRunning: 'Running on port {port}',
+        serveStopped: 'Not running',
+        serveUnknown: 'Status unknown',
+        serveStart: 'Start it',
+        serveStartHint: 'Starts the shared search service. Other harnesses will use it too.',
+        serveStartFailed: 'Could not start: {reason}',
         hostLoaded: 'loaded',
         hostNotLoaded: 'not installed',
         hostStale: 'out of date',
@@ -376,6 +385,15 @@ hostWindow.__ModuleLoader__.load({
         // 宿主接入区。
         hostsSection: '宿主接入',
         hostsHint: '把 searchfuse 接到其他 harness，并查看它们是否真的加载了。',
+        // 本地服务。它决定其他宿主走 HTTP 还是退回子进程，而那条降级路径
+        // 用户完全感知不到，所以必须报出来。
+        serveSection: '本地服务',
+        serveRunning: '运行中，端口 {port}',
+        serveStopped: '未运行',
+        serveUnknown: '状态未知',
+        serveStart: '拉起',
+        serveStartHint: '拉起后，其他宿主的搜索也会走这个服务。',
+        serveStartFailed: '拉起失败：{reason}',
         hostLoaded: '已加载',
         hostNotLoaded: '未安装',
         hostStale: '需要更新',
@@ -566,6 +584,19 @@ hostWindow.__ModuleLoader__.load({
         return 'off';
       }
       return 'embedded';
+    }
+
+    /**
+     * 本地服务状态的三态。
+     *
+     * 旧版摘要没有 `serve` 段时返回 'unknown' 而不是 'stopped'：把「不知道」
+     * 报成「没在跑」会让卡片一直挂着拉起按钮，而那可能只是一份旧摘要。
+     * 三态也守住「别假装知道」这条：摘要没说的事，界面就不该替它下结论。
+     */
+    function serveLabel(summary: Bag): string {
+      var serve = summary?.serve;
+      if (serve === undefined || serve === null) return 'unknown';
+      return serve.running === true ? 'running' : 'stopped';
     }
 
     // 引擎切换或新的摘要到达时的下一份草稿。那些字段属于新选中的引擎，
@@ -1514,6 +1545,18 @@ hostWindow.__ModuleLoader__.load({
   color: var(--dsw-alias-label-primary);
   border-color: var(--dsw-alias-label-primary);
 }
+.sf-serve-state {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+.sf-serve-state[data-state='stopped'] {
+  color: var(--dsw-alias-label-primary);
+}
+.sf-serve-state[data-state='unknown'] {
+  color: var(--dsw-alias-label-secondary);
+  opacity: 0.7;
+}
 
 .sf-field {
   display: flex;
@@ -1951,6 +1994,35 @@ hostWindow.__ModuleLoader__.load({
             })
             .catch(() => {});
         }, []);
+
+        /**
+         * 手动拉起本地服务。
+         *
+         * 这是一次真的副作用：宿端会 spawn `serve --ensure`。所以它与保存
+         * 动作分开——`action` 字段让它走独立分支，绝不顺带改写配置。
+         * 成功后再拉一次摘要，让状态行立刻变成「运行中，端口 N」。
+         */
+        var ensureServe = react.useCallback(() => {
+          fetch('/searchfuse/config', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'ensureServe' }),
+          })
+            .then((r) =>
+              r.json().then((body) => {
+                if (!r.ok || !body.ok) {
+                  throw new Error(body.message || body.error || '');
+                }
+                return body;
+              }),
+            )
+            .then((body) => {
+              summaryState[1](Object.assign({}, summary || {}, { serve: { running: true, port: body.port } }));
+            })
+            .catch((error) => {
+              noteState[1](String(t.serveStartFailed).replace('{reason}', noteFrom(error, t.saveFailed)));
+            });
+        }, [summary]);
 
         if (view === 'summary') {
           return t.subtitle;
@@ -2681,12 +2753,54 @@ hostWindow.__ModuleLoader__.load({
               h('p', { className: 'sf-hint' }, t.orderHint),
             );
 
+            // 本地服务。放在引擎卡片之前，与运行方式同一层：它不是某个引擎的
+            // 属性，而是三个宿主共享的基础设施。只在确实需要拉起时才显示按钮
+            // ——一个永远亮着的按钮等于噪音。
+            const serveState = serveLabel(summary);
+            const servePort =
+              summary && summary.serve && summary.serve.port !== undefined ? String(summary.serve.port) : '';
+            const serveBlock = h(
+              'div',
+              { key: 'serve', className: 'sf-section' },
+              h('h4', { className: 'sf-section-title' }, t.serveSection),
+              h(
+                'div',
+                { className: 'sf-mode-row' },
+                h(
+                  'span',
+                  { className: 'sf-serve-state', 'data-state': serveState },
+                  serveState === 'running'
+                    ? String(t.serveRunning).replace('{port}', servePort)
+                    : serveState === 'stopped'
+                      ? t.serveStopped
+                      : t.serveUnknown,
+                ),
+                serveState === 'running'
+                  ? null
+                  : h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'sf-mode-btn',
+                        'data-action': 'ensure-serve',
+                        onClick: () => {
+                          noteState[1]('');
+                          ensureServe();
+                        },
+                      },
+                      t.serveStart,
+                    ),
+              ),
+              serveState === 'running' ? null : h('p', { className: 'sf-section-hint' }, t.serveStartHint),
+            );
+
             body = h(
               'div',
               { key: 'engine-body' },
               overviewRow,
               strategyBlock,
               modeBlock,
+              serveBlock,
               h(
                 'div',
                 { key: 'engine-section', className: 'sf-section' },
@@ -3528,6 +3642,7 @@ hostWindow.__ModuleLoader__.load({
       effectiveOrder: effectiveOrder,
       moveToRank: moveToRank,
       orderChanged: orderChanged,
+      serveLabel: serveLabel,
       rankOf: rankOf,
     };
     // `slots` 与 `locale` 都是可选的，所以这里不要求任何一个：registerCard
