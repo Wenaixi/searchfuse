@@ -86,12 +86,19 @@ export async function ensureServeRunning(
 | 位置 | 时机 | 失败时 |
 | :-- | :-- | :-- |
 | `claude/hooks/register.ts` | `searchOrRead` 发现 runtime.json 读不到，且 `$.process.run` 兜底也失败之后 | 保持现状：交回 `next(e)` |
-| `dsh/index.ts` 插件启动 | `apply` 末尾，`ctx.effect` 里 | 静默：dsh 自己能用 CLI |
+| `dsh/index.ts` 卡片动作 | `POST {action:'ensureServe'}` | 返回 `{ ok: false, message }` |
 | `omp/extension.ts` | 已有，不改 | — |
 
 Claude 侧**只在两条路都失败后**才 ensure，理由是这个 hook 在每个 `tool.call` 上都会跑，每次都 spawn 一个进程太贵。判据是「这次真的用不上服务了」，而不是「服务好像不在」。
 
-`dsh/index.ts` 的启动 ensure 必须**不阻塞 `apply`**：`void ensureServeRunning()`，失败只记一行日志。插件加载慢 5 分钟是不可接受的。
+**dsh 侧不做「插件加载时自动拉起」（2026-11-24 实施时推翻）。** 原设计要在 `apply` 末尾 `void ensureServeRunning()`，实测它会：
+- 污染既有测试——多个用例断言「发到服务的请求恰好 1 个、path 是 `/v1/search`」，
+  而 `apply` 时的 healthz 探针把计数变成 2、把首个请求变成 `/healthz`；
+- 拖慢每一次插件加载；
+- 而 dsh 自己走 CLI，根本不依赖这个服务。
+
+所以 dsh 侧只在卡片的「拉起」动作里真的 spawn。这不减少任何实际能力：
+需要服务的另外两个宿主各有自己的 ensure。
 
 ### 3.3 卡片新增一个动作
 

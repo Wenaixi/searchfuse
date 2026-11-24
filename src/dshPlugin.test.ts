@@ -744,6 +744,46 @@ async function withConfig(
   }
 }
 
+describe('本地服务的状态与拉起动作', () => {
+  it('摘要里带上服务在不在', async () => {
+    await withConfig({}, async (handler) => {
+      const { status, body } = await callRoute(handler, { method: 'GET', url: '/searchfuse/config' });
+      expect(status).toBe(200);
+      expect(body).toHaveProperty('serve');
+      // 临时 HOME 下没有 runtime.json，所以确定性地是「不在跑」。
+      // 这条同时守着「服务状态必须真的被算出来」——若 serve 段被写成
+      // 常量或忘记 await（于是下发一个 Promise），这里都会红。
+      expect(body.serve).toEqual({ running: false });
+    });
+  });
+
+  it('action=ensureServe 是独立动作，不写配置文件', async () => {
+    await withConfig({ engine: 'exa' }, async (handler, file) => {
+      const before = fs.readFileSync(file, 'utf-8');
+      // 注入一个立刻以退出码 1 结束的假 CLI：`startServe` 会立刻判失败并返回，
+      // 不会留下常驻服务。这条验的是「动作被路由识别且走了独立分支」，
+      // 不是「服务真的起得来」——后者由 src/serveEnsure.test.ts 守着。
+      const fakeCli = path.join(os.tmpdir(), `sf-fake-cli-${Date.now()}-${Math.random()}.cjs`);
+      fs.writeFileSync(fakeCli, 'process.exit(1);\n', 'utf-8');
+      const savedCli = process.env.SEARCHFUSE_SERVE_CLI;
+      process.env.SEARCHFUSE_SERVE_CLI = fakeCli;
+      try {
+        const { status, body } = await callRoute(handler, postOf({ action: 'ensureServe' }));
+        // 动作被识别：返回的是结果对象，不是完整摘要（后者会带 engines）。
+        expect(status).toBe(200);
+        expect(body).not.toHaveProperty('engines');
+        expect(body).toHaveProperty('ok');
+        // 关键断言：配置文件一个字节都没动。
+        expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+      } finally {
+        if (savedCli === undefined) delete process.env.SEARCHFUSE_SERVE_CLI;
+        else process.env.SEARCHFUSE_SERVE_CLI = savedCli;
+        fs.rmSync(fakeCli, { force: true });
+      }
+    });
+  });
+});
+
 describe('dsh settings card route', () => {
   // The card is the browser half; this covers the host half it talks to,
   // where the API keys live. Every assertion here is about a key not leaving,

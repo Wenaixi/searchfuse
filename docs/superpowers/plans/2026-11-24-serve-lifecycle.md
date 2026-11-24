@@ -484,17 +484,18 @@ const SERVE_ENSURE_TIMEOUT_MS = 20_000;
 
 **注意：** 原来的代码是 `applyCardSettings(JSON.parse(...))`，要把它改成先解析到 `body`、再传递。
 
-- [ ] **Step 5: 实现 `apply` 末尾的非阻塞拉起**
+- [ ] **Step 5: （已作废）不实现「apply 末尾自动拉起」**
 
-在 `apply()` 的最后（所有注册完成之后）加：
+**实施时推翻：** 原计划要在 `apply()` 末尾 `void startServe()`。实测它会把
+`dsh web search provider` 与 `dsh CLI budgets` 两组共 5 条既有测试打下线——
+那些用例断言「发到服务的请求恰好 1 个、首个 path 是 `/v1/search`」，而 `apply`
+时的 healthz 探针把计数变成 2、把首个请求变成 `/healthz`。
 
-```ts
-  // 服务是三个宿主共享的加速器。插件加载时顺手拉一次，失败只记一行日志：
-  // dsh 自己走 CLI，服务起不来不影响它，绝不能因此拖慢插件加载。
-  void startServe().catch((error: unknown) => {
-    console.error(`[searchfuse] serve ensure skipped: ${caughtMessage(error)}`);
-  });
-```
+而且它本来就违反三条：拖慢每次插件加载、dsh 自己走 CLI 根本不需要服务、
+用户没在用服务时也白起一个常驻进程。
+
+**所以 dsh 侧只在卡片的「拉起」动作（Step 4）里真的 spawn。** 不减少任何
+实际能力：需要服务的另外两个宿主各有自己的 ensure。这一步没有代码要写。
 
 - [ ] **Step 6: 跑测试确认通过**
 
