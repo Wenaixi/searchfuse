@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
@@ -95,7 +95,7 @@ export async function ensureServeRunning(options: EnsureOptions = {}): Promise<E
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const code = await new Promise<number | undefined>((resolve) => {
-    let child;
+    let child: ChildProcess;
     try {
       child = spawn(nodeBinary, [cliPath, 'serve', '--ensure'], {
         stdio: 'ignore',
