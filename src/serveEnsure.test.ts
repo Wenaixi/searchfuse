@@ -72,4 +72,36 @@ describe('ensureServeRunning', () => {
       restore();
     }
   });
+
+  it('服务已在跑时立刻返回，不 spawn、不改写文件', async () => {
+    const { home, restore } = withTempHome();
+    try {
+      // 起一个真服务替代品：只答 /healthz 200，其余一概不管。
+      const server = http.createServer((req, res) => {
+        res.writeHead(req.url === '/healthz' ? 200 : 404, { 'content-type': 'text/plain' });
+        res.end('OK');
+      });
+      const port = await new Promise<number>((resolve) => {
+        server.listen(0, '127.0.0.1', () => {
+          const address = server.address();
+          resolve(typeof address === 'object' && address !== null ? address.port : 0);
+        });
+      });
+      try {
+        const file = path.join(home, '.searchfuse', 'runtime.json');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, JSON.stringify({ port, token: 'abc' }), 'utf-8');
+        const before = fs.statSync(file).mtimeMs;
+        // cliPath 指向必然失败的位置：如果真的去 spawn，这条会红。
+        const outcome = await ensureServeRunning({ cliPath: '/nonexistent/main.js', timeoutMs: 500 });
+        expect(outcome).toEqual({ started: false, port });
+        expect(outcome.reason).toBeUndefined();
+        expect(fs.statSync(file).mtimeMs).toBe(before);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    } finally {
+      restore();
+    }
+  });
 });
