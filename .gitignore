@@ -61,3 +61,6 @@ ci-log.txt
 
 # OMC 运行时状态，不该进仓库
 .omc/
+
+# 提交消息的临时落盘文件，不进城。
+.git-commit-msg.tmp
