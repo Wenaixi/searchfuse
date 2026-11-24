@@ -304,7 +304,15 @@ async function runKernel(
 }
 
 /**
- * 拉起本地服务：跑 `serve --ensure`。
+ * 拉起本地服务。
+ *
+ * **不能用退出码判成功。** 实测：`serve --ensure` 在「已经在跑」时立刻
+ * exit 0，而在真正需要起服务时会把服务拉起来并**常驻不退出**。沙箱的
+ * `$.process.run` 会一直等到 `timeoutMs` 到点才返回，那时服务已经起来了，
+ * 但退出码通常不是 0——按退出码判就会把成功报成失败，白等一整个超时。
+ *
+ * 所以先探一次：服务已经在跑就直接返回 true，一次子进程都不起。真的需要
+ * 拉起时才调 `serve --ensure`，拉起之后**再探一次**，以健康检查为准。
  *
  * CLI 入口从 kernel 的绝对路径推——两个产物永远在同一个 dist 目录，而
  * settings 里只写了 kernelPath 这一个绝对路径，各推一次就会漂移。
@@ -313,17 +321,35 @@ async function runKernel(
  * 加裸名 `'node'`。
  */
 async function wakeServe($: HostDollar, next: HostNext, kernelPath: string): Promise<boolean> {
+  // 已经在跑：什么都不做，直接告诉调用方可以重试 HTTP。
+  if (await healthOnce($, next)) return true;
+
   const cliPath = kernelPath.replace(/kernel\.js$/, 'main.js');
   // 路径里没有 kernel.js 说明 settings 里写的不是我们以为的那个文件，
   // 这时不猜，直接放弃。
   if (cliPath === kernelPath) return false;
   try {
-    const run = await $.process.run({
+    await $.process.run({
       argv: ['node', cliPath, 'serve', '--ensure'],
       timeoutMs: WAKE_TIMEOUT_MS,
       signal: next.signal,
     });
-    return run.exitCode === 0;
+  } catch {
+    // 超时或失败都可能发生在服务已经起来之后，所以这里不判死，
+    // 交给下面的健康检查说最后一句。
+  }
+  return await healthOnce($, next);
+}
+
+/** 探一次本地服务的 `/healthz`。读不到 runtime.json 就是没起。 */
+async function healthOnce($: HostDollar, next: HostNext): Promise<boolean> {
+  const runtime = await readServeRuntime($, next);
+  if (runtime === undefined) return false;
+  try {
+    const response = await $.http.fetch(`http://127.0.0.1:${runtime.port}/healthz`, {
+      method: 'GET',
+    });
+    return response.ok;
   } catch {
     return false;
   }

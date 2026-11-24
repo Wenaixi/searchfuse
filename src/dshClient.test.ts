@@ -1772,6 +1772,27 @@ describe('the card’s stylesheet holds its design contracts', () => {
   });
 });
 
+describe('真实配置下 searxng 模式的判定', () => {
+  // 2026-11-25 实测：dsh 路由同时下发 `searxng.embedded: true`（顶层段，
+  // 判据是 `config.searxng?.embedded !== false`）与
+  // `engines.searxng.baseURL`（外部实例地址）。两者并存时，运行时按
+  // `providers/searxng.ts` 是 baseURL 优先，所以卡片也必须判成 external，
+  // 否则界面与运行时各说各话。
+  it('有 baseURL 时判 external，即使摘要里的 embedded 是 true', () => {
+    const card = evaluate({}).factory(() => ({})).__card;
+    const draft = card.nextDraft(
+      {
+        engine: '',
+        engines: { searxng: { baseURL: 'http://127.0.0.1:8888' } },
+        searxng: { embedded: true, outgoing: {}, networks: {}, engines: {} },
+        aggregateMode: 'rrf',
+      },
+      '',
+    );
+    expect(draft.searxngMode).toBe('external');
+  });
+});
+
 describe('服务状态的三态', () => {
   // 三态而不是两态：把「不知道」报成「没在跑」会让卡片一直挂着拉起按钮，
   // 而那可能只是一份旧版摘要。
