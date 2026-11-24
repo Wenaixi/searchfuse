@@ -817,10 +817,17 @@ function describeServeFailure(status: number | string, body: string): string {
 }
 
 /**
- * 唤醒服务：用 `serve --ensure` 幂等地把它拉起来。
+ * 唤醒服务：把它拉起来并确认 healthy。
  *
- * 为什么不是 `spawn(serve)` 直接起：`--ensure` 会先探 `/healthz`，
- * 已经在跑就 exit 0，不会重复起第二个实例抢同一个文件。
+ * **绝不能等 `serve --ensure` 的退出码。** 那是 2026-11-25 现场验证过的
+ * 事故根因：`serve --ensure` 在服务不在跑时会拉起服务并**常驻不退出**，
+ * 而 `run()` 会一直等到超时；超时中断的只是这个等待，**子进程没被杀**，
+ * 于是每失败一次就留下一个僵尸 node 进程。118 个僵尸、3719 MB 私有内存、
+ * 118 个监听端口，就是这么一个个攒出来的。
+ *
+ * 唯一的实现是 `startServe()`：spawn 出 detached + unref 的常驻子进程
+ * 就撒手，再用 `/healthz` 轮询到它就绪。这里只是给它一个不带 CLI 覆盖的
+ * 入口，供搜索路径调用。
  *
  * 返回是否**这次真的把它拉起来了**（供上层的重试判断）。
  */
@@ -828,11 +835,12 @@ async function wakeServe(signal?: AbortSignal): Promise<boolean> {
   // `cliPath()` 抛出的「构建缺失」是一个能直接照做的指示（重装），不能被
   // 下面的 catch 吞成一句笼统的「不可达」。
   const cli = cliPath();
-  const timeout = AbortSignal.timeout(WAKE_TIMEOUT_MS);
-  const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   try {
-    const { code } = await run(process.execPath, [cli, 'serve', '--ensure'], combined, childEnv());
-    return code === 0;
+    const outcome = await startServe(cli);
+    if (outcome.started && outcome.port !== undefined) return true;
+    // 服务本来就在跑：那也算「可达」，上层重试即可。
+    if (outcome.port !== undefined) return true;
+    return false;
   } catch {
     return false;
   }

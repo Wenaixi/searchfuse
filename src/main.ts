@@ -34,7 +34,7 @@ import { findEngine, listEngines } from './providers/index.ts';
 import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
-import { ensureServeToken, startServe } from './serve.ts';
+import { ensureServeToken, runtimePath, startServe } from './serve.ts';
 import { readSecret } from './util/secretInput.ts';
 import { registerSearxngCleanup } from './providers/searxngServer.ts';
 
@@ -275,6 +275,22 @@ state
     }
   });
 
+/**
+ * 这个 pid 的进程还活着吗。
+ *
+ * `process.kill(pid, 0)` 不发送信号，只做存在性检查：进程在则静默返回，
+ * 不在则抛 ESRCH。用它回收「持锁进程已经死了」的陈旧锁。
+ */
+function isAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 读 `~/.searchfuse/runtime.json`；不存在或形状不对时返回 undefined。 */
 function readRuntimeFile(): { port: number } | undefined {
   try {
@@ -302,6 +318,9 @@ program
       process.exit(2);
     }
 
+    // 服务一就绪就调它放锁，见下面 startServe 之后那一段。
+    let releaseLockFn: (() => void) | undefined;
+
     if (options.ensure) {
       // 不能拿 requested 去探：端口可能由内核分配过，真正的值在 runtime.json。
       // 用固定的默认端口去猜，端口一随机就会判成「没在跑」并起第二个实例，
@@ -321,6 +340,87 @@ program
           // 新实例就绪后会覆盖它。
         }
       }
+
+      // 跨进程互斥。**没有这一步，并发 `--ensure` 会雪崩。**
+      //
+      // 2026-11-25 现场：118 个僵尸进程、3719 MB 私有内存、118 个监听端口。
+      // 机制是上面那段判据在并发下必然全部落空——runtime.json 还没被写出时，
+      // 每个 `--ensure` 都读到「没在跑」，于是各自起一个服务；谁最后写文件
+      // 谁赢，其余全部变成占着端口的孤儿。
+      //
+      // `mkdirSync` 是原子的：拿它当锁。抢不到的进程不去起服务，而是等
+      // 抢先者把 runtime.json 写出来，然后直接复用。
+      const lockDir = path.join(path.dirname(runtimePath()), 'serve.ensure.lock');
+      let holdsLock = false;
+      try {
+        fs.mkdirSync(lockDir, { recursive: true });
+        // 标记这次创建成功：回收陈旧锁时不能误删别人刚建的。
+        fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}\n`, 'utf-8');
+        holdsLock = true;
+      } catch {
+        // 别人拿着锁。清掉一个太老的锁（持有者已死），否则等它。
+        const ownerFile = path.join(lockDir, 'owner');
+        let stale = false;
+        try {
+          const stat = fs.statSync(lockDir);
+          const owner = Number(fs.readFileSync(ownerFile, 'utf-8').trim());
+          // 超过 30 秒，或持有进程已经不在，都算陈旧。
+          stale = Date.now() - stat.mtimeMs > 30_000 || !isAlive(owner);
+        } catch {
+          stale = true;
+        }
+        if (stale) {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          try {
+            fs.mkdirSync(lockDir, { recursive: true });
+            fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}\n`, 'utf-8');
+            holdsLock = true;
+          } catch {
+            holdsLock = false;
+          }
+        }
+      }
+
+      if (!holdsLock) {
+        // 别人正在起。等它写文件，最多等 20 秒，然后直接退 0 让调用方重试。
+        const deadline = Date.now() + 20_000;
+        while (Date.now() < deadline) {
+          const ready = readRuntimeFile();
+          if (ready !== undefined) {
+            try {
+              const res = await fetch(`http://127.0.0.1:${ready.port}/healthz`, {
+                signal: AbortSignal.timeout(2000),
+              });
+              if (res.ok) {
+                process.stdout.write(`Already running on 127.0.0.1:${ready.port}.\n`);
+                process.exit(0);
+              }
+            } catch {
+              // 还没就绪，继续等。
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+        process.stderr.write('Error: another serve --ensure is starting up; gave up waiting.\n');
+        process.exit(1);
+      }
+      // 持锁期间进程被外部杀掉时，锁会留在原地；上面的陈旧检测会在 30 秒后
+      // 或持有进程消失后回收它。
+      const releaseLock = (): void => {
+        try {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+        } catch {
+          // 删不掉不影响退出。
+        }
+      };
+      process.once('exit', releaseLock);
+      for (const signalName of ['SIGINT', 'SIGTERM'] as const) {
+        process.once(signalName, () => {
+          releaseLock();
+          process.exit(0);
+        });
+      }
+      releaseLockFn = releaseLock;
     }
 
     const token = ensureServeToken();
@@ -331,7 +431,12 @@ program
         idleExitSeconds: options.daemon ? 0 : (config.serve?.idleExitSeconds ?? 0),
       });
       process.stdout.write(`Listening on http://127.0.0.1:${handle.port}\n`);
+      // **服务一就绪就放锁。** 持锁到进程退出是错的：`serve` 本来就是常驻
+      // 进程，锁会永远不释放，后来者只能等到 20 秒超时——那等于把「互斥」
+      // 变成了「排队失败」。互斥要保护的只是「谁来起服务」这一小段。
+      releaseLockFn?.();
     } catch (error) {
+      releaseLockFn?.();
       process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
       process.exit(1);
     }
