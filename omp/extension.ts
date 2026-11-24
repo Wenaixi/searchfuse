@@ -140,43 +140,63 @@ async function tryServe(args: string[], signal: AbortSignal | undefined): Promis
 /**
  * 唤醒服务：跑 `serve --ensure`。
  *
- * 它先探 `/healthz`，已在跑就 exit 0，所以重复调用不会起第二个实例。
- * omp 扩展是普通 Node 进程，能直接起子进程。
+ * **不能用退出码判成功，也不能在超时后 kill 子进程。** `serve --ensure`
+ * 在服务不在跑时会把服务拉起来并**常驻不退出**（`src/main.ts:326-333`
+ * 只写 stdout，没有 exit），所以等 close 永远等不到；超时到点 kill 掉的
+ * 正是刚起来的那个服务——服务白起一次、被判失败、还被干掉。
+ *
+ * 正确做法：先探一次 `/healthz`，已在跑就直接成功；真要拉起时 spawn 出
+ * 子进程就撒手（`detached` + `unref`，不 kill），再轮询健康检查，
+ * 让服务自己说了算。
  */
-function wakeServe(signal: AbortSignal | undefined): Promise<boolean> {
-  return new Promise((resolve) => {
-    const node = resolveNodeBinary();
-    if (node === undefined) {
-      resolve(false);
-      return;
-    }
-    // kernel 与服务入口在同一个 dist 目录，所以从 KERNEL_PATH 推出 main.js。
-    const cliPath = KERNEL_PATH.replace(/kernel\.js$/, 'main.js');
-    let child;
-    try {
-      child = spawn(node, [cliPath, 'serve', '--ensure'], { stdio: 'ignore' });
-    } catch {
-      resolve(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve(false);
-    }, WAKE_TIMEOUT_MS);
-    timer.unref();
-    signal?.addEventListener('abort', () => {
-      child.kill();
-      resolve(false);
-    }, { once: true });
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(false);
+async function wakeServe(signal: AbortSignal | undefined): Promise<boolean> {
+  // 已经在跑：一次子进程都不起。
+  if (await healthOnce(signal)) return true;
+
+  const node = resolveNodeBinary();
+  if (node === undefined) return false;
+  // kernel 与服务入口在同一个 dist 目录，所以从 KERNEL_PATH 推出 main.js。
+  const cliPath = KERNEL_PATH.replace(/kernel\.js$/, 'main.js');
+  try {
+    const child = spawn(node, [cliPath, 'serve', '--ensure'], {
+      stdio: 'ignore',
+      // 它是常驻服务，不该跟着 omp 的会话生命周期走。
+      detached: true,
     });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve(code === 0);
+    child.unref();
+    // 只处理起不来（例如 node 不在 PATH）。起来之后就不管它了。
+    child.on('error', () => {});
+  } catch {
+    return false;
+  }
+
+  // 轮询到通为止。
+  const deadline = Date.now() + WAKE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 500);
+      timer.unref();
     });
-  });
+    if (await healthOnce(signal)) return true;
+  }
+  return false;
+}
+
+/** 探一次本地服务的 `/healthz`。读不到 runtime.json 就是没起。 */
+async function healthOnce(signal: AbortSignal | undefined): Promise<boolean> {
+  const runtime = readServeRuntime();
+  if (runtime === undefined) return false;
+  try {
+    const timeout = AbortSignal.timeout(2000);
+    const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    const response = await fetch(`http://127.0.0.1:${runtime.port}/healthz`, {
+      headers: { Connection: 'close' },
+      signal: combined,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
