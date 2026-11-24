@@ -151,8 +151,15 @@ export async function ensureServeRunning(options: EnsureOptions = {}): Promise<E
     }
 
     const runtime = readServeRuntimeFile(file);
-    if (runtime !== undefined && (await healthOnce(runtime.port))) {
-      return { started: true, port: runtime.port };
+    if (runtime !== undefined) {
+      if (await healthOnce(runtime.port)) {
+        return { started: true, port: runtime.port };
+      }
+    } else if (exitedEarly === 0) {
+      // 子进程说「已经在跑」并以 0 退出，但 runtime.json 读不出可用端口。
+      // 这不是「还没起来」，是「起来了却写不出文件」，继续轮询只会白等
+      // 满整个超时，所以直接报出来，让调用方知道文件出了问题。
+      return { started: false, reason: 'runtime.json not written' };
     }
 
     if (Date.now() >= deadline) {

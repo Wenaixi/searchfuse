@@ -35,7 +35,7 @@ const CLI_PATH = fileURLToPath(new URL('../dist/kernel.js', import.meta.url));
 // doctor 需要完整 CLI（子命令解析、config 读取），而 CLI_PATH 指向的是
 // 只认 --query 的搜索内核。两者不是同一个入口，不能共用一个常量。
 const DOCTOR_CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
-/** 拉起服务的上限。与 omp 扩展侧的 WAKE_TIMEOUT_MS 保持一致。 */
+/** 拉起服务的上限。比 omp 与 Claude 侧的唤醒上限宽一些：这条路径带轮询。 */
 const SERVE_ENSURE_TIMEOUT_MS = 20_000;
 // 由仓库里的一个测试与 src/schema.ts 保持同步；插件文件无法导入 TS 源码，
 // 且要保持完全零依赖（只用 node 内置模块）。
@@ -623,17 +623,6 @@ function healthOnce(port: number): Promise<boolean> {
  *
  * CLI 路径从 `PACKAGE_ROOT` 推，不假设与源码树同构——插件在 pnpm 的快照里
  * 运行时，`../dist/main.js` 指向的是快照内的副本，那正是要用的那份。
- */
-/**
- * 拉起本地服务：跑 `serve --ensure`。
- *
- * 就绪的判据是 `/healthz` 通过，不是子进程退出码。实测：`serve --ensure`
- * 只在「已经在跑」时以 0 退出；真正需要起服务时它会把服务拉起来并**常驻**，
- * 永远等不到 close。等退出码会一路等到超时，然后杀掉刚起来的那个服务。
- * 所以 spawn 之后就把子进程交出去（detached + unref），改为轮询健康检查。
- *
- * CLI 路径从 `PACKAGE_ROOT` 推，不假设与源码树同构——插件在 pnpm 的快照里
- * 运行时，`../dist/main.js` 指向的是快照内的副本，那正是要用的那份。
  *
  * `SEARCHFUSE_SERVE_CLI` 可以让测试注入一个假 CLI：路由的 handler 没有
  * 参数可传，而真 CLI 会留下一个常驻服务，测试不能那么干。
@@ -641,6 +630,13 @@ function healthOnce(port: number): Promise<boolean> {
 async function startServe(
   cliPath: string = process.env.SEARCHFUSE_SERVE_CLI ?? join(PACKAGE_ROOT, 'dist', 'main.js'),
 ): Promise<{ started: boolean; port?: number; reason?: string }> {
+  // 服务已经在跑：不 spawn，直接确认。这条与 `src/serveEnsure.ts` 的
+  // 第 1、2 步必须一致——否则服务在跑时点「拉起」会白起一个子进程。
+  const already = readServeRuntime();
+  if (already !== undefined && (await healthOnce(already.port))) {
+    return { started: false, port: already.port };
+  }
+
   let spawnError: unknown;
   let exitedEarly: number | undefined;
 
