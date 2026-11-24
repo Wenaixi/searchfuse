@@ -32,6 +32,10 @@ export default defineConfig({
         'config-schema': resolve(__dirname, 'src/config-schema.ts'),
         // 三宿主共同的子进程入口：dsh 与 Claude Code 都 spawn 它。
         kernel: resolve(__dirname, 'src/kernel.ts'),
+        // 服务生命周期的唯一判据。单独成为一个 entry 是为了让验收脚本
+        // 能直接 import 它（`import('./dist/serve-ensure.js')`），
+        // 而不必绕经 CLI 的 commander 参数解析。
+        'serve-ensure': resolve(__dirname, 'src/serveEnsure.ts'),
       },
       formats: ['es'],
     },
