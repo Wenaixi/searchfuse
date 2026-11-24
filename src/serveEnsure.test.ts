@@ -104,4 +104,23 @@ describe('ensureServeRunning', () => {
       restore();
     }
   });
+
+  it('spawn 成功但服务始终没起来时，超时后报告不健康', async () => {
+    // 假 CLI：什么都不做，立刻 exit 0。模拟「进程起来了，但没把服务拉起来」。
+    // 这专门守超时分支——实现若退回「等退出码」，这条会因为 exit 0 被误判成
+    // 成功（或拿不到端口）而红。
+    const { home, restore } = withTempHome();
+    try {
+      const cli = path.join(home, 'fake-cli.js');
+      fs.writeFileSync(cli, 'process.exit(0);\n', 'utf-8');
+      const t0 = Date.now();
+      const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs: 700 });
+      expect(outcome.started).toBe(false);
+      expect(outcome.reason).toContain('healthy');
+      // 确实等到了超时，而不是误判成功立刻返回。
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
+    } finally {
+      restore();
+    }
+  });
 });

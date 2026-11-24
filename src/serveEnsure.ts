@@ -5,9 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { runtimePath } from './serve.ts';
 import { spawnHidden } from './util/spawnHidden.ts';
 
-/** 子进程句柄的类型，从 wrapper 推导，本文件不直接依赖该内置模块。 */
-type Child = ReturnType<typeof spawnHidden>;
-
 /** 拉起/检查的结果。`reason` 只在没起来时出现，给调用方一行可读的解释。 */
 export interface EnsureOutcome {
   started: boolean;
@@ -20,13 +17,26 @@ export interface EnsureOptions {
   nodeBinary?: string;
   /** CLI 入口绝对路径；默认从本文件位置推 ../dist/main.js。 */
   cliPath?: string;
-  /** spawn 到退出码返回的上限，默认 20 秒。 */
+  /** spawn 之后等服务就绪的上限，默认 20 秒。 */
   timeoutMs?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 /** 探 /healthz 的上限。服务是本机回环，超过就算不通。 */
 const HEALTH_TIMEOUT_MS = 2_000;
+/** spawn 之后轮询就绪状态的间隔。 */
+const POLL_INTERVAL_MS = 500;
+
+/** 睡一会儿。轮询用，为这点事引入依赖不值得。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 把 spawn 失败整理成一行可读的原因。 */
+function describeSpawnFailure(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `serve --ensure failed to start: ${detail}`;
+}
 
 /**
  * 读 `~/.searchfuse/runtime.json`。
@@ -84,6 +94,12 @@ function healthOnce(port: number): Promise<boolean> {
  *
  * 拉起复用 `serve --ensure` 而不是自己起服务：它已经处理了「端口 0 由内核
  * 分配」「已在跑就 exit 0」两个边界。在插件里重写一遍必然漂移。
+ *
+ * 就绪的判据是 `/healthz` 通过，不是子进程退出码。`serve --ensure` 只在
+ * 「已经在跑」时以 0 退出；真正需要起服务时它会把服务拉起来并**常驻**，
+ * 永远等不到 close 事件。等退出码会一路等到超时，然后用 child.kill() 杀掉
+ * 刚刚起来的那个服务——这正是本设计要避免的事。所以 spawn 之后就把子进程
+ * 交出去（detached + unref），改为轮询健康检查。
  */
 export async function ensureServeRunning(options: EnsureOptions = {}): Promise<EnsureOutcome> {
   const file = runtimePath();
@@ -97,37 +113,54 @@ export async function ensureServeRunning(options: EnsureOptions = {}): Promise<E
   const nodeBinary = options.nodeBinary ?? 'node';
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const code = await new Promise<number | undefined>((resolve) => {
-    let child: Child;
-    try {
-      child = spawnHidden(nodeBinary, [cliPath, 'serve', '--ensure'], {
-        stdio: 'ignore',
-      });
-    } catch {
-      resolve(undefined);
-      return;
-    }
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve(undefined);
-    }, timeoutMs);
-    timer.unref();
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(undefined);
-    });
-    child.on('close', (exit) => {
-      clearTimeout(timer);
-      resolve(exit === null ? undefined : exit);
-    });
-  });
+  // 子进程的生命周期与本次调用无关：它要么直接退出（已在跑），要么变成
+  // 常驻服务。用一个标志记住它是否已经失败退出，好让轮询早点收手。
+  let spawnError: unknown;
+  let exitedEarly: number | undefined;
 
-  if (code !== 0) {
-    return { started: false, reason: `serve --ensure exited ${code === undefined ? 'abnormally' : code}` };
+  try {
+    const child = spawnHidden(nodeBinary, [cliPath, 'serve', '--ensure'], {
+      stdio: 'ignore',
+      // 让服务脱离父进程的会话：调用方（dsh 宿主）退出时不该把服务带走。
+      detached: true,
+    });
+    child.unref();
+    child.on('error', (error) => {
+      spawnError = error;
+    });
+    child.on('close', (code) => {
+      // 0 是「已经在跑」，非 0 是启动失败。两者都不必再轮询。
+      exitedEarly = code === null ? undefined : code;
+    });
+  } catch (error) {
+    // spawn 本身同步抛出的情况（例如参数非法）。
+    return { started: false, reason: describeSpawnFailure(error) };
   }
-  const after = readServeRuntimeFile(file);
-  if (after === undefined) {
-    return { started: false, reason: 'serve --ensure succeeded but wrote no usable runtime.json' };
+
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    // 先看子进程是否已经给出结论，避免白等满超时。
+    if (spawnError !== undefined) {
+      return { started: false, reason: describeSpawnFailure(spawnError) };
+    }
+    // 非 0 退出是明确的启动失败，立刻收手。
+    // 退出 0 表示 serve 认为「已经在跑」，但我们在 spawn 之前刚探过 healthz
+    // 并且失败过，所以不把它当终局结论——继续轮询，让健康检查说了算。
+    if (exitedEarly !== undefined && exitedEarly !== 0) {
+      return { started: false, reason: `serve --ensure exited ${exitedEarly}` };
+    }
+
+    const runtime = readServeRuntimeFile(file);
+    if (runtime !== undefined && (await healthOnce(runtime.port))) {
+      return { started: true, port: runtime.port };
+    }
+
+    if (Date.now() >= deadline) {
+      return {
+        started: false,
+        reason: `serve did not become healthy within ${timeoutMs} ms`,
+      };
+    }
+    await sleep(POLL_INTERVAL_MS);
   }
-  return { started: true, port: after.port };
 }
