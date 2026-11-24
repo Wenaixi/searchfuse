@@ -1,9 +1,12 @@
-import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runtimePath } from './serve.ts';
+import { spawnHidden } from './util/spawnHidden.ts';
+
+/** 子进程句柄的类型，从 wrapper 推导，本文件不直接依赖该内置模块。 */
+type Child = ReturnType<typeof spawnHidden>;
 
 /** 拉起/检查的结果。`reason` 只在没起来时出现，给调用方一行可读的解释。 */
 export interface EnsureOutcome {
@@ -95,12 +98,10 @@ export async function ensureServeRunning(options: EnsureOptions = {}): Promise<E
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const code = await new Promise<number | undefined>((resolve) => {
-    let child: ChildProcess;
+    let child: Child;
     try {
-      child = spawn(nodeBinary, [cliPath, 'serve', '--ensure'], {
+      child = spawnHidden(nodeBinary, [cliPath, 'serve', '--ensure'], {
         stdio: 'ignore',
-        // dsh 可能跑在没有控制台的宿主里，Windows 会为每个子进程弹黑框。
-        windowsHide: true,
       });
     } catch {
       resolve(undefined);
