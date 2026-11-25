@@ -112,6 +112,14 @@ export function toSearxngShape(raw: unknown, query: string): SearxngResponse {
   }
 
   // 失败的引擎：omp 只在结果为空时读它，但我们总是填，让诊断信息不丢。
+  //
+  // 两个来源都要读，因为两种运行模式的失败信息放在不同字段里：
+  // - 链式：失败写在 `attempts` 的 `error` 上
+  // - 融合：`buildFusedResult` 返回 `attempts: []`，失败全在 `uncertainty`
+  //   （形如 "tavily: 超时" 的一行行文字），`status` 同时变成 degraded
+  //
+  // 只读 `attempts` 的话，融合模式下这份失败列表永远是空的——omp 拿不到任何
+  // 上游原因，只剩一句泛化错误，那正是这个字段存在的理由。
   const failures: Array<[string, string]> = [];
   const attempts = Array.isArray(entry.attempts) ? entry.attempts : [];
   for (const attempt of attempts) {
@@ -119,6 +127,21 @@ export function toSearxngShape(raw: unknown, query: string): SearxngResponse {
     const record = attempt as Record<string, unknown>;
     if (typeof record.error !== 'string') continue;
     failures.push([typeof record.engine === 'string' ? record.engine : 'unknown', record.error]);
+  }
+  // 融合模式的补充：uncertainty 里每一条是「引擎: 原因」这样的整行文字，
+  // 拆成 omp 要的 [engine, reason] 二元组。拆不出引擎名的整行保留成一条，
+  // 宁可多一条也不要丢掉原因。
+  if (failures.length === 0) {
+    const uncertainty = Array.isArray(entry.uncertainty) ? entry.uncertainty : [];
+    for (const line of uncertainty) {
+      if (typeof line !== 'string' || line === '') continue;
+      const colon = line.indexOf(':');
+      if (colon > 0 && colon < 40) {
+        failures.push([line.slice(0, colon).trim(), line.slice(colon + 1).trim()]);
+      } else {
+        failures.push(['searchfuse', line]);
+      }
+    }
   }
 
   const answer = typeof entry.summary === 'string' && entry.summary !== '' ? [entry.summary] : [];

@@ -133,4 +133,52 @@ describe('toSearxngShape', () => {
     expect(shaped.results).toEqual([]);
     expect(shaped.unresponsive_engines).toEqual([['tavily', 'boom']]);
   });
+
+  it('融合模式下 attempts 为空，失败原因从 uncertainty 补出来', () => {
+    // `buildFusedResult` 返回的就是这个形状：attempts 恒为 []，
+    // 失败与跳过全在 uncertainty 里（形如 "tavily: 超时" 的整行文字）。
+    // 只读 attempts 的话这份列表永远为空，omp 拿不到任何上游原因。
+    const shaped = toSearxngShape(
+      {
+        results: [
+          {
+            engine: 'tavily,exa',
+            status: 'degraded',
+            items: [],
+            attempts: [],
+            uncertainty: [
+              'exa: timed out after 8000ms',
+              'firecrawl: 处于冷却期，本次未参与（配额恢复后自动回归）',
+              'no eligible engine left',
+            ],
+          },
+        ],
+      },
+      'q',
+    );
+    // 每条都要保留：能拆出引擎名的拆成二元组，拆不出的整行兜底。
+    expect(shaped.unresponsive_engines).toEqual([
+      ['exa', 'timed out after 8000ms'],
+      ['firecrawl', '处于冷却期，本次未参与（配额恢复后自动回归）'],
+      ['searchfuse', 'no eligible engine left'],
+    ]);
+  });
+
+  it('attempts 有内容时以它为准，不重复读 uncertainty', () => {
+    // 两种模式的失败信息不该叠加：链式已经给了精确的 [engine, error]，
+    // 再拿 uncertainty 拼一遍会让同一个失败出现两次。
+    const shaped = toSearxngShape(
+      {
+        results: [
+          {
+            items: [],
+            attempts: [{ engine: 'tavily', error: 'boom' }],
+            uncertainty: ['tavily: boom'],
+          },
+        ],
+      },
+      'q',
+    );
+    expect(shaped.unresponsive_engines).toEqual([['tavily', 'boom']]);
+  });
 });
