@@ -8,22 +8,34 @@
 
 | 工作 | 引擎 | 可配置吗 |
 | :-- | :-- | :-- |
-| 搜公开网页 | `firecrawl`、`keenable`、`youcom`、`antigravity-cli`、`tavily`、`exa` | 首选引擎加每引擎参与开关 |
+| 搜公开网页 | `firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng`、`antigravity-cli`、`tavily`、`exa` | 首选引擎加每引擎参与开关 |
 | 读一个 URL | 首选引擎（若它能抓取），然后是 `firecrawl`、`antigravity-cli`、`local` | 每引擎参与开关 |
 | 搜 X（推特） | `grok-cli` | 每引擎参与开关 |
 
-搜索顺序固定为 `firecrawl`、`keenable`、`youcom`、`antigravity-cli`、`tavily`、`exa`。抓取顺序是 `firecrawl`、`antigravity-cli`、`local`。每个引擎默认都参与。`engines.<name>.enabled: false` 会先排除一个引擎，可用性再过滤剩余名单，额度冷却最后重排就绪链（见下文）。Firecrawl 领跑两条链，因为它的免注册通道在裸机上就能用，不要账号不要 key。Keenable 排搜索第二也是同样的理由：Firecrawl 额度用完时，裸机上还有一个免注册的后备。You.com 排第三：额度更小的免注册通道（每个 IP 每天 100 次），给前两个都用完的繁忙 IP 兜底。
+搜索顺序固定为 `firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng`、`antigravity-cli`、`tavily`、`exa`（`src/providers/index.ts` 的 `ROLE_PREFERENCE.search` 是这一顺序的唯一出处）。抓取顺序是 `firecrawl`、`antigravity-cli`、`local`。每个引擎默认都参与，唯一的例外是 `antigravity-cli`：它靠模型合成答案、动辄一分钟以上，默认不参与自动路由，要用 `engines.antigravity-cli.enabled: true` 打开。`engines.<name>.enabled: false` 会先排除一个引擎，可用性再过滤剩余名单，额度冷却最后重排就绪链（见下文）。
+
+前五台是免注册的，这是「装完即用」的全部来源：
+
+| 引擎 | 链上位置 | 免注册额度 |
+| :-- | :-- | :-- |
+| `firecrawl` | 1 | 每月 1,000 credits，无需注册 |
+| `keenable` | 2 | 每 IP 每小时 1,000 次，每秒最多 10 次 |
+| `anysearch` | 3 | 匿名额度，按 IP 限流；配 key 可解限流 |
+| `youcom` | 4 | 每 IP 每天 100 次 |
+| `searxng` | 5 | 需要自建实例，但不需要 key |
+
+后三台是需要配置的备份：`antigravity-cli` 要装 `agy` 并登录（默认关闭），`tavily`、`exa` 要 key。`firecrawl` 领跑两条链，因为它的免注册通道在裸机上就能用。`keenable` 排第二同理：`firecrawl` 额度用完时裸机上还有一个免注册后备。`anysearch` 排第三、`youcom` 排第四，是两条额度更小的免注册通道，给前几个都用完的繁忙 IP 兜底。`searxng` 排第五：它不需要 key，所以要排在需要 key 的引擎之前，但它又不像前面几台那样在全新机器上就现成。
 
 从这张表能推出两个事实，它们回答大多数问题：
 
 - **单页抓取零配置可用。** `local` 引擎零安装，默认是抓取的最后兜底。只有用户明确禁用它时才会离开自动链。
-- **网页搜索可在 Firecrawl 免注册免费额度上运行**（每月 1,000 credits，无需注册），后面还有 Keenable 的免注册额度（每个 IP 每小时 1,000 次）和 You.com 的免注册搜索（每个 IP 每天 100 次）。配置了 `engine` 时以配置为准。搜索链不含 `local`，因为 `local` 不能搜索。三个免注册引擎都被限流时，搜索至少还需要一个带 key 的引擎或 `agy` 作为后备。抓取仍有 `local` 兜底。
+- **网页搜索可以在完全不配置的情况下跑起来。** 前面五台免注册引擎依次兜底：Firecrawl 免注册额度（每月 1,000 credits，无需注册）、Keenable（每个 IP 每小时 1,000 次）、AnySearch（匿名额度，按 IP 限流）、You.com（每个 IP 每天 100 次）、SearXNG（需自建实例，但不需要 key）。配置了 `engine` 时以配置为准。搜索链不含 `local`，因为 `local` 不能搜索。这几台免注册引擎全被限流、而 `searxng` 又没配实例时，搜索至少还需要一个带 key 的引擎或 `agy` 作为后备。抓取仍有 `local` 兜底。
 
 X 是独立语料，不是竞争的搜索引擎，所以它永远不会顶替网页搜索。`--source` 选语料，`--engine` 选工具。
 
 ## 零配置
 
-searchfuse 没有配置文件也能跑：抓取有 `local` 兜底，搜索先走 Firecrawl 的免注册免费额度，再走 Keenable 的，再走 You.com 的。搜索没有 local 后备（`local` 不能搜索），所以三个免注册引擎都被限流时需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
+searchfuse 没有配置文件也能跑：抓取有 `local` 兜底，搜索按 `firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng` 的顺序依次试五台免注册引擎。搜索没有 local 后备（`local` 不能搜索），所以这几台都被限流、`searxng` 又没配实例时，需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
 
 首选的免费升级是 Antigravity CLI，它写带引用的综述，一个工具同时覆盖搜索和抓取，还不要 key：
 
@@ -65,7 +77,7 @@ JSON 不支持注释，所以每个字段的说明在这里：
 
 | 字段 | 类型 | 作用范围 | 含义 |
 | :-- | :-- | :-- | :-- |
-| `engine` | string | 顶层 | 由哪个引擎搜索。空表示自动（用本机可用的最好那个）。取值 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`youcom`、`searxng`、`grok-cli`、`local` 之一。别名 `agy`、`antigravity`、`grok`、`http`、`direct` 也接受，会归一为正式名。 |
+| `engine` | string | 顶层 | 由哪个引擎搜索。空表示自动（用本机可用的最好那个）。取值 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng`、`grok-cli`、`local` 之一。别名 `agy`、`antigravity`、`grok`、`http`、`direct` 也接受，会归一为正式名。 |
 | `cooldown` | `"on"` / `"off"` | 顶层 | 额度冷却故障转移。默认开。关掉后不读不写任何状态，路由与从前完全一致。 |
 | `allowPrivateNetwork` | boolean | 顶层 | 允许本地抓取器访问私有或保留地址，包括 VPN 使用的其他保留地址段和 hosts 文件加速器。默认 `false`。DNS 返回的 `198.18.0.0/15` 地址已按 fake-ip 占位值放行，无需此开关。在 URL 中直写该地址段，开关关闭时仍会被拦截。此设置从不授权 Firecrawl 云端披露，URL 中直写的私有和保留目标始终不会发往云端。对于 DNS 结果，只有应用 fake-ip 例外后所有地址仍被判为私有或保留地址时，Firecrawl 才会拒绝披露。 |
 | `aggregate` | object | 顶层 | 融合搜索。开启时 `web_search` 并发询问多个引擎并合并它们的排序列表，而不是逐个尝试。详见下方「融合搜索」一节。 |
@@ -80,8 +92,8 @@ JSON 不支持注释，所以每个字段的说明在这里：
 | `mcp.<server>.timeoutMs` | number | `mcp` | 同时是握手超时与单次调用超时。默认：握手 `10000`，调用 `30000`。 |
 | `engines` | object | 顶层 | 按引擎正式名分组的每引擎设置。 |
 | `engines.<name>.enabled` | boolean | 所有引擎 | 是否允许自动路由使用该引擎。省略表示启用，但下方「需要你打开才生效」一节列出的引擎除外。设为 `false` 会排除它，设为 `true` 会删除覆盖并回到内置默认。单次显式 `--engine` 仍会强制使用该引擎。 |
-| `engines.<name>.apiKey` | string | `tavily`、`exa`、`firecrawl`、`keenable` | 一个 API key，或用英文逗号分隔的多个 key。解析时会忽略空白和空项。鉴权、限流或配额失败时按顺序轮换 key。网络、5xx 或解析失败时直接切换下一个引擎。也可用环境变量 `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `KEENABLE_API_KEY`，环境变量优先于文件。 |
-| `engines.<name>.baseURL` | string | `tavily`、`exa`、`firecrawl`、`keenable`、`searxng` | 替换官方主机的接口地址：兼容的第三方网关、代理、自建部署。必须是完整的 http(s) URL。对 `searxng` 而言这就是实例地址，因为它没有官方主机。也可用环境变量 `TAVILY_BASE_URL` / `EXA_BASE_URL` / `FIRECRAWL_BASE_URL` / `KEENABLE_BASE_URL`。设为空即取消。详见下方端点一节。 |
+| `engines.<name>.apiKey` | string | `tavily`、`exa`、`firecrawl`、`keenable`、`anysearch` | 一个 API key，或用英文逗号分隔的多个 key。解析时会忽略空白和空项。鉴权、限流或配额失败时按顺序轮换 key。网络、5xx 或解析失败时直接切换下一个引擎。也可用环境变量 `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `KEENABLE_API_KEY` / `ANYSEARCH_API_KEY`，环境变量优先于文件。`anysearch` 的 key 是可选的：不配就走匿名限流档，配了且被上游拒绝也不失败，会自动降级回匿名档。 |
+| `engines.<name>.baseURL` | string | `tavily`、`exa`、`firecrawl`、`keenable`、`anysearch`、`searxng` | 替换官方主机的接口地址：兼容的第三方网关、代理、自建部署。必须是完整的 http(s) URL。对 `searxng` 而言这就是实例地址，因为它没有官方主机。也可用环境变量 `TAVILY_BASE_URL` / `EXA_BASE_URL` / `FIRECRAWL_BASE_URL` / `KEENABLE_BASE_URL` / `ANYSEARCH_BASE_URL`。设为空即取消。详见下方端点一节。 |
 | `engines.<name>.proxy` | string | 所有引擎 | 只让这个引擎走它自己的代理。留空则像以前一样跟随本机的 `http_proxy` / `https_proxy` / `no_proxy`。`direct` 或 `none` 表示仅此引擎绕过系统代理。完整的 `http(s)://` URL 表示这个引擎的流量走它。既不是关键字、也不是完整 http(s) URL 的值会被拒绝而不是忽略——回落到环境变量会把手误出来的笔误悄悄送进你正想避开的那个代理。 |
 | `engines.<name>.expose` | object | 所有引擎 | 这个引擎如何参与搜索。两个键默认都是 `aggregate: true, tool: false`，这也是在这些设置出现之前写下的配置所得到的行为。详见下方「能力矩阵」一节。 |
 | `engines.<name>.expose.aggregate` | boolean | 所有引擎 | 这个引擎的结果是否进入融合后的 `web_search` 答案。`false` 表示它只做独立工具。 |
@@ -90,6 +102,10 @@ JSON 不支持注释，所以每个字段的说明在这里：
 | `engines.firecrawl.keylessFetch` | boolean | `firecrawl` | 允许 Firecrawl 在无 key 时抓取公网页面。默认 `true`（免注册抓取开箱即开）。设为 `false` 可让自动抓取远离 Firecrawl 云端。配置了 key 或显式选择 Firecrawl 引擎时仍会启用。 |
 | `engines.<name>.bin` | string | `antigravity-cli`、`grok-cli` | 该引擎 CLI 的路径。默认在 `PATH` 上找 `agy` 和 `grok`。 |
 | `engines.<name>.model` | string | `antigravity-cli` | 引擎使用的模型。默认 `gemini-3.8-flash-low`。 |
+| `searxng` | object | 顶层 | 随包 SearXNG 实例的设置。只影响 `searxng` 引擎，其他引擎一律不读。 |
+| `searxng.embedded` | boolean | `searxng` | 是否启用随包实例。**默认 `true`**：留空 `baseURL` 时装完即可搜索，无需先配外部实例。显式写 `false` 才关闭。配了 `baseURL` 时以 `baseURL` 为准，这个开关不再起作用。 |
+| `searxng.outgoing` | object | `searxng` | 随包实例自己去抓网页时的代理设置（`http_proxy` 等），与 `engines.searxng.proxy`（管 searchfuse 直连那一跳）互不覆盖。 |
+| `searxng.extra_proxy_timeout` | number | `searxng` | 走代理时额外多等的秒数。必须放在 `searxng` 顶层，写进 `networks.<name>` 会让实例启动直接失败。 |
 
 `local`（内置抓取器）和 `grok-cli` 不需要凭据，但都接受通用的 `enabled` 开关。老文件把 `allowPrivateNetwork` 存在 `engines.http.allowPrivateNetwork` 下，或存成字符串 `"true"`/`"false"` 的，读取时会自动提升为顶层布尔值。
 
@@ -176,20 +192,48 @@ Keenable 只搜索，所以 `-u` 配 `-e keenable` 会报错。它和 Exa 一样
 
 ### youcom（搜索，只有免注册）
 
-不要 key 也不用注册，在搜索顺序里排第三，在 Firecrawl 和 Keenable 之后。请求走 `https://api.you.com/v1/agents/search`，每个 IP 每天 100 次（同一 IP 上所有人共用）。它没有 `apiKey`、`baseURL` 或模型设置，也没有带 key 的升级方式。`--max-results` 最多 50。想让自动路由跳过它，设 `engines.youcom.enabled: false`，`-e youcom` 仍可单次强制使用。
+不要 key 也不用注册，在搜索顺序里排第四，在 Firecrawl、Keenable 和 AnySearch 之后。请求走 `https://api.you.com/v1/agents/search`，每个 IP 每天 100 次（同一 IP 上所有人共用）。它没有 `apiKey`、`baseURL` 或模型设置，也没有带 key 的升级方式。`--max-results` 最多 50。想让自动路由跳过它，设 `engines.youcom.enabled: false`，`-e youcom` 仍可单次强制使用。
 
 You.com 只搜索，所以 `-u` 配 `-e youcom` 会报错。它和 Keenable 一样返回排好序的链接和片段（You.com 有 `page_age` 时作为发布日期带上），但不写综述，所以 summary 是机械拼的，会有一条 warning 说明这一点，证据在 `items` 里。
 
-### 第三方兼容端点（tavily、exa、firecrawl、keenable）
+### anysearch（搜索，默认免注册）
+
+搜索引擎，在顺序里排第三，紧跟 Keenable。匿名档不要 key 也不用注册，额度按 IP 限流（具体上限未公开）。在 https://anysearch.com 领一个免费 key，请求就带上认证头，解掉匿名档的限流：
+
+```bash
+searchfuse config set anysearch.apiKey <key>
+# 或环境变量：export ANYSEARCH_API_KEY=<key>
+```
+
+**key 无效时会自动降级，不会让搜索失败。** 带 key 的请求被上游判 401/403 时，这一次自动改用匿名档重试，并在结果里注明「key 被拒，已用匿名档」。所以用户填错 key 也不至于搜不动，只是回到了限流档。key 修好后下一次请求立刻恢复，不需要重启任何东西。
+
+它和 Keenable 一样只搜索，所以 `-u` 配 `-e anysearch` 会报错；返回排好序的链接和摘要、不写综述，summary 是机械拼的。`--max-results` 上限 50。端点基址是 `https://api.anysearch.com`，可指向兼容网关（见下方「第三方兼容端点」）。它还有一层相关性过滤：结果与查询共享词汇太少时整个批次按空结果处理，把机会让给下一个引擎。
+
+### searxng（搜索，默认用随包实例）
+
+SearXNG 是自托管的元搜索引擎，一个实例背后扇出到几十个上游引擎，但对 searchfuse 来说它只贡献一份排序列表（RRF 不会因为它「代表很多来源」而抬高它的票数）。
+
+**默认不需要任何配置。** `searxng.embedded` 默认开启，留空 `baseURL` 时 searchfuse 会拉起一个随包的 SearXNG 实例，搜完即走：自动挑空闲端口、生成临时 `settings.yml`、并发健康轮询，闲置十分钟后回收。这带来了第二层免注册后备，代价是首次冷启动要解包两三秒。
+
+```bash
+searchfuse config set searxng.baseURL http://127.0.0.1:8088   # 用自己的实例
+searchfuse config set searxng.embedded false                  # 关掉随包实例
+```
+
+填了 `baseURL` 就用用户的实例，`embedded` 不再起作用；留空则用随包实例。公共实例几乎总返回 403，因为它的 `settings.yml` 里 `format: json` 是关的，所以要么指向自己实例、要么用随包实例，不要随便填一个公共地址。
+
+它只搜索，`-u` 配 `-e searxng` 会报错。`searxng.outgoing` 控制的是随包实例自己去抓网页时走哪个代理，与 `engines.searxng.proxy`（管 searchfuse 直连那一跳）互不覆盖。自建细节见 [docs/searxng-setup.md](../../../docs/searxng-setup.md)。
+
+
 
 四个 HTTP 引擎可以指向任何与官方 API 同协议的端点：转售网关、区域代理、自建部署。设置 `baseURL` 后，引擎在它上面拼各自的文档路径（tavily 和 exa 是 `/search`，firecrawl 是 `/v2/search` 和 `/v2/scrape`，keenable 带 key 时是 `/v1/search`，免注册时是 `/v1/search/public`），所以 base 为 `https://gw.example.com/tavily` 时会请求 `https://gw.example.com/tavily/search`。
 
-官方基地址内置在 provider 代码里，分别是 `https://api.tavily.com`、`https://api.exa.ai`、`https://api.firecrawl.dev`、`https://api.keenable.ai`。它们不会被复制进 `config.json`。`baseURL` 缺失或被清空都表示使用内置官方地址，这样后续版本修正默认值时不会被旧配置文件压住。dsh 设置卡片也遵守同一规则。
+官方基地址内置在 provider 代码里，分别是 `https://api.tavily.com`、`https://api.exa.ai`、`https://api.firecrawl.dev`、`https://api.keenable.ai`、`https://api.anysearch.com`。它们不会被复制进 `config.json`。`baseURL` 缺失或被清空都表示使用内置官方地址，这样后续版本修正默认值时不会被旧配置文件压住。dsh 设置卡片也遵守同一规则。
 
 ```bash
 searchfuse config set tavily.baseURL https://gw.example.com/tavily
 searchfuse config set tavily.baseURL ""        # 回到官方端点
-# 或按次生效：export TAVILY_BASE_URL=... / EXA_BASE_URL=... / FIRECRAWL_BASE_URL=... / KEENABLE_BASE_URL=...
+# 或按次生效：export TAVILY_BASE_URL=... / EXA_BASE_URL=... / FIRECRAWL_BASE_URL=... / KEENABLE_BASE_URL=... / ANYSEARCH_BASE_URL=...
 ```
 
 API key 会发给 base 指定的主机。这正是功能的意义，也正是信任决定：只指向你愿意把这个 key 交出去的主机。
