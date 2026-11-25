@@ -2,7 +2,7 @@
 
 > 状态：已确认，待实施
 > 日期：2026-11-20
-> 仓库：`E:\newCC\aaa-dsh-go\dsh-modsearch`（@wenaixi/searchfuse）
+> 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（@wenaixi/searchfuse）
 
 ## 一、背景与目标
 

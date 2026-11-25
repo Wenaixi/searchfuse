@@ -2,7 +2,7 @@
 
 > 状态：**pending approval**
 > 日期：2026-11-24
-> 仓库：`E:\newCC\aaa-dsh-go\dsh-modsearch`（`@wenaixi/searchfuse`）
+> 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 前置：`2026-11-21-searchfuse-tri-host-design.md`（该文档第 610 行已记录本问题为已知风险，至今未处置）
 
 ## 一、问题

@@ -2,7 +2,7 @@
 
 > 状态：待批准
 > 日期：2026-11-21
-> 仓库：`E:\newCC\aaa-dsh-go\dsh-modsearch`（`@wenaixi/searchfuse`）
+> 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 取代：`2026-11-21-searchfuse-tri-host-design.md` 中关于「三家如何接入」的部分
 
 ## 一、目标

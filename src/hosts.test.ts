@@ -325,7 +325,7 @@ describe('ompStatus', () => {
   it('模板占位符被渲染后不再判陈旧', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'searchfuse-omp-'));
     created.push(dir);
-    const kernelPath = 'E:\\\\newCC\\\\aaa-dsh-go\\\\dsh-modsearch\\\\dist\\\\kernel.js';
+    const kernelPath = 'E:\\\\newCC\\\\aaa-dsh-go\\\\searchfuse\\\\dist\\\\kernel.js';
     const template = "const KERNEL_PATH = '__SEARCHFUSE_KERNEL_PATH__';\\n";
     // 用与生产代码相同的渲染方式写出「已安装」的样子，确保比对口径一致。
     const escaped = JSON.stringify(kernelPath).slice(1, -1);

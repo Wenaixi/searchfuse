@@ -2,7 +2,7 @@
 
 > 状态：**pending approval**
 > 日期：2026-11-21（v7，经六轮 Architect + Critic 评审）
-> 仓库：`E:\newCC\aaa-dsh-go\dsh-modsearch`（`@wenaixi/searchfuse`）
+> 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 取代：`2026-11-20-searchfuse-dual-host-design.md`
 
 ## 〇、修订摘要（三轮评审）
