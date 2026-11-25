@@ -28,12 +28,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnHidden } from './spawnHidden.js';
 
-// 三宿主共用的子进程入口。dsh 与 Claude Code 都 spawn 它，聚合实现
-// 只有 src/search.ts 一份。此处曾指向 dist/main.js（完整 CLI），但那个
-// 入口还带着 commander 的参数解析与 doctor/config 等子命令，搜索并不需要。
-const CLI_PATH = fileURLToPath(new URL('../dist/kernel.js', import.meta.url));
-// doctor 需要完整 CLI（子命令解析、config 读取），而 CLI_PATH 指向的是
-// 只认 --query 的搜索内核。两者不是同一个入口，不能共用一个常量。
+// 完整 CLI 入口。doctor 需要子命令解析与 config 读取，所以用 dist/main.js。
+// 注意搜索内核是另一个入口（dist/kernel.js，只认 --query / --url），两者
+// 不能混用：把 kernel.js 拿去执行 `serve --ensure` 会报「不认识的命令」。
 const DOCTOR_CLI_PATH = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 /** 拉起服务的上限。比 omp 与 Claude 侧的唤醒上限宽一些：这条路径带轮询。 */
 const SERVE_ENSURE_TIMEOUT_MS = 20_000;
@@ -60,7 +57,6 @@ const OWN_TOOL_BACKSTOP_MS = OWN_TOOL_DEADLINE_MS + 20_000;
 // HTTP 请求的墙钟上限。服务端自己有整轮 deadline（默认 180 秒），这里比它
 // 多留一点余量，免得客户端先放弃、把一个仍在正常工作的轮次掐断。
 const SEARCH_TIMEOUT_MS = 240_000;
-const WAKE_TIMEOUT_MS = 15_000;
 // provider 路径运行在 tool-web 的预算之下（随包发布的搜索路由是 60 秒）：
 // 单个引擎给 40 秒，就能在 55 秒的一整轮里给一次快速回退留出余地。
 /**
@@ -566,23 +562,6 @@ function childEnv() {
 }
 
 /**
- * 本插件拉起的 CLI。只有 npm 包才带 dist/：从 GitHub 源码安装（DSH 的添加
- * 对话框接受仓库 URL）没有构建产物，此时 Node 打印的那句光秃秃的
- * "Cannot find module" 也没指出任何出路。
- */
-function cliPath() {
-  const cli = process.env.MODSEARCH_DSH_CLI || CLI_PATH;
-  if (!existsSync(cli)) {
-    throw new Error(
-      `searchfuse's CLI build is missing (${cli}). This happens when the plugin was ` +
-        'installed from its GitHub repository, which ships source only. Remove the ' +
-        'plugin and add it again by package name: @wenaixi/searchfuse',
-    );
-  }
-  return cli;
-}
-
-/**
  * 探一次 `/healthz`。返回是否 200。
  *
  * 探针必须带 `Connection: close`：服务走 keep-alive，不主动断开就会一直
@@ -626,15 +605,34 @@ function healthOnce(port: number): Promise<boolean> {
  *
  * `SEARCHFUSE_SERVE_CLI` 可以让测试注入一个假 CLI：路由的 handler 没有
  * 参数可传，而真 CLI 会留下一个常驻服务，测试不能那么干。
+ *
+ * `MODSEARCH_DSH_CLI` 是给用户/测试覆盖「CLI 该从哪找」的老通道，优先级
+ * 高于默认路径。删掉 `cliPath()` 时差点把它一起砍掉——那是既有能力，
+ * 不是死代码（`src/dshPlugin.test.ts` 靠它注入一个缺失路径来验重装提示）。
  */
 async function startServe(
-  cliPath: string = process.env.SEARCHFUSE_SERVE_CLI ?? join(PACKAGE_ROOT, 'dist', 'main.js'),
+  cliPath: string = process.env.SEARCHFUSE_SERVE_CLI ??
+    process.env.MODSEARCH_DSH_CLI ??
+    join(PACKAGE_ROOT, 'dist', 'main.js'),
 ): Promise<{ started: boolean; port?: number; reason?: string }> {
   // 服务已经在跑：不 spawn，直接确认。这条与 `src/serveEnsure.ts` 的
   // 第 1、2 步必须一致——否则服务在跑时点「拉起」会白起一个子进程。
   const already = readServeRuntime();
   if (already !== undefined && (await healthOnce(already.port))) {
     return { started: false, port: already.port };
+  }
+
+  // 只有 npm 包才带 dist/：从 GitHub 源码安装（DSH 的添加对话框接受仓库 URL）
+  // 没有构建产物，此时 Node 打印的那句光秃秃的 "Cannot find module" 没指出
+  // 任何出路。在这里提前给一句能照着做的指示，比让 spawn 失败更有用。
+  if (!existsSync(cliPath)) {
+    return {
+      started: false,
+      reason:
+        `searchfuse's CLI build is missing (${cliPath}). This happens when the plugin was ` +
+        'installed from its GitHub repository, which ships source only. Remove the ' +
+        'plugin and add it again by package name: @wenaixi/searchfuse',
+    };
   }
 
   let spawnError: unknown;
@@ -831,18 +829,22 @@ function describeServeFailure(status: number | string, body: string): string {
  *
  * 返回是否**这次真的把它拉起来了**（供上层的重试判断）。
  */
-async function wakeServe(signal?: AbortSignal): Promise<boolean> {
-  // `cliPath()` 抛出的「构建缺失」是一个能直接照做的指示（重装），不能被
-  // 下面的 catch 吞成一句笼统的「不可达」。
-  const cli = cliPath();
+async function wakeServe(signal?: AbortSignal): Promise<{ woke: boolean; reason?: string }> {
+  // **不能把 `cliPath()` 的结果传进去。** 它指向 `dist/kernel.js`（搜索内核，
+  // 只接受 `--query` / `--url`），而 `serve --ensure` 是 `dist/main.js` 的子命令。
+  // 2026-11-25 实测：把 kernel.js 当 CLI 传过去，等于执行
+  // `node dist/kernel.js serve --ensure`，kernel 不认识 `serve`，报错退出，
+  // 第三级兜底从来没真正起过服务。`startServe` 的默认参数就是 main.js，
+  // 所以这里不传任何 CLI 覆盖。
+  if (signal?.aborted === true) return { woke: false };
   try {
-    const outcome = await startServe(cli);
-    if (outcome.started && outcome.port !== undefined) return true;
-    // 服务本来就在跑：那也算「可达」，上层重试即可。
-    if (outcome.port !== undefined) return true;
-    return false;
-  } catch {
-    return false;
+    const outcome = await startServe();
+    if (outcome.port !== undefined) return { woke: true };
+    // 没起来：把失败原因带上去，让上层能区分「构建缺失」（可行动的重装指示）
+    // 与「服务连不上」（去跑 doctor）。丢掉 reason 会把前者降级成后者。
+    return { woke: false, reason: outcome.reason };
+  } catch (error) {
+    return { woke: false, reason: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -863,9 +865,16 @@ async function fetchOrSpawn(args: string[], signal?: AbortSignal): Promise<strin
   if (first !== undefined) return first;
 
   const woke = await wakeServe(signal);
-  if (woke) {
+  if (woke.woke) {
     const second = await tryServe(args, signal);
     if (second !== undefined) return second;
+  }
+
+  // **构建缺失是可行动的，不能降级成一句「去跑 doctor」。**
+  // 从 GitHub 源码安装的插件没有 dist/，用户看到「服务连不上」会一头雾水；
+  // 「重装成包名」才是那条出路。这条 reason 由 startServe 在 spawn 之前给出。
+  if (woke.reason !== undefined && woke.reason.includes('build is missing')) {
+    throw new Error(woke.reason);
   }
 
   throw new Error(

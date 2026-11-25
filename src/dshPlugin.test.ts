@@ -782,6 +782,62 @@ describe('本地服务的状态与拉起动作', () => {
       }
     });
   });
+
+  it('action=ensureServe 在服务已跑时直接复用，不 spawn 子进程', async () => {
+    // 这条钉住 `startServe` 开头那个「已在跑就先探 healthz」的早退段。
+    //
+    // 为什么要单独测：既有的 ensureServe 用例注入的是「立刻退出 1」的假 CLI，
+    // 只走失败分支。缺了这条，把早退段删掉（于是服务在跑时还白起一个子进程，
+    // 那正是雪崩的一个来源）测试也照样绿。
+    await withConfig({ engine: 'exa' }, async (handler, _file, house) => {
+      // 起一个真的回环服务当「已在跑」的服务：healthOnce 必须真的打通。
+      const health = http.createServer((req, res) => {
+        if (req.url === '/healthz') {
+          res.writeHead(200, { 'content-type': 'text/plain' });
+          res.end('OK');
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+      await new Promise<void>((resolve) => health.listen(0, '127.0.0.1', resolve));
+      const port = (health.address() as { port: number }).port;
+
+      // runtime.json 写到临时家目录：withConfig 已经把 HOME/USERPROFILE 指过去。
+      const runtimeFile = path.join(process.env.HOME as string, '.searchfuse', 'runtime.json');
+      fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+      fs.writeFileSync(
+        runtimeFile,
+        JSON.stringify({ port, token: 'test-token', pid: 1 }),
+        'utf-8',
+      );
+
+      // 假 CLI：一旦被 spawn 就留下证据文件。早退生效时它不该出现。
+      const marker = path.join(os.tmpdir(), `sf-spawned-${Date.now()}-${Math.random()}.txt`);
+      const fakeCli = path.join(os.tmpdir(), `sf-fake-cli2-${Date.now()}-${Math.random()}.cjs`);
+      fs.writeFileSync(fakeCli, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'spawned');\n`, 'utf-8');
+      const savedCli = process.env.SEARCHFUSE_SERVE_CLI;
+      process.env.SEARCHFUSE_SERVE_CLI = fakeCli;
+      try {
+        const { status, body } = await callRoute(handler, postOf({ action: 'ensureServe' }));
+        expect(status).toBe(200);
+        expect(body).toHaveProperty('ok');
+        // 核心断言：服务已在跑，就不该 spawn。
+        //
+        // **必须等一会儿再判**：spawn 是异步的，`detached` 的子进程要过几毫秒
+        // 才真的启动并写标记。立刻检查会让「早退段被删掉」的错误实现也绿
+        // （反向验证时亲眼见过）。早退生效时等多久都不会出现标记。
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(fs.existsSync(marker)).toBe(false);
+      } finally {
+        if (savedCli === undefined) delete process.env.SEARCHFUSE_SERVE_CLI;
+        else process.env.SEARCHFUSE_SERVE_CLI = savedCli;
+        fs.rmSync(fakeCli, { force: true });
+        fs.rmSync(marker, { force: true });
+        await new Promise<void>((resolve) => health.close(() => resolve()));
+      }
+    });
+  });
 });
 
 describe('dsh settings card route', () => {
