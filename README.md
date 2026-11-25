@@ -6,9 +6,9 @@
 
 <p align="center"><b>In the chat app your model can search the web. On the API it cannot. SearchFuse puts the web back: web search, X search, page fetch. Free, no signup, no API key.</b></p>
 
-<p align="center">🥇 <b>The strongest free web search plugin for DeepSeek Harness (dsh)</b> 🥇</p>
+<p align="center"><b>The strongest free web search plugin for DeepSeek Harness (dsh)</b></p>
 
-<p align="center">Engines: <b>Firecrawl</b> (keyless, default) · <b>Keenable</b> (keyless) · <b>You.com</b> (keyless) · <b>SearXNG</b> (self-hosted) · <b>AnySearch</b> (keyless) · <b>Tavily</b> · <b>Exa</b> · <b>Antigravity CLI</b> · <b>Grok (X)</b> · <b>local</b>, fused by default</p>
+<p align="center">Engines: <b>Firecrawl</b> (keyless, default) · <b>Keenable</b> (keyless) · <b>AnySearch</b> (keyless) · <b>You.com</b> (keyless) · <b>SearXNG</b> (bundled) · <b>Tavily</b> · <b>Exa</b> · <b>Antigravity CLI</b> · <b>Grok (X)</b> · <b>local</b>, fused by default</p>
 
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a> ·
@@ -36,11 +36,11 @@ Hit a problem? [Open an issue](https://github.com/Wenaixi/searchfuse/issues/new/
 
 ## Features
 
-- **🥇 The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.0`. In the desktop app's Add plugin dialog, enter `@wenaixi/searchfuse`, not the GitHub URL. Details in [harness setup](docs/harness-setup.md#deepseek-harness-dsh).
-- **Free out of the box, no signup.** Search and page fetch run on Firecrawl Keyless by default: [1,000 free credits/month](https://www.firecrawl.dev/blog/firecrawl-keyless-launch), no account, no API key, no card. Every fallback channel is free too: Antigravity CLI needs only a browser sign-in, and Tavily, Exa, and a free Firecrawl key each add their own monthly quota with no card required.
+- **The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.0`. In the desktop app's Add plugin dialog, enter `@wenaixi/searchfuse`, not the GitHub URL. Details in [harness setup](docs/harness-setup.md#deepseek-harness-dsh).
+- **Free out of the box, no signup.** Search and page fetch run on Firecrawl Keyless by default: [1,000 free credits/month](https://www.firecrawl.dev/blog/firecrawl-keyless-launch), no account, no API key, no card. Every fallback channel is free too: Keenable, AnySearch, and You.com each add a keyless pool, the bundled SearXNG instance needs no key at all, Antigravity CLI needs only a browser sign-in, and Tavily, Exa, and a free Firecrawl key each add their own monthly quota with no card required.
 - **Fused search, not failover.** By default `web_search` asks every reachable engine at once and merges their ranked lists with reciprocal rank fusion, so an answer reflects several indexes and a page two engines agree on outranks one only a single engine liked. Set `aggregate.mode chain` for the old sequential behaviour.
 - **Automatic failover.** When a channel fails or exhausts its quota, the next one takes over. Under fusion, one engine erroring costs only its own contribution; the rest of the answer stands and the failure is named in `uncertainty`.
-- **Per-engine key rotation.** Give Tavily, Exa, Firecrawl, or Keenable multiple comma-separated keys. Authentication, rate-limit, and quota failures rotate to the next key before the engine chain falls back.
+- **Per-engine key rotation.** Give Tavily, Exa, Firecrawl, Keenable, or AnySearch multiple comma-separated keys. Authentication, rate-limit, and quota failures rotate to the next key before the engine chain falls back.
 - **Every engine on its own leash.** Each engine can join the fused answer, become a standalone tool the model calls by name, do both, or be switched off — independently. Each can also take its own proxy, so one engine leaves the machine's proxy while the rest keep using it.
 - **MCP servers become tools.** Point the plugin at any Streamable HTTP MCP server and its tools appear as `mcp__<server>__<tool>`, no separate plugin to install. Connections are made concurrently and a server that cannot be reached costs only its own tools.
 - **Searches X (Twitter).** With Grok Build installed, SearchFuse queries the corpus that web indexes cannot reach.
@@ -68,21 +68,22 @@ Ask which Node.js line is still in maintenance. `read_page` reads the release pa
 
 ## Supported engines
 
-Firecrawl, Keenable, and You.com work with zero setup. Every other engine is one command away. Keys live in `~/.searchfuse/config.json` (0600, masked when shown):
+Firecrawl, Keenable, AnySearch, You.com, and the bundled SearXNG work with zero setup. Every other engine is one command away. Keys live in `~/.searchfuse/config.json` (0600, masked when shown):
 
 | Engine | Does | Free tier | Turn it on |
 | :-- | :-- | :-- | :-- |
 | Firecrawl (default) | web search + page fetch | keyless: 1,000 free credits/month, no signup. A free key adds your own 1,000/month | nothing, it works as installed |
 | Keenable | web search | keyless: 1,000 requests/hour per IP (shared by everyone on that IP), no signup. A free key gives 100,000 requests/month of your own | nothing, it works as installed |
+| AnySearch | web search | keyless: anonymous quota, rate-limited per IP. A free key lifts the rate limit; a rejected key falls back to the anonymous tier automatically | nothing, it works as installed |
 | You.com | web search | keyless: 100 searches/day per IP (shared by everyone on that IP), no signup | nothing, it works as installed |
-| SearXNG | web search (its own 70+ upstream engines behind one adapter) | free, self-hosted | run an instance, then `searchfuse config set searxng.baseURL <url>` |
+| SearXNG | web search (its own 70+ upstream engines behind one adapter) | free, bundled instance by default | nothing, it works as installed. Point it at your own instance with `searchfuse config set searxng.baseURL <url>` |
 | Tavily | web search | 1,000 credits/month, no card | `searchfuse config set tavily.apiKey <key>` |
 | Exa | web search | $10/month recurring credit (~1,400 searches), no card | `searchfuse config set exa.apiKey <key>` |
 | Antigravity CLI | web search + page fetch | free, browser sign-in | off by default: install `agy`, sign in, then `searchfuse config set engines.antigravity-cli.enabled true` |
 | Grok Build | X (Twitter) search | rides SuperGrok or X Premium | install `grok` and sign in |
 | local | page fetch | built in, nothing to install | nothing |
 
-Keys can also come from the environment (`TAVILY_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `KEENABLE_API_KEY`). One engine can take multiple keys as a comma-separated value such as `key-one,key-two`, in either the config file or its environment variable. Multiple engines configured means they run together and their results are fused. Every engine participates by default except `antigravity-cli`, which stays off until you turn it on with `searchfuse config set engines.antigravity-cli.enabled true` because it is too slow for a fusion budget. Exclude any engine with `searchfuse config set <engine>.enabled false`. Using a Tavily-, Exa-, Firecrawl-, or Keenable-compatible third-party or self-hosted endpoint? Point the engine at it: `searchfuse config set tavily.baseURL <url>`. Official endpoints stay built into the code and are never written as default config. Every knob, engine by engine, is in the [configuration guide](skills/searchfuse/references/configure.md).
+Keys can also come from the environment (`TAVILY_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `KEENABLE_API_KEY`, `ANYSEARCH_API_KEY`). One engine can take multiple keys as a comma-separated value such as `key-one,key-two`, in either the config file or its environment variable. Multiple engines configured means they run together and their results are fused. Every engine participates by default except `antigravity-cli`, which stays off until you turn it on with `searchfuse config set engines.antigravity-cli.enabled true` because it is too slow for a fusion budget. Exclude any engine with `searchfuse config set <engine>.enabled false`. Using a Tavily-, Exa-, Firecrawl-, Keenable-, or AnySearch-compatible third-party or self-hosted endpoint? Point the engine at it: `searchfuse config set tavily.baseURL <url>`. Official endpoints stay built into the code and are never written as default config. Every knob, engine by engine, is in the [configuration guide](skills/searchfuse/references/configure.md).
 
 ## Installation
 
