@@ -36,6 +36,7 @@ import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, runtimePath, startServe } from './serve.ts';
 import { readSecret } from './util/secretInput.ts';
+import { isAlive } from './util/isAlive.ts';
 import { registerSearxngCleanup } from './providers/searxngServer.ts';
 
 if (process.env.MODSEARCH_NESTED) {
@@ -275,28 +276,25 @@ state
     }
   });
 
-/**
- * 这个 pid 的进程还活着吗。
- *
- * `process.kill(pid, 0)` 不发送信号，只做存在性检查：进程在则静默返回，
- * 不在则抛 ESRCH。用它回收「持锁进程已经死了」的陈旧锁。
- */
-function isAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+/** 锁久到多久就认为持有者不正常（PID 复用兜底）。正常起服务只要几百毫秒。 */
+const STALE_LOCK_MS = 120_000;
 
-/** 读 `~/.searchfuse/runtime.json`；不存在或形状不对时返回 undefined。 */
+
+/**
+ * 读 `~/.searchfuse/runtime.json`，只取端口。
+ *
+ * **判据必须与 `src/serveEnsure.ts` 的 `readServeRuntimeFile` 逐条一致**：
+ * 同一个文件，两处若宽严不一，就会出现「一个判在跑、一个判没在跑」的
+ * 错配——宽的那个 exit 0 不动手，严的那个去起新服务，结果是想用的服务
+ * 根本没起来。2026-11-25 审查时发现这里原本只判 `typeof === 'number'`，
+ * 缺整数校验与 token 校验，与 `serveEnsure.ts` 不一致。
+ */
 function readRuntimeFile(): { port: number } | undefined {
   try {
     const raw = fs.readFileSync(path.join(os.homedir(), '.searchfuse', 'runtime.json'), 'utf8');
-    const parsed = JSON.parse(raw) as { port?: unknown };
-    if (typeof parsed.port !== 'number') return undefined;
+    const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
+    if (typeof parsed.port !== 'number' || !Number.isInteger(parsed.port)) return undefined;
+    if (typeof parsed.token !== 'string' || parsed.token === '') return undefined;
     return { port: parsed.port };
   } catch {
     return undefined;
@@ -345,44 +343,58 @@ program
       //
       // 2026-11-25 现场：118 个僵尸进程、3719 MB 私有内存、118 个监听端口。
       // 机制是上面那段判据在并发下必然全部落空——runtime.json 还没被写出时，
-      // 每个 `--ensure` 都读到「没在跑」，于是各自起一个服务；谁最后写文件
-      // 谁赢，其余全部变成占着端口的孤儿。
+      // 每个 `--ensure` 都读到「没在跑」，于是各自起一个服务；`config.serve.port`
+      // 默认是 0（内核挑端口），所以它们各自绑到**不同的空闲端口**，全部成功、
+      // 全部常驻。谁最后写 runtime.json 谁赢，其余全成占坑的孤儿。
       //
-      // `mkdirSync` 是原子的：拿它当锁。抢不到的进程不去起服务，而是等
-      // 抢先者把 runtime.json 写出来，然后直接复用。
-      const lockDir = path.join(path.dirname(runtimePath()), 'serve.ensure.lock');
+      // 锁用 `openSync(..., 'wx')` 而不是 `mkdirSync(dir, {recursive: true})`。
+      // 2026-11-25 实测：带 recursive 的 mkdirSync 对已存在的目录**静默成功、
+      // 不抛 EEXIST**，拿它当锁等于没锁——抢锁的 try 块永远不抛，等待分支是
+      // 死代码。`wx` 则是原子排他创建：第一次成功，第二次抛 EEXIST。
+      const lockFile = path.join(path.dirname(runtimePath()), 'serve.ensure.lock');
       let holdsLock = false;
       try {
-        fs.mkdirSync(lockDir, { recursive: true });
-        // 标记这次创建成功：回收陈旧锁时不能误删别人刚建的。
-        fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}\n`, 'utf-8');
+        const fd = fs.openSync(lockFile, 'wx');
+        fs.writeSync(fd, `${process.pid}\n`);
+        fs.closeSync(fd);
         holdsLock = true;
       } catch {
-        // 别人拿着锁。清掉一个太老的锁（持有者已死），否则等它。
-        const ownerFile = path.join(lockDir, 'owner');
-        let stale = false;
+        // 别人拿着锁。**先判持有者死活，再判它是否太久。**
+        //
+        // 两个条件不能用 `||` 无条件并列：一台负载高、起服务耗时超过 30 秒的
+        // 机器上，一个活着的持有者会被 mtime 门槛误抢，两个进程同时起服务。
+        // 只有「确认持有者已死」才立刻回收；mtime 只作为 PID 复用时的兜底。
+        let ownerPid = 0;
         try {
-          const stat = fs.statSync(lockDir);
-          const owner = Number(fs.readFileSync(ownerFile, 'utf-8').trim());
-          // 超过 30 秒，或持有进程已经不在，都算陈旧。
-          stale = Date.now() - stat.mtimeMs > 30_000 || !isAlive(owner);
+          ownerPid = Number(fs.readFileSync(lockFile, 'utf-8').trim());
         } catch {
-          stale = true;
+          // 读不到就是空锁或半写的锁。
         }
-        if (stale) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
+        const ownerDead = ownerPid > 0 && !isAlive(ownerPid);
+        let tooOld = false;
+        try {
+          tooOld = Date.now() - fs.statSync(lockFile).mtimeMs > STALE_LOCK_MS;
+        } catch {
+          // stat 失败：文件可能在判定途中被持有者删掉了。
+        }
+        // 持有者已死，或锁久到不可能是正常启动（PID 复用兜底），才回收。
+        // 持有者活着但慢，就老实等它——抢锁会制造出第二个服务。
+        if (ownerDead || tooOld) {
           try {
-            fs.mkdirSync(lockDir, { recursive: true });
-            fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}\n`, 'utf-8');
+            fs.unlinkSync(lockFile);
+            const fd = fs.openSync(lockFile, 'wx');
+            fs.writeSync(fd, `${process.pid}\n`);
+            fs.closeSync(fd);
             holdsLock = true;
           } catch {
+            // 回收途中被别人抢走：照常走等待分支。
             holdsLock = false;
           }
         }
       }
 
       if (!holdsLock) {
-        // 别人正在起。等它写文件，最多等 20 秒，然后直接退 0 让调用方重试。
+        // 别人正在起。等它写文件，最多等 20 秒。
         const deadline = Date.now() + 20_000;
         while (Date.now() < deadline) {
           const ready = readRuntimeFile();
@@ -401,16 +413,20 @@ program
           }
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
+        // **不能传个「成功」的退出码就走。** `serveEnsure.ts` 把「早退 0 且
+        // 没有 runtime.json」判成「文件没写出来」这个真故障；并发等待失败若
+        // 也退 0，一次正常的并发启动会被误报成文件级故障。等不到就用非 0
+        // 退出，让调用方的失败分支说实话。
         process.stderr.write('Error: another serve --ensure is starting up; gave up waiting.\n');
         process.exit(1);
       }
-      // 持锁期间进程被外部杀掉时，锁会留在原地；上面的陈旧检测会在 30 秒后
-      // 或持有进程消失后回收它。
+      // 持锁期间进程被外部杀掉时，锁会留在原地；上面的陈旧检测会在
+      // STALE_LOCK_MS 之后或持有进程消失后回收它。
       const releaseLock = (): void => {
         try {
-          fs.rmSync(lockDir, { recursive: true, force: true });
+          fs.unlinkSync(lockFile);
         } catch {
-          // 删不掉不影响退出。
+          // 删不掉（比如已经被陈旧回收清掉）不影响退出。
         }
       };
       process.once('exit', releaseLock);

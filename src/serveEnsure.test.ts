@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ensureServeRunning, readServeRuntimeFile } from './serveEnsure.ts';
+import { isAlive } from './util/isAlive.ts';
 import { cleanupTempDirs, withTempHome } from './testing/helpers.ts';
 
 const created: string[] = [];
@@ -176,12 +177,20 @@ describe('ensureServeRunning', () => {
     try {
       const cli = path.join(home, 'fake-cli.js');
       fs.writeFileSync(cli, 'process.exit(0);\n', 'utf-8');
+      // 超时给到 3000，而断言「远小于 3000」。
+      //
+      // 为什么不用「小于 700」这种贴着超时的阈值：子进程的启动与退出事件
+      // 本身就有几百毫秒的抖动（实测这台机器上跑过一次 1055ms），贴着超时
+      // 写会让测试随机器负载变红。判据要抓的是「没有等满超时」，不是
+      // 「非常快」——3000 对 3000 以下的巨大差距才区分得开正确实现和
+      // 「一直轮询到超时」的错误实现。
+      const timeoutMs = 3000;
       const t0 = Date.now();
-      const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs: 700 });
+      const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs });
       expect(outcome.started).toBe(false);
       expect(outcome.reason).toBe('runtime.json not written');
-      // 立刻返回，没有等满超时。
-      expect(Date.now() - t0).toBeLessThan(700);
+      // 早退：耗时必须明显小于超时。等满超时的实现会 ≥ 3000。
+      expect(Date.now() - t0).toBeLessThan(timeoutMs - 500);
     } finally {
       restore();
     }
@@ -191,9 +200,22 @@ describe('ensureServeRunning', () => {
     // 假 CLI：一直活着、不写 runtime.json。这是「拉起了进程但服务没起来」
     // 的形状，只有等满超时才能下结论。
     const { home, restore } = withTempHome();
+    const pidFile = path.join(home, 'fake-cli.pid');
     try {
       const cli = path.join(home, 'fake-cli.js');
-      fs.writeFileSync(cli, 'setInterval(() => {}, 1 << 30);\n', 'utf-8');
+      // 必须把自己的 pid 落到文件里：这个假 CLI 不写 runtime.json，所以
+      // killChildOnPort 无从定位它。不这么做，每跑一次这条测试就泄漏一个
+      // 常驻 node 孤儿——测试自己制造雪崩，正是这次事故的讽刺版。
+      fs.writeFileSync(
+        cli,
+        [
+          "const fs = require('node:fs');",
+          'fs.writeFileSync(process.env.SEARCHFUSE_TEST_PID_FILE, String(process.pid));',
+          'setInterval(() => {}, 1 << 30);',
+        ].join('\n'),
+        'utf-8',
+      );
+      process.env.SEARCHFUSE_TEST_PID_FILE = pidFile;
       const t0 = Date.now();
       const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs: 700 });
       expect(outcome.started).toBe(false);
@@ -201,7 +223,47 @@ describe('ensureServeRunning', () => {
       // 确实等到了超时，而不是误判成功立刻返回。
       expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
     } finally {
+      delete process.env.SEARCHFUSE_TEST_PID_FILE;
+      try {
+        const pid = Number(fs.readFileSync(pidFile, 'utf-8').trim());
+        if (Number.isInteger(pid) && pid > 0) process.kill(pid);
+      } catch {
+        // 文件不在或进程已退出：都不影响测试结果。
+      }
       restore();
     }
+  });
+});
+
+describe('跨进程锁的原子语义', () => {
+  /**
+   * 这条钉住 118 僵尸进程事故的第二条根因：并发 `--ensure` 各自起一个服务。
+   *
+   * 关于「为什么只有这一条」：我试过三种写法，只有这一条有真守护力。
+   * (a) 在测试里直接调 `fs.openSync('wx')` —— 测的是 Node 原生 API，
+   *     生产实现退回 `mkdirSync` 后照样绿。
+   * (b) 起两个真实 `serve --ensure` 子进程数存活数 —— **也不行**：实测
+   *     破坏锁实现后它照样绿，因为两个进程启动有先后，第二个读到已写出的
+   *     runtime.json 会走「Already running」早退，掩盖了竞态。而且它要跑
+   *     20 秒，慢且不稳。
+   * (c) 抄一份生产判据到本地再测 —— 测的是副本。
+   *
+   * 所以锁的完整行为（`wx` 排他 + 陈旧回收 + 立即释放）靠代码审查与
+   * CLAUDE.md 的事故记录兜底；可自动化的部分只留下 EPERM 这一条，
+   * 因为它是纯函数判据，能精确断言。这是有意识的取舍，不是漏测。
+   */
+  it('EPERM 必须判成「活着」：否则会误抢受保护进程的锁', () => {
+    // 2026-11-25 实测：对 PID 4（System）这类权限受限的进程，
+    // process.kill(pid, 0) 抛的是 EPERM 而不是 ESRCH。EPERM 的含义是
+    // 「进程存在，只是不归我管」。把它当「死了」会让一个活着的持有者
+    // 的锁被误抢，两个进程同时起服务。
+    //
+    // **测的是生产代码本身**（`src/util/isAlive.ts`）。反向验证确认：
+    // 把 EPERM 改成别的码，这条会红在本行。
+    expect(isAlive(4)).toBe(true); // System：存在但权限受限，必抛 EPERM
+    expect(isAlive(999_999)).toBe(false); // 不存在：ESRCH
+    expect(isAlive(0)).toBe(false); // 非法 pid：直接 false，不交给 kill
+    expect(isAlive(-1)).toBe(false);
+    expect(isAlive(Number.NaN)).toBe(false);
   });
 });
