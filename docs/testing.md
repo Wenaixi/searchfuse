@@ -46,6 +46,43 @@ CI 在 `ubuntu-latest` 的 Node 22 / 24 / 26 与 `windows-latest` 的 Node 22 / 
 
 比真实系统能力更弱的测试替身，会悄悄跳过整条路径。`src/dshPlugin.test.ts` 里的 `house()` 夹具之所以让 `tools.register` 返回一个撤销函数，正是这个理由：不这么做，"先撤掉旧一代、再注册新一代"那条路径永远不会跑，而热重载测试会对一个从不撤销任何东西的实现照样绿。当替身模拟不了生产代码依赖的某个行为时，去扩展替身，而不是把断言放宽。
 
+## 假绿的四种形态
+
+上面那条习惯说来容易，做起来会连着被骗。2026-11-25 审查本地服务生命周期时补了十余条测试，每一条都反向验证过（破坏实现、看它是否变红），抓到四种假绿。它们都**看起来**像在守护什么。
+
+### 一、测的是原生 API，不是我们的代码
+
+```ts
+expect(() => fs.openSync(lock, 'wx')).toThrow(/EEXIST/);
+```
+
+它测的是 Node 的 `wx` 语义。把生产实现退回有缺陷的 `mkdirSync(recursive: true)` 后**照样绿**——那条断言压根没碰我们的代码。
+
+判据：这条断言里有没有**生产代码的符号**？没有就是假的。
+
+### 二、抄一份生产判据到本地去测
+
+```ts
+function codeMeansAlive(error) { return error.code === 'EPERM'; }  // 抄的副本
+expect(codeMeansAlive(err)).toBe(true);
+```
+
+测的是那份副本。破坏生产实现后照样绿。
+
+判据：**断言必须走进 function under test**。生产函数 import 不进来，就把它抽成独立模块再导入，不要抄。`src/util/isAlive.ts` 就是这么从 `src/main.ts` 里抽出来的——`main.ts` 顶层有 `await program.parseAsync`，导入它会把整条 CLI 解析跑一遍。
+
+### 三、异步窗口没等到就断言
+
+「早退时不该 spawn 子进程」→ 断言 `fs.existsSync(marker) === false`。但 `spawn` 是异步的，`detached` 的子进程要过几毫秒才写标记。**立刻检查永远是 false**，于是把早退段删掉测试也绿。
+
+判据：断言否定性事实（「不该发生」）时，必须先给「如果会发生」留足时间窗口，再断言它没发生。
+
+### 四、黑盒并发测试掩盖竞态
+
+起两个真实 `serve --ensure` 数存活进程，看起来是最像真事的验证。实测：破坏锁实现后它**照样绿**——两个进程启动有先后，第二个读到已经写出的 `runtime.json` 就走「Already running」早退，把竞态盖住了。而且它要跑 20 秒，还容易在测试被强杀时泄漏进程和锁。
+
+结论：能稳定自动化的只有纯函数判据。锁的其余行为（`wx` 排他、陈旧回收、立即释放）靠代码审查与项目 `CLAUDE.md` 的事故记录兜底，这是有意识的取舍，不是漏测。
+
 ## 热重载
 
 插件自己拥有 `~/.searchfuse/config.json`，它在宿主的 profile 之外，所以宿主的重载信号永远不会为它触发。`watchModsearchConfigFile` 每隔几秒 stat 一次它的 mtime，MCP 工具与引擎工具都挂在这唯一一个监视器上——只有一个定时器，因为对同一个文件挂两套监视器会让两半在一次保存之后短暂地看法不一致。
