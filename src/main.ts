@@ -353,17 +353,97 @@ program
       // 死代码。`wx` 则是原子排他创建：第一次成功，第二次抛 EEXIST。
       const lockFile = path.join(path.dirname(runtimePath()), 'serve.ensure.lock');
       let holdsLock = false;
+      /** 抢锁失败时如果是环境错误，记在这里，让下面直接报出来而不是空等。 */
+      let lastLockError: NodeJS.ErrnoException | undefined;
+      /**
+       * 抢锁。**用 `linkSync`，不是 `openSync('wx')`。**
+       *
+       * 两者的差别只在回收路径上，但那个差别是致命的：
+       * - `openSync('wx')` 依赖「锁文件不存在」才能成功。回收时要先删旧锁
+       *   再建新锁，这**两步之间**任何进程都能建锁，于是并发回收时多个进程
+       *   各自删一次、各自建一次，全都认为自己持锁。
+       * - `linkSync(cand, lock)` 把「建锁」压成一次内核原子操作：只有当
+       *   `lock` 不存在时才成功，存在就抛 EEXIST。删完之后最先 link 的那个
+       *   赢，其余全部 EEXIST。
+       *
+       * 2026-11-25 实测（8 进程真并发抢同一把陈旧锁）：
+       * `openSync('wx')` 版 8/8 全部报持锁；`linkSync` 版恰好 1 个成功、
+       * 7 个 EEXIST。Windows 与 POSIX 都支持 link，Windows 上同样原子。
+       */
+      const tryTakeLock = (): boolean | 'env-error' | 'retry' => {
+        const candidate = `${lockFile}.cand.${process.pid}`;
+        try {
+          fs.writeFileSync(candidate, `${process.pid}\n`, { mode: 0o600 });
+        } catch (writeError) {
+          // 连候选文件都写不出来：家目录只读或权限不足。这不是竞争，
+          // 是环境问题，不能当成「别人持锁」去空等 20 秒。
+          lastLockError = writeError as NodeJS.ErrnoException;
+          return 'env-error';
+        }
+        try {
+          fs.linkSync(candidate, lockFile);
+          return true;
+        } catch (linkError) {
+          const code = (linkError as NodeJS.ErrnoException).code;
+          // EEXIST 是正常竞争——**除非锁路径上是一个目录**。
+          // 上一版锁是 `mkdirSync` 建的**目录**，升级过来的用户家里会残留
+          // 一个 `serve.ensure.lock/`。link 到已存在的目录同样报 EEXIST，
+          // 但它不是「别人持锁」，是旧版本残留：读不出 owner（EISDIR）、
+          // mtime 又是旧的，于是永远判不成陈旧，所有 `--ensure` 空等 20 秒后
+          // 失败退出，服务再也起不来。2026-11-25 实测：8 个进程全部
+          // 「gave up waiting」，runtime.json 从未写出。
+          if (code === 'EEXIST' || code === 'ENOENT' || code === 'EISDIR' || code === 'EPERM') {
+            try {
+              if (fs.statSync(lockFile).isDirectory()) {
+                fs.rmSync(lockFile, { recursive: true, force: true });
+                return 'retry';
+              }
+            } catch {
+              // stat 也失败（例如刚被别人删掉）：不是目录，按竞争处理。
+            }
+          }
+          if (code === 'EEXIST') return false;
+          lastLockError = linkError as NodeJS.ErrnoException;
+          return 'env-error';
+        } finally {
+          // 候选文件只是一块踏板，锁已经 link 过去，它就没用了。
+          // 即使 link 失败也要删，否则每次抢锁都留一个垃圾文件。
+          try {
+            fs.unlinkSync(candidate);
+          } catch {
+            // 删不掉不影响结论。
+          }
+        }
+      };
+
+      // **先建父目录。** `linkSync` 不会建父目录：全新安装第一次跑时
+      // `~/.searchfuse` 还不存在，抛的是 ENOENT，会被当成「别人持锁」，
+      // 于是空等 20 秒后 exit 1，服务永远起不来。`ensureServeToken()`
+      // 虽然也建这个目录，但它在锁之后才跑，来不及。2026-11-25 实测。
       try {
-        const fd = fs.openSync(lockFile, 'wx');
-        fs.writeSync(fd, `${process.pid}\n`);
-        fs.closeSync(fd);
-        holdsLock = true;
+        fs.mkdirSync(path.dirname(lockFile), { recursive: true, mode: 0o700 });
       } catch {
-        // 别人拿着锁。**先判持有者死活，再判它是否太久。**
+        // 建不出来（例如家目录只读）：让下面的抢锁照常失败，
+        // 由失败分支给出结论，这里不提前下判断。
+      }
+
+      const take = tryTakeLock();
+      if (take === 'env-error') {
+        // 家目录写不进去：这不是竞争，空等 20 秒只会得到一句误导的话。
+        process.stderr.write(
+          `Error: cannot create ${lockFile} (${lastLockError?.code ?? lastLockError?.message}). ` +
+            'Check that ~/.searchfuse is writable.\n',
+        );
+        process.exit(1);
+      }
+      // 'retry' 表示刚清掉一个老版本残留的目录锁，再抢一次。
+      holdsLock = take === true || (take === 'retry' && tryTakeLock() === true);
+      if (!holdsLock) {
+        // 没抢到。判一下是不是陈旧锁（持有者已死 / 久到不可能是正常启动）。
         //
-        // 两个条件不能用 `||` 无条件并列：一台负载高、起服务耗时超过 30 秒的
-        // 机器上，一个活着的持有者会被 mtime 门槛误抢，两个进程同时起服务。
-        // 只有「确认持有者已死」才立刻回收；mtime 只作为 PID 复用时的兜底。
+        // 判据顺序有讲究：先判持有者死活，mtime 只作 PID 复用时的兜底。
+        // 两个条件用 `||` 无条件并列的话，一台负载高、起服务超过 STALE_LOCK_MS
+        // 的机器上，一个**活着但慢**的持有者会被 mtime 门槛误抢，制造第二个服务。
         let ownerPid = 0;
         try {
           ownerPid = Number(fs.readFileSync(lockFile, 'utf-8').trim());
@@ -377,19 +457,24 @@ program
         } catch {
           // stat 失败：文件可能在判定途中被持有者删掉了。
         }
-        // 持有者已死，或锁久到不可能是正常启动（PID 复用兜底），才回收。
-        // 持有者活着但慢，就老实等它——抢锁会制造出第二个服务。
         if (ownerDead || tooOld) {
+          // 回收：删掉旧锁，让所有同样判成陈旧的进程重新去 link。
+          // 这里**故意不自己建**——删完之后由下一次 tryTakeLock 决定谁赢，
+          // 竞争交给 link 的原子性，不会出现「删旧建新两步之间被插队」的窗口。
           try {
             fs.unlinkSync(lockFile);
-            const fd = fs.openSync(lockFile, 'wx');
-            fs.writeSync(fd, `${process.pid}\n`);
-            fs.closeSync(fd);
-            holdsLock = true;
           } catch {
-            // 回收途中被别人抢走：照常走等待分支。
-            holdsLock = false;
+            // 别人已经删了：接着抢就是。
           }
+          const retake = tryTakeLock();
+          if (retake === 'env-error') {
+            process.stderr.write(
+              `Error: cannot create ${lockFile} (${lastLockError?.code ?? lastLockError?.message}). ` +
+                'Check that ~/.searchfuse is writable.\n',
+            );
+            process.exit(1);
+          }
+          holdsLock = retake === true || (retake === 'retry' && tryTakeLock() === true);
         }
       }
 
@@ -423,10 +508,14 @@ program
       // 持锁期间进程被外部杀掉时，锁会留在原地；上面的陈旧检测会在
       // STALE_LOCK_MS 之后或持有进程消失后回收它。
       const releaseLock = (): void => {
+        // **只删自己的锁。** 如果这期间锁被别人回收并重建（陈旧竞态），
+        // 直接 unlink 会删掉别人的锁，让第三个进程误以为无人持锁。
         try {
-          fs.unlinkSync(lockFile);
+          const owner = Number(fs.readFileSync(lockFile, 'utf-8').trim());
+          if (owner === process.pid) fs.unlinkSync(lockFile);
         } catch {
-          // 删不掉（比如已经被陈旧回收清掉）不影响退出。
+          // 读不出内容：可能是老版本残留的**目录**锁（readFileSync 会抛 EISDIR）。
+          // 那种残留在 tryTakeLock 里清，这里不必再动，免得误删别人的东西。
         }
       };
       process.once('exit', releaseLock);
