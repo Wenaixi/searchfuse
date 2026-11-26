@@ -22,20 +22,20 @@
 | `keenable` | 2 | 每 IP 每小时 1,000 次，每秒最多 10 次 |
 | `anysearch` | 3 | 匿名额度，按 IP 限流；配 key 可解限流 |
 | `youcom` | 4 | 每 IP 每天 100 次 |
-| `searxng` | 5 | 需要自建实例，但不需要 key |
+| `searxng` | 5 | 默认用随包实例，不需要 key，也不需要先自建 |
 
 后三台是需要配置的备份：`antigravity-cli` 要装 `agy` 并登录（默认关闭），`tavily`、`exa` 要 key。`firecrawl` 领跑两条链，因为它的免注册通道在裸机上就能用。`keenable` 排第二同理：`firecrawl` 额度用完时裸机上还有一个免注册后备。`anysearch` 排第三、`youcom` 排第四，是两条额度更小的免注册通道，给前几个都用完的繁忙 IP 兜底。`searxng` 排第五：它不需要 key，所以要排在需要 key 的引擎之前，但它又不像前面几台那样在全新机器上就现成。
 
 从这张表能推出两个事实，它们回答大多数问题：
 
 - **单页抓取零配置可用。** `local` 引擎零安装，默认是抓取的最后兜底。只有用户明确禁用它时才会离开自动链。
-- **网页搜索可以在完全不配置的情况下跑起来。** 前面五台免注册引擎依次兜底：Firecrawl 免注册额度（每月 1,000 credits，无需注册）、Keenable（每个 IP 每小时 1,000 次）、AnySearch（匿名额度，按 IP 限流）、You.com（每个 IP 每天 100 次）、SearXNG（需自建实例，但不需要 key）。配置了 `engine` 时以配置为准。搜索链不含 `local`，因为 `local` 不能搜索。这几台免注册引擎全被限流、而 `searxng` 又没配实例时，搜索至少还需要一个带 key 的引擎或 `agy` 作为后备。抓取仍有 `local` 兜底。
+- **网页搜索可以在完全不配置的情况下跑起来。** 前面五台免注册引擎依次兜底：Firecrawl 免注册额度（每月 1,000 credits，无需注册）、Keenable（每个 IP 每小时 1,000 次）、AnySearch（匿名额度，按 IP 限流）、You.com（每个 IP 每天 100 次）、SearXNG（默认用随包实例，不需要 key 也不需要先自建）。配置了 `engine` 时以配置为准。搜索链不含 `local`，因为 `local` 不能搜索。这几台免注册引擎全被限流时，搜索至少还需要一个带 key 的引擎或 `agy` 作为后备。抓取仍有 `local` 兜底。
 
 X 是独立语料，不是竞争的搜索引擎，所以它永远不会顶替网页搜索。`--source` 选语料，`--engine` 选工具。
 
 ## 零配置
 
-searchfuse 没有配置文件也能跑：抓取有 `local` 兜底，搜索按 `firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng` 的顺序依次试五台免注册引擎。搜索没有 local 后备（`local` 不能搜索），所以这几台都被限流、`searxng` 又没配实例时，需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
+searchfuse 没有配置文件也能跑：抓取有 `local` 兜底，搜索按 `firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng` 的顺序依次试五台免注册引擎（`searxng` 最后这台用的是随包实例，也不需要先自建）。搜索没有 local 后备（`local` 不能搜索），所以这几台都被限流时，需要一个带 key 的引擎或 `agy`。它看这台机器上有什么，用最好的那个。只有用户想改变这一点时才需要建配置。
 
 首选的免费升级是 Antigravity CLI，它写带引用的综述，一个工具同时覆盖搜索和抓取，还不要 key：
 
