@@ -1,6 +1,6 @@
 # 三宿主搜索接管与默认 MCP 设计
 
-> 状态：待批准
+> 状态：已实施。本文档是当时的**设计决策记录**，不是现状说明；实现如果已经演进，以代码为准。
 > 日期：2026-11-21
 > 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 取代：`2026-11-21-searchfuse-tri-host-design.md` 中关于「三家如何接入」的部分

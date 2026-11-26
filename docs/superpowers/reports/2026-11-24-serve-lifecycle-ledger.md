@@ -1,5 +1,7 @@
 # SDD ledger — plan: docs/superpowers/plans/2026-11-24-serve-lifecycle.md
 
+> 状态：历史执行账本。记录的是当时每一轮的实际动作，不是现状说明。
+
 工作台：`.superpowers/sdd/2026-11-24-serve-lifecycle/`
 分支：`feature/serve-lifecycle`（从 `main` 的 `030a679` 切出）
 Spec：`docs/superpowers/specs/2026-11-24-serve-lifecycle-design.md`

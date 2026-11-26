@@ -1,6 +1,6 @@
 # 本地服务生命周期：让三条宿主链路都能自愈
 
-> 状态：**pending approval**
+> 状态：已实施。本文档是当时的**设计决策记录**，不是现状说明；实现如果已经演进，以代码为准。
 > 日期：2026-11-24
 > 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 前置：`2026-11-21-searchfuse-tri-host-design.md`（该文档第 610 行已记录本问题为已知风险，至今未处置）

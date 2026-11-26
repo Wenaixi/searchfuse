@@ -1,6 +1,6 @@
 # searchfuse 三宿主架构设计（dsh + Claude Code + omp）
 
-> 状态：**pending approval**
+> 状态：已实施。本文档是当时的**设计决策记录**，不是现状说明；实现如果已经演进，以代码为准。
 > 日期：2026-11-21（v7，经六轮 Architect + Critic 评审）
 > 仓库：`E:\newCC\aaa-dsh-go\searchfuse`（`@wenaixi/searchfuse`）
 > 取代：`2026-11-20-searchfuse-dual-host-design.md`

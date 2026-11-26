@@ -1,5 +1,10 @@
 # 本地服务生命周期 Implementation Plan
 
+> 状态：**已执行完成**（2026-11-26 核实：`src/serveEnsure.ts`、`src/serveEnsure.test.ts`、
+> `src/util/isAlive.ts` 均存在，Claude hook 的三级兜底在 `claude/hooks/register.ts` 的
+> `wakeServe` 里）。下面的 checkbox 是执行时的工作清单，**没有回填勾选**；判断是否完成
+> 请看代码与测试，不要看这些方框。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Claude Code 侧在本地服务不可用时能自己拉起来，并把「服务在不在」这一个判据统一到单处。
