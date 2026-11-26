@@ -32,9 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # 版本由 package.json 的 packageManager 决定；这里再写 version 会让
-      # action-setup 报「Multiple versions of pnpm specified」并直接失败。
+      # action-setup 必须能找到一个版本来源，否则报「No pnpm version is
+      # specified」。只写在这里、不写 package.json 的 packageManager：两处同时
+      # 声明会报「Multiple versions of pnpm specified」。version: 12 会装 12.x 最新。
       - uses: pnpm/action-setup@v4
+        with:
+          version: 12
       - uses: actions/setup-node@v4
         with:
           node-version: 22
