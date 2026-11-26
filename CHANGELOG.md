@@ -120,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **cordis 4.2 兼容**：`engines.dsh` 补上 `<0.3.0-0` 上界（DSH 0.2.3 系列
   随包带入 cordis 4.2.0-alpha.1 与 schemastery 3.20.0-alpha.1，实测引擎闸门
   与 bundle 组合均无回归）。
+- **工具链在发版前全部升到最新**：TypeScript 5.9 → 7.0、Vite 6.4 → 8.3、
+  Vitest 3.2 → 5.1、Biome 2.5 → 2.6、commander 13 → 15、undici 7.30 → 8.13、
+  `@searxng-js/searxng` 0.1.2 → 0.1.3，CI 与 `packageManager` 一并钉在
+  pnpm 12.23。两处必须跟着改：TypeScript 7 要求 `tsconfig.dsh.json` 显式写
+  `rootDir`（否则退出码 2、`dsh/index.js` 不生成，包装不上）；undici 8 对
+  `http://` 目标改用标准代理转发而非 CONNECT 隧道，测试里的假代理两条路都要接。
 
 [Unreleased]: https://github.com/Wenaixi/searchfuse/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Wenaixi/searchfuse/releases/tag/v0.1.0
