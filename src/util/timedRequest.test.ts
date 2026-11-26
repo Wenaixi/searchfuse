@@ -44,12 +44,26 @@ function startOrigin(): Promise<Server> {
  */
 async function startProxy(originPort: number): Promise<Server & { seen: string[] }> {
   const seen: string[] = [];
-  const server = http.createServer((_req, res) => {
-    res.writeHead(405);
-    res.end();
+  const server = http.createServer((req, res) => {
+    // undici 8 对 `http://` 目标走的是标准代理转发（绝对 URI 的
+    // `GET http://host/path`），不再用 CONNECT 隧道——隧道本来就是 HTTPS
+    // 的做法。所以这个假代理两条路都要接：转发与隧道都要把请求送到 origin。
+    seen.push(`${req.method} ${req.url ?? ''}`);
+    const upstream = http.request(
+      { host: '127.0.0.1', port: originPort, path: req.url, method: req.method, headers: req.headers },
+      (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+        upstreamRes.pipe(res);
+      },
+    );
+    upstream.on('error', () => {
+      res.writeHead(502);
+      res.end();
+    });
+    req.pipe(upstream);
   });
   server.on('connect', (req, clientSocket, head) => {
-    seen.push(req.url ?? '');
+    seen.push(`CONNECT ${req.url ?? ''}`);
     const upstream = net.connect(originPort, '127.0.0.1', () => {
       clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       upstream.write(head);
@@ -110,7 +124,7 @@ describe('requestText and the system HTTP proxy', () => {
     const { response, text } = await call('http://engine-api.invalid/search');
     expect(response.status).toBe(200);
     expect(text).toBe('{"from":"origin"}');
-    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+    expect(proxy.seen).toEqual(['GET http://engine-api.invalid/search']);
   });
 
   it('goes direct for a host listed in NO_PROXY', async () => {
@@ -159,7 +173,7 @@ describe('requestText and a per-engine proxy override', () => {
       `http://127.0.0.1:${proxy.port}`,
     );
     expect(text).toBe('{"from":"origin"}');
-    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+    expect(proxy.seen).toEqual(['GET http://engine-api.invalid/search']);
   });
 
   it('bypasses http_proxy when the engine asks for a direct connection', async () => {
@@ -179,13 +193,13 @@ describe('requestText and a per-engine proxy override', () => {
       `http://127.0.0.1:${proxy.port}`,
     );
     expect(text).toBe('{"from":"origin"}');
-    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+    expect(proxy.seen).toEqual(['GET http://engine-api.invalid/search']);
   });
 
   it('keeps following the environment when the setting is absent', async () => {
     vi.stubEnv('http_proxy', `http://127.0.0.1:${proxy.port}`);
     const { text } = await callWithProxy('http://engine-api.invalid/search', undefined);
     expect(text).toBe('{"from":"origin"}');
-    expect(proxy.seen).toEqual(['engine-api.invalid:80']);
+    expect(proxy.seen).toEqual(['GET http://engine-api.invalid/search']);
   });
 });

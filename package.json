@@ -2,6 +2,7 @@
   "name": "@wenaixi/searchfuse",
   "version": "0.1.0",
   "description": "融合搜索插件：并发询问多个搜索引擎并用倒数排名融合结果，为原生无联网能力的模型补上网搜、X 搜索与单页抓取。开箱免费，免注册免密钥（Firecrawl 免注册通道每月 1,000 免费额度）。",
+  "packageManager": "pnpm@12.23.0",
   "type": "module",
   "bin": {
     "searchfuse": "./dist/main.js"
@@ -82,16 +83,16 @@
     }
   },
   "dependencies": {
-    "@searxng-js/searxng": "0.1.2",
-    "commander": "^13.1.0",
-    "undici": "^7.30.2"
+    "@searxng-js/searxng": "0.1.3",
+    "commander": "15.1.0",
+    "undici": "8.13.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.7",
+    "@biomejs/biome": "2.6.9",
     "@types/node": "^22.19.7",
-    "@vitest/coverage-v8": "3.2.4",
-    "typescript": "^5.9.3",
-    "vite": "^6.4.1",
-    "vitest": "3.2.4"
+    "@vitest/coverage-v8": "5.1.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.2"
   }
 }
