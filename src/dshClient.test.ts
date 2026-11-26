@@ -856,7 +856,9 @@ function render(
           if (value.props.children !== undefined) walk(value.props.children);
         }
       };
-      built.forEach((node) => walk(node.kids));
+      built.forEach((node) => {
+        walk(node.kids);
+      });
       return out;
     })(),
   };

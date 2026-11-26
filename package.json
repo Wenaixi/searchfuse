@@ -30,10 +30,14 @@
     "skills/searchfuse/references",
     "CHANGELOG.md",
     "SECURITY.md",
-    "dsh",
+    "dsh/*.js",
+    "dsh/*.d.ts",
+    "dsh/*.json",
     "cordis.patch.yml",
     "omp",
-    "claude"
+    "claude",
+    "!claude/tsconfig.json",
+    "!dsh/*.ts.map"
   ],
   "keywords": [
     "search",
