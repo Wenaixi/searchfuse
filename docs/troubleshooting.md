@@ -21,7 +21,7 @@ Every engine for the web source failed.
   - firecrawl: ...
 ```
 
-Firecrawl、Keenable 和 You.com 都能走免注册端点搜索，所以裸安装也有可用引擎。现在看到这条信息，表示所有候选都在运行时失败。按尝试列表找真实原因，常见情况是网络不可用、超时、免注册每日额度耗尽、Keenable 免注册的每小时额度用完、You.com 免注册的每日额度用完，或已配置引擎的账号额度用完。每个引擎自己的失败会按顺序列出，从第一个能修的下手，通常是额度或 key。
+Firecrawl、Keenable、AnySearch、You.com 和随包的 SearXNG 都能在零配置下搜索，所以裸安装也有可用引擎。现在看到这条信息，表示所有候选都在运行时失败。按尝试列表找真实原因，常见情况是网络不可用、超时、免注册每日额度耗尽、Keenable 免注册的每小时额度用完、AnySearch 的匿名额度被限流、You.com 免注册的每日额度用完，或已配置引擎的账号额度用完。每个引擎自己的失败会按顺序列出，从第一个能修的下手，通常是额度或 key。
 
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash && agy   # 然后登录
@@ -95,6 +95,21 @@ keenable is out of credits (HTTP 402). ...
 ```
 
 当前额度已经用完。对 Firecrawl 而言，它可能是免注册每日额度，也可能是账号额度。其他搜索引擎会自动接手，冷却开着时耗尽的引擎会被挪到链末尾直到恢复。加额度、换引擎，或等待对应周期重置。Keenable 带 key 的额度是每个组织每月 100,000 次，在 https://app.keenable.ai 管理。
+
+## AnySearch 匿名额度被限流
+
+```
+anysearch's anonymous pool is rate-limited for now. Set a free key for your own quota: searchfuse config set anysearch.apiKey <key>
+```
+
+不带 key 时 AnySearch 走匿名档，额度按 IP 限流（具体上限未公开）。链上的下一个搜索引擎会自动接手。想要一份自己的额度，到 https://anysearch.com 领个免费 key：
+
+```bash
+searchfuse config set anysearch.apiKey <key>
+# 或环境变量：export ANYSEARCH_API_KEY=<key>
+```
+
+它和按住其他引擎不同：**key 被上游拒绝也不会让搜索失败**，这一次会自动降级回匿名档重试，并在 `warnings` 里写明「AnySearch key was rejected; used the anonymous tier for this request instead.」。所以看到那句话时，搜索仍然有结果，只是回到了限流档；修好 key 后下一次请求立刻恢复，不需要重启。
 
 ## Keenable 免注册额度本小时用完
 
