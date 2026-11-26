@@ -13,7 +13,7 @@ SearchFuse 是原生 dsh bundle。它保留 dsh 内置的 `web_search` 工具与
 
 ## 兼容性
 
-当前 bundle 已对照 `@deepseek-ai/dsh 0.1.7-alpha.1` 检查，设置卡片另外对照过 `0.1.5-rc.2`。这些版本保留了 SearchFuse 用到的接口：
+当前 bundle 已对照 `@deepseek-ai/dsh 0.2.3-alpha.2` 实测：`--dump-config` 输出里 `searchProvider: modsearch` 与 `@wenaixi/searchfuse` 插件行都正常出现，bundle patch 生效。更早的版本线（0.2.2-rc.3 到 rc.5、0.1.7-alpha.1、设置卡片对照过的 0.1.5-rc.2）也验证过，下面这几条接口在各版之间没有变化：
 
 - npm bundle 仍通过 `dsh.bundle.patch` 声明配置层。
 - web 接缝仍通过 `ctx.web.registerSearchProvider(...)` 接收 provider。
@@ -80,11 +80,12 @@ searchfuse config set tavily.apiKey <key>
 searchfuse config set exa.apiKey <key>
 searchfuse config set firecrawl.apiKey <key>
 searchfuse config set keenable.apiKey <key>
+searchfuse config set anysearch.apiKey <key>
 searchfuse config set firecrawl.keylessFetch false
 searchfuse config set cooldown off
 ```
 
-不做任何设置就能开跑：搜索和单页抓取默认运行在 Firecrawl 的免注册免费额度上（每月 1,000 免费 credits，无需注册），搜索还能退到 Keenable 的免注册额度（每个 IP 每小时 1,000 次，无需注册），再退到 You.com 的免注册搜索（每个 IP 每天 100 次，无需注册）。免注册公网抓取默认开启，它会把请求的 URL 交给 Firecrawl 的云端爬虫，结果中的 warning 会标明这条路径。`firecrawl.keylessFetch false` 可让自动抓取只走本地。私有或保留地址不会发给 Firecrawl，而会落到本地抓取器。
+不做任何设置就能开跑：搜索和单页抓取默认运行在 Firecrawl 的免注册免费额度上（每月 1,000 免费 credits，无需注册），搜索还能依次退到 Keenable 的免注册额度（每个 IP 每小时 1,000 次）、AnySearch 的匿名档（按 IP 限流，配 key 可解开）、You.com 的免注册搜索（每个 IP 每天 100 次），以及随包的 SearXNG 实例（不需要 key）。免注册公网抓取默认开启，它会把请求的 URL 交给 Firecrawl 的云端爬虫，结果中的 warning 会标明这条路径。`firecrawl.keylessFetch false` 可让自动抓取只走本地。私有或保留地址不会发给 Firecrawl，而会落到本地抓取器。
 
 完整说明见[引擎配置手册](../skills/searchfuse/references/configure.md)和[安全说明](security.md)。
 
@@ -94,14 +95,14 @@ dsh 网页端没有终端，所以插件自带一张设置卡片。dsh 0.1.6-alp
 
 卡片管四件事：
 
-- 首选引擎：自动，或 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`youcom`、`searxng`、`grok-cli` 之一。`firecrawl`、`keenable` 和 `youcom` 三项标注「免注册免费」。`local` 只抓单页不搜索，所以不在这个列表里，除非配置文件当前就把它设成了 `engine`，那时它照常显示，免得界面与文件不一致。
-- 当前所选引擎自己的设置：HTTP 引擎（`tavily`、`exa`、`firecrawl`、`keenable`，以及 `searxng`——它的接口地址就是实例地址）显示 API 密钥与接口地址，`antigravity-cli` 显示模型，每个引擎都可以单独配一个代理。走自家命令行工具登录的引擎和内置抓取器只显示一行说明，因为它们两样都不需要。选中未配置密钥的 `firecrawl` 或 `keenable` 时会多一行说明，讲清它默认跑在免注册的免费额度上。选中 `youcom` 时不显示密钥框，改显示一行说明，因为它只有免注册这一种用法。
+- 首选引擎：自动，或 `antigravity-cli`、`tavily`、`exa`、`firecrawl`、`keenable`、`anysearch`、`youcom`、`searxng`、`grok-cli` 之一。`firecrawl`、`keenable`、`anysearch`、`youcom` 和 `searxng` 五项标注「免注册免费」。`local` 只抓单页不搜索，所以不在这个列表里，除非配置文件当前就把它设成了 `engine`，那时它照常显示，免得界面与文件不一致。
+- 当前所选引擎自己的设置：HTTP 引擎（`tavily`、`exa`、`firecrawl`、`keenable`、`anysearch`，以及 `searxng`——它的接口地址就是实例地址）显示 API 密钥与接口地址，`antigravity-cli` 显示模型，每个引擎都可以单独配一个代理。走自家命令行工具登录的引擎和内置抓取器只显示一行说明，因为它们两样都不需要。选中未配置密钥的 `firecrawl`、`keenable` 或 `anysearch` 时会多一行说明，讲清它默认跑在免注册的免费额度上。选中 `youcom` 时不显示密钥框，改显示一行说明，因为它只有免注册这一种用法。
 - 自动引擎链：只列出 `searchfuse doctor` 判定本机已就绪的搜索引擎，每个一个复选框，勾选表示允许自动路由使用它。本机跑不了的引擎不出现在这里，它们不是需要用户做的决定。`local` 是单页抓取，不参与搜索，所以也不在这排里。`grok-cli` 只服务 X 搜索，旁边标注「仅 X 搜索」。读不到 doctor 结果时会列出全部搜索引擎并说明状态未知。保存成功后卡片会重新问一次 doctor，刚配好密钥的引擎马上就能长出复选框。
 - 曝光矩阵：每个引擎一个四选一——融入 `web_search`、作为独立工具、两者兼得、或关闭，外加独立形态下用的工具名。默认是只融入，但 `antigravity-cli` 默认关闭。卡片显示的是**生效状态**，所以一个因为从未被启用而关着的引擎，看起来不会和一个被手动关掉的引擎一样。
 
 每个引擎默认都勾选，但插件主动留着不启用的一个除外：`antigravity-cli`。卡片把它们的关闭状态连同理由一起显示出来，而不是假装它们是开着的。取消勾选只写入 `enabled: false`，重新勾选会删除这项覆盖，不保存多余的 `true`。取消当前首选引擎时，首选项会回到自动。卡片只改自己列出来的引擎：没有复选框的引擎（本机跑不了的，以及 `local`）的 `enabled` 一律原样带过，改它们只能用 `searchfuse config set <engine>.enabled`。本机一个就绪引擎都没有时，这排复选框换成一行提示，说明本机暂无就绪的引擎。
 
-Tavily、Exa、Firecrawl、Keenable 的官方接口地址内置在 provider 代码里。界面的接口地址只表示覆盖值。留空或清空都会使用内置官方地址，不会把默认 URL 写进配置文件。
+Tavily、Exa、Firecrawl、Keenable、AnySearch 的官方接口地址内置在 provider 代码里，SearXNG 没有官方主机（它连你填的实例，或随包实例）。界面的接口地址只表示覆盖值。留空或清空都会使用内置官方地址，不会把默认 URL 写进配置文件。
 
 其余设置仍然只走 CLI，包括 `bin`、`allowPrivateNetwork`、`cooldown` 和 `keylessFetch`。卡片保存时会原样带过这些字段，也无法新建它们。
 
@@ -154,6 +155,8 @@ Tavily、Exa、Firecrawl、Keenable 的官方接口地址内置在 provider 代�
 ```
 
 修改 patch 后运行 `--dump-config`。dsh patch 行会整体替换目标行的 `config`，所以同一行需要保留的值必须全部重写。
+
+**注意 `- id: modsearch` 不是笔误。** 那是 bundle 在 `cordis.patch.yml` 里注册的插件 id，也是 web 接缝 `searchProvider` 指向的名字。包名改过（`@liustack/modsearch` → `@wenaixi/searchfuse`），但这个 id 一直保留，改它会让接缝找不到 provider。
 
 ## 运行时验证
 
