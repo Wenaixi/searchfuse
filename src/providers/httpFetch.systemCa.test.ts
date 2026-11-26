@@ -25,6 +25,12 @@ vi.mock('undici', () => ({
       return Promise.resolve();
     }
   },
+  // httpFetch 在传了 dispatcher 时改用 undici 自己的 fetch（全局 fetch 是
+  // Node 内置 undici，与 npm 装的 undici 8 大版本不一致时会抛
+  // `invalid onRequestStart method`）。这个 mock 必须提供它，否则 import
+  // 到的是 undefined，调用直接 TypeError。转发给全局 fetch：这个套件测的是
+  // 传给 Agent 的 connect.ca，请求本身走真实回环服务端。
+  fetch: (...args: unknown[]) => (globalThis.fetch as (...a: unknown[]) => unknown)(...args),
 }));
 
 vi.mock('node:tls', () => ({

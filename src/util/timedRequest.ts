@@ -1,4 +1,4 @@
-import { EnvHttpProxyAgent, type Dispatcher } from 'undici';
+import { EnvHttpProxyAgent, fetch as undiciFetch, type Dispatcher } from 'undici';
 import { formatErrorWithCause } from './errorCause.ts';
 import { resolveProxyForUrl } from './proxy.ts';
 import { redactSecrets } from './redact.ts';
@@ -57,9 +57,16 @@ export async function requestText(
   try {
     let response: Response;
     try {
+      // 传了 dispatcher 时必须用 undici 自己的 fetch：全局 fetch 是 Node 内置
+      // 的 undici，版本跟着 Node 走（Node 22.23 内置 6.29），而这里的
+      // dispatcher 来自 npm 装的 undici 8，两个大版本的 handler 契约不兼容，
+      // 内置 fetch 会抛 `invalid onRequestStart method`，且只在旧 Node 上复现。
+      // 没有 dispatcher 时用全局 fetch：那条路径不碰 undici 内部契约，
+      // 而且测试都是 stubGlobal('fetch') 打桩的，换成 undiciFetch 就打不中。
       // `dispatcher` 是 Node/undici 对 fetch 选项的扩展，不在 DOM 的
       // RequestInit 类型里，所以通过类型断言挂上去。
-      response = await fetch(url, {
+      const doFetch = dispatcher ? undiciFetch : fetch;
+      response = await doFetch(url, {
         ...init,
         signal,
         ...(dispatcher ? { dispatcher } : {}),

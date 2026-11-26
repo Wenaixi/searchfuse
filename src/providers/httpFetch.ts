@@ -9,7 +9,7 @@
 // the result onto the shared engine contract. The SSRF guards live in
 // ./http/network.ts and the markup handling in ./http/htmlExtract.ts.
 import * as tls from 'node:tls';
-import { Agent, EnvHttpProxyAgent, type Dispatcher } from 'undici';
+import { Agent, EnvHttpProxyAgent, fetch as undiciFetch, type Dispatcher } from 'undici';
 import { assertSafeRemoteTarget, normalizeFetchUrl, type PinnedTarget } from './http/network.ts';
 import {
   extractLinks,
@@ -296,7 +296,12 @@ async function fetchOnce(
   const started = Date.now();
 
   try {
-    const response = await fetch(url, {
+    // 必须用 undici 自己的 fetch，不能用全局那个。全局 fetch 是 Node 内置
+    // 的 undici，版本跟着 Node 走（Node 22.23 内置的是 6.29），而这里的
+    // dispatcher 来自 npm 装的 undici 8——两个大版本的 handler 契约不兼容，
+    // 内置 fetch 会直接抛 `invalid onRequestStart method`，且只在旧 Node 上
+    // 复现（Node 26 内置 8.x，本地看不出来）。用同一个库的 fetch 就没有这道缝。
+    const response = await undiciFetch(url, {
       method: 'GET',
       redirect: 'manual',
       signal,
