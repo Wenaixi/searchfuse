@@ -146,18 +146,19 @@ describe('search flags', () => {
     // result was already written (#38). So the CLI sets its exit code and lets
     // the loop end the process. It waits for a pending SIGKILL first, or the
     // exit would orphan an engine that ignored SIGTERM.
-    // fake timers 必须**在导入 main.ts 之前**就装上。main.ts 在顶层设了一个
-    // 2 秒的退出 backstop（`setTimeout(...).unref()`）；这台机器上
-    // `import('./main.ts')` 本身就要几秒，backstop 会在真实时间里先触发，
-    // 于是 `exit` 被调用，而这条测试要证的正是「不该调 exit」。装成假时钟后
-    // 那段耗时只花在别的定时器上，backstop 只能被 runOnlyPendingTimers 触发。
-    vi.useFakeTimers();
+    // main.ts 在顶层设了一个 2 秒的退出 backstop（`setTimeout(...).unref()`）。
+    // 这条测试要证的是「正常路径下不该调 exit」，只有 backstop 才该调它。
+    //
+    // 顺序很关键：先让 import 在**真实时钟**下跑完，再装假时钟。反过来做的话
+    // 假时钟会把 runCli 里那个 `vi.waitFor` 一起冻住（它靠真实时间的轮询），
+    // 机器一忙就卡到超时。导入跑完时 backstop 还没到 2 秒，所以不会被触发。
     let releaseKills = () => {};
     const pendingKills = new Promise<void>((resolve) => {
       releaseKills = resolve;
     });
     const { exit, waitForPendingKills, loading } = await runCli(['-q', 'anything'], pendingKills);
     await vi.waitFor(() => expect(waitForPendingKills).toHaveBeenCalled());
+    vi.useFakeTimers();
     releaseKills();
     await loading;
     expect(process.exitCode).toBe(0);
