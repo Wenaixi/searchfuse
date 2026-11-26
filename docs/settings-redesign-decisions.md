@@ -122,7 +122,7 @@ Checkbox          { checked, label, onChange, disabled }
 ```ts
 engine?: string                    // 首选引擎，'' = 自动
 engines?: Record<string, EngineSettings>
-aggregate?: AggregateConfig        // { mode:'rrf'|'chain', deadlineMs, cacheTtlMs }
+aggregate?: AggregateConfig        // { mode:'rrf'|'chain', deadlineMs }（缓存已移除，无 cacheTtlMs）
 mcp?: Record<string, McpServerConfig>
 cooldown?: string                  // 'on' | 'off'
 allowPrivateNetwork?: boolean
