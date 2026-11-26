@@ -1,8 +1,8 @@
 # 三宿主功能对等矩阵
 
-> 状态：待实现（本文件由 CI 断言，未实现的格子标记 `TODO(<阶段>)`）
+> 状态：部分实现，本文件由 `scripts/parity-check.mjs` 校验（**未挂在 CI 上**，需手动或发布前跑 `pnpm parity:check`；`--final` 模式禁止 TODO）
 > 关联 spec：`docs/superpowers/specs/2026-11-21-searchfuse-tri-host-design.md` §十 S6
-> 日期：2026-11-21
+> 日期：2026-11-26（初版 2026-11-21）
 
 ## 判定规则
 
@@ -26,15 +26,14 @@
 
 | 能力 | dsh | Claude Code | omp |
 |---|---|---|---|
-| 搜索（聚合） | TODO(S3) | TODO(S4) | TODO(S5) |
+| 搜索（聚合） | src/dshPlugin.test.ts::returns evidence plus provenance as the canonical value | TODO(S4)：`claude/hooks/register.ts:464` 已接管 `WebSearch`，但没有等价测试 | TODO(S5) |
 | 搜索（单引擎强制） | TODO(S3) | TODO(S4) | TODO(S5) |
 | 引擎开关（`engines.*.enabled`） | TODO(S2) | TODO(S2) | TODO(S2) |
 | 聚合模式（`aggregate.mode` rrf/chain） | TODO(S3) | TODO(S4) | TODO(S5) |
 | 引擎顺序（`engine` 首选） | TODO(S3) | TODO(S4) | TODO(S5) |
-| 结果缓存 | TODO(S3) | TODO(S4) | TODO(S5) |
 | 冷却（`cooldown`） | TODO(S3) | TODO(S4) | TODO(S5) |
-| X 语料（`x_search`） | TODO(S3) | TODO(S4) | TODO(S5) |
-| 网页阅读（`read_page`） | TODO(S3) | TODO(S4) | TODO(S5) |
+| X 语料（`x_search`） | src/dshPlugin.test.ts::returns evidence plus provenance as the canonical value | TODO(S4)：`register.ts:502` 已注册该工具，但没有测试 | TODO(S5) |
+| 网页阅读（`read_page`） | src/dshPlugin.test.ts::returns the fetch evidence fields as the canonical value | TODO(S4)：`register.ts:512` 已注册该工具，但没有测试 | TODO(S5) |
 | 单引擎独立工具 | TODO(S3) | TODO(S4) | N/A: 宿主无此 API（`SearchProviderId` 封闭枚举） |
 | MCP：context7 | TODO(S2) | TODO(S4) | TODO(S5) |
 | MCP：grep | TODO(S2) | TODO(S4) | TODO(S5) |
@@ -56,3 +55,7 @@
 ## 变更记录
 
 - 2026-11-21：创建骨架，全部标记 TODO，等待 S1–S5 落地后填充。
+- 2026-11-26：与代码对齐。删掉「结果缓存」一行（该能力已移除，源码中零命中）；
+  订正顶部状态——脚本存在但**没挂 CI**，原文「本文件由 CI 断言」不实。填充 dsh
+  侧三格（搜索聚合、x_search、read_page），并把 Claude Code 侧标为「已实现但
+  无等价测试」，因为矩阵的定义是「有实现且有测试」，光有代码不算。
