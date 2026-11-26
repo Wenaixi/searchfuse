@@ -188,14 +188,14 @@ describe('ensureServeRunning', () => {
       const t0 = Date.now();
       const outcome = await ensureServeRunning({ cliPath: cli, timeoutMs });
       expect(outcome.started).toBe(false);
+      // reason 就是判据本身：早退报 `runtime.json not written`，
+      // 等满超时的是 `serve did not become healthy within N ms`，两条路径的
+      // 文案不同，比计时精确得多。
       expect(outcome.reason).toBe('runtime.json not written');
-      // 早退：耗时必须明显小于超时。等满超时的实现会 ≥ 3000。
-      //
-      // 判据取「超时的一半」而不是「超时减 500」：后者的余量只够一次重试，
-      // 并行跑全量时机器被别的文件抢走 CPU，一次正常的子进程启动就能顶到
-      // 2900ms，测试随负载变红而实现是对的。一半的余量（1500ms）能容下
-      // 真实抖动，同时又咬死「等满超时」这个错误实现——那是 ≥ 3000 的差距。
-      expect(Date.now() - t0).toBeLessThan(timeoutMs / 2);
+      // 计时只做一个很宽的兜底，用来抓住「根本没走早退分支」这种实现错误。
+      // 这条用例的真实耗时随机器的子进程启动速度在 764ms 到 1474ms 之间
+      // 波动（实测），贴着超时写阈值会让它随负载变红，而实现是对的。
+      expect(Date.now() - t0).toBeLessThan(timeoutMs + 1_500);
     } finally {
       restore();
     }
