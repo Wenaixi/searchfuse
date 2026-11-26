@@ -1,6 +1,6 @@
 <!-- Please read before opening this PR. -->
 
-Thanks for the effort, and sorry to catch you here: **ModSearch does not accept
+Thanks for the effort, and sorry to catch you here: **SearchFuse does not accept
 pull requests.** The tool is maintained single-handedly and every line stays
 author-owned, so PRs are closed without review as a matter of policy, not as a
 judgment on your work.

@@ -11,22 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+暂无。
 
-- **AnySearch 引擎。** 免注册匿名档即可搜索（有限流），可配 `ANYSEARCH_API_KEY`
-  提升额度。带 key 请求被 401/403 拒绝时自动降级匿名档重试一次，并在
-  `warnings` 里注明。结果带相关性过滤：与查询无共享词汇的整批判空，让 RRF
-  融合有机会换下一个引擎。默认参与融合。
+## [0.1.0] - 2026-11-26
 
-### Removed
-
-- **arXiv 引擎。** 按任意词命中检索，语义太宽，会把无关论文混进融合结果。
-  把它从引擎注册表、配置、卡片与文档全部移除——不再有默认关闭，因为它不再
-  存在。
-
-## [0.1.0] - 2026-11-18
-
-首个正式版本。modsearch 是一个给模型用的联网搜索插件：把搜索查询变成带来源
+首个正式版本。searchfuse 是一个给模型用的联网搜索插件：把搜索查询变成带来源
 的结构化证据，并把这套能力同时以 CLI、技能和 dsh 插件三种形态交付。
 
 ### Added
@@ -40,10 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   剩余参数排序，host 小写，去掉默认端口与非根路径的尾斜杠。`www.` 前缀与路径
   大小写刻意保留，因为合并它们会悄悄丢掉一个真实的第二来源。融合后的条目带
   `score` 与 `foundIn`，读者据此能分辨多源共识与单一引擎的看法。
-- **十个搜索与抓取引擎。** Firecrawl、Keenable、You.com 免注册可用；Tavily、
-  Exa 各带免费月度额度；SearXNG 接入自建实例（它自己的七十多个上游引擎经一个
-  适配器进来）；arXiv 面向文献；Antigravity CLI 靠浏览器登录并合成答案；
-  Grok 覆盖 X 语料；`local` 抓单页。
+- **十个搜索与抓取引擎。** 搜索链固定为 Firecrawl、Keenable、AnySearch、
+  You.com、SearXNG、Antigravity CLI、Tavily、Exa；抓取链是 Firecrawl、
+  Antigravity CLI、`local`；Grok 覆盖 X 语料。前五台免注册或免 key：Firecrawl、
+  Keenable、AnySearch、You.com 各有自己的免注册额度，SearXNG 默认用随包实例
+  （它自己的七十多个上游引擎经一个适配器进来）。Tavily、Exa 各带免费月度额度，
+  Antigravity CLI 靠浏览器登录并合成答案（默认关闭，因为它慢到超出融合预算）。
+  AnySearch 可配 `ANYSEARCH_API_KEY` 提升额度；带 key 的请求被 401/403 拒绝时
+  自动降级匿名档重试一次，并在 `warnings` 里注明。它的结果带相关性过滤：与查询
+  无共享词汇的整批判空，让融合有机会换下一个引擎。
 - **能力矩阵。** 每个引擎用两个正交开关自由组合：`expose.aggregate` 决定它是否
   进入融合答案，`expose.tool` 决定它是否另成一个可按名调用的独立工具，两者可
   同时开启。`toolName` 覆盖独立工具的名字。
@@ -55,14 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   命名与宿主自己的 MCP 客户端一致（`mcp__<server>__<tool>`）。握手并发的，
   一个服务端连不上只损失它自己的工具，并在 30 秒后自动重试一次。握手与工具调用
   使用各自独立的超时上限。
-- **融合结果缓存。** 一份答案默认可复用五分钟，键由查询、结果上限与产出它的
-  引擎集合构成——是集合而非顺序，因为顺序属于路由而非问题本身。模型收窄问题时
-  重复提问很常见，而免注册额度按 IP 计量，这能把第二次提问变成一次磁盘读取。
-  `aggregate.cacheTtlMs: 0` 关闭缓存。
 - **配额冷却。** 额度耗尽的引擎自动退到链尾并记下恢复时间，月度额度（Tavily 的
   432/433）按二十四小时算，其余按四十五分钟算。冷却中的引擎不参与融合，并在
   `uncertainty` 里写明"未参与"而非"失败"。
-- **`modsearch doctor`。** 不花额度、不发网络请求地诊断本机配置：Node 版本、
+- **`searchfuse doctor`。** 不花额度、不发网络请求地诊断本机配置：Node 版本、
   引擎选择与其来源、配置文件权限、每个角色的候选引擎及其就绪原因、融合与 MCP
   两节的配置事实，缺什么附一条可直接复制的修复命令。
 - **dsh 设置卡片。** 网页端没有终端，所以卡片提供首选引擎、密钥与端点、引擎
@@ -72,16 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **arXiv 与 Antigravity CLI 默认不激活。** arXiv 按任意词命中检索，语义太宽：
-  查询 `electron main process` 会返回铜氧化物里的激子-极化激元论文，`react hooks
-  tutorial` 会返回关于 cure model 与 hook length 的论文。融合按名次排序而不看
-  语义，于是一条无关的 arXiv 头名可能压过两个其他引擎都认可的页面。两者都仍出现
-  在设置卡片上，一键即可打开，`doctor` 也照常报告它们是否可用。
+- **Antigravity CLI 默认不激活。** 它靠模型合成并引用答案，动辄一分钟以上，
+  超过任何有用的融合预算，留在链里也只能被跳过。它仍出现在设置卡片上，一键即可
+  打开，`doctor` 也照常报告它是否可用。想要它就写
+  `engines.antigravity-cli.enabled: true`。
 - **代理遵循 `no_proxy`。** 引擎 API 调用与单页抓取走同一套代理规则，不再出现
   "抓网页能通、搜索全失败"的分裂状态。失败的调用会点名原因（`ECONNREFUSED`、
   `EAI_AGAIN`），而不是一句光秃秃的 `fetch failed`。
-- **权限收紧。** 配置文件与缓存以 `0600` 写入，目录以 `0700` 创建，采用同目录
-  临时文件加原子重命名，避免写到一半的 JSON 变成下一次启动的故障源。
+- **权限收紧。** 配置文件以 `0600` 写入，目录以 `0700` 创建，采用同目录临时
+  文件加原子重命名，避免写到一半的 JSON 变成下一次启动的故障源。
 
 ### Removed
 
@@ -126,5 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **密钥从不进入模型可读的输出。** `config show`、`doctor` 与卡片一律打码，只报告
   密钥来自环境变量还是配置文件。
 
-[Unreleased]: https://github.com/liustack/modsearch/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/liustack/modsearch/releases/tag/v0.1.0
+### Compatibility
+
+- **cordis 4.2 兼容**：`engines.dsh` 补上 `<0.3.0-0` 上界（DSH 0.2.3 系列
+  随包带入 cordis 4.2.0-alpha.1 与 schemastery 3.20.0-alpha.1，实测引擎闸门
+  与 bundle 组合均无回归）。
+
+[Unreleased]: https://github.com/Wenaixi/searchfuse/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Wenaixi/searchfuse/releases/tag/v0.1.0
