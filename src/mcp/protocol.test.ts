@@ -325,8 +325,20 @@ describe('McpConnection', () => {
       const connection = new McpConnection(config(server.url), { timeoutMs: 5_000 });
       const started = Date.now();
       const call = connection.callTool('slowTool', { query: 'x' }, controller.signal);
-      setTimeout(() => controller.abort(), 50);
+      // 中止要等 `tools/call` 真的到达服务端之后再发。写成固定的 50ms 是在赌
+      // 「握手 + 发请求一定能在 50ms 内完成」：机器一忙，握手还没走完就被中止，
+      // 请求从未发出，`toolCalls` 就是 0，而实现完全正确。
+      const abortWhenInFlight = (async () => {
+        while (toolCalls === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          if (Date.now() - started > 3_000) {
+            throw new Error('the tool call never reached the server within 3s');
+          }
+        }
+        controller.abort();
+      })();
       await expect(call).rejects.toThrow(/abort|cancel/i);
+      await abortWhenInFlight;
       expect(Date.now() - started).toBeLessThan(2_000);
       // 请求确实发出去了：这不是「进门就被拦下」，而是飞行途中被掐断的。
       expect(toolCalls).toBe(1);
