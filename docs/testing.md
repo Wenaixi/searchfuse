@@ -22,7 +22,7 @@ pnpm typecheck                              # tsc --noEmit，跑测试前先跑�
 
 ## 约定
 
-- 单元测试里不碰网络。HTTP 引擎（Tavily、Exa、Firecrawl、Keenable、You.com）靠打桩全局 `fetch` 来验，页面抓取跑在 `startLocalPage` 起的回环服务端上，`agy` 与 `grok` 两个子进程引擎换成回放固定信封的假 CLI。
+- 单元测试里不碰网络。HTTP 引擎（Tavily、Exa、Firecrawl、Keenable、AnySearch、You.com）靠打桩全局 `fetch` 来验，页面抓取跑在 `startLocalPage` 起的回环服务端上，`agy` 与 `grok` 两个子进程引擎换成回放固定信封的假 CLI。SearXNG 走随包实例，它的测试不真的起服务端。
 - 要伪造家目录或 PATH（grok 可用性检查用得上），用 `src/testing/helpers.ts` 里的 `withTempHome` 与 `envWithBinaries`。它们会还原自己动过的东西。`withTempHome` 同时重定向 `HOME` 和 `USERPROFILE`，因为 `os.homedir()` 在 POSIX 上认 `HOME`、在 Windows 上认 `USERPROFILE`。
 - 走子进程传输的引擎把 `buildInvocation` 与 `parseOutput` 当纯函数测，这在任何平台上都能跑。端到端的路由与回退测试要通过 `runSearch` 拉起一个假 CLI，而假 CLI 是 POSIX shell 脚本，所以那些套件挂在 `SPAWNS_FAKE_CLI` 上、在 Windows 上跳过。
 
@@ -81,7 +81,7 @@ expect(codeMeansAlive(err)).toBe(true);
 
 起两个真实 `serve --ensure` 数存活进程，看起来是最像真事的验证。实测：破坏锁实现后它**照样绿**——两个进程启动有先后，第二个读到已经写出的 `runtime.json` 就走「Already running」早退，把竞态盖住了。而且它要跑 20 秒，还容易在测试被强杀时泄漏进程和锁。
 
-结论：能稳定自动化的只有纯函数判据。锁的其余行为（`wx` 排他、陈旧回收、立即释放）靠代码审查与项目 `CLAUDE.md` 的事故记录兜底，这是有意识的取舍，不是漏测。
+结论：能稳定自动化的只有纯函数判据。锁的其余行为（`linkSync` 的内核原子性、陈旧回收、立即释放）靠代码审查与项目 `CLAUDE.md` 的事故记录兜底，这是有意识的取舍，不是漏测。注意那三种行为里，能真跑并发验的只有 `isAlive` 的 EPERM 判据（`src/serveEnsure.test.ts` 里那条直接测生产函数）；`linkSync` 本身的原子性虽然做过 8 进程实测（`openSync('wx')` 版 8/8 全部误报持锁，`linkSync` 版恰好 1 个成功、7 个 EEXIST），但那是一次性的人工验证，没有进测试套件。
 
 ## 热重载
 
