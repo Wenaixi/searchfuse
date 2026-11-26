@@ -1,14 +1,14 @@
-# modsearch skill launcher (Windows, PowerShell 5.1 compatible).
+# searchfuse skill launcher (Windows, PowerShell 5.1 compatible).
 #
 # The Windows twin of run.sh: identical resolution order, identical diagnostic
 # fields, identical exit codes. One stable action for the agent ("run
-# modsearch"); this script picks a working way to run it here.
+# searchfuse"); this script picks a working way to run it here.
 #
 # Invoke it per-process so no global policy is touched:
 #   powershell -ExecutionPolicy Bypass -File run.ps1 -q "test"
 #
 # Resolution order (kept identical in run.sh):
-#   1. A compatible modsearch already on PATH  -> run it directly.
+#   1. A compatible searchfuse already on PATH -> run it directly.
 #   2. npx present                             -> run the pinned npm version.
 #   3. bunx present                            -> run the pinned version via Bun.
 #   4. (phase B placeholder) a native artifact -> not published yet.
@@ -22,8 +22,8 @@ $ErrorActionPreference = 'Stop'
 # --- Version constants: stamped by scripts/release.mjs at release time. --------
 # Do not edit $Pinned by hand; scripts/stamp.test.mjs asserts it equals the
 # package.json version, and the release script rewrites it on every bump.
-$Package = '@liustack/modsearch'
-$Bin = 'modsearch'
+$Package = '@wenaixi/searchfuse'
+$Bin = 'searchfuse'
 $Pinned = '0.1.0'
 # -------------------------------------------------------------------------------
 

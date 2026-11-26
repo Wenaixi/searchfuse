@@ -72,11 +72,11 @@ Three jobs, each with its own engines:
 
 | Role | Engines (best first) | Notes |
 | :-- | :-- | :-- |
-| search the web | `firecrawl`, `keenable`, `youcom`, `antigravity-cli`, `tavily`, `exa` | Firecrawl works keyless with no signup (1,000 free credits/month), and so do Keenable (1,000 requests/hour, shared per IP) and You.com (100 searches/day, shared per IP). agy is free with a browser sign-in. Tavily, Exa, and a free Firecrawl or Keenable key add personal quotas. |
+| search the web | `firecrawl`, `keenable`, `anysearch`, `youcom`, `searxng`, `antigravity-cli`, `tavily`, `exa` | Firecrawl works keyless with no signup (1,000 free credits/month), and so do Keenable (1,000 requests/hour, shared per IP), AnySearch (anonymous quota, rate-limited), and You.com (100 searches/day, shared per IP). SearXNG uses a bundled instance by default, no key needed. agy is free with a browser sign-in but off unless enabled. Tavily, Exa, and a free Firecrawl or Keenable key add personal quotas. |
 | fetch a page | `firecrawl`, `antigravity-cli`, `local` | Firecrawl runs a cloud browser, keyless by default (`firecrawl.keylessFetch false` opts out). `local` needs nothing and is the default floor. |
 | search X | `grok-cli` | Needs Grok Build with SuperGrok or X Premium. |
 
-searchfuse picks per role from what is installed and falls through on failure, so do not probe first: run the command and read `results[].engine` to see who answered.
+searchfuse picks per role from what is installed and falls through on failure, so do not probe first: run the command and read `results[].engine` to see who answered. By default it runs in fusion mode: several engines answer at once and their ranked lists are merged, so `engine` is a comma-separated list and each item carries `foundIn`.
 
 - Page fetch has the built-in `local` engine as its zero-setup floor unless the user explicitly disabled it with `local.enabled false`, or forced a different engine with `-e`. It returns the page as served, with no summary and no focus narrowing, so pick out the relevant parts yourself. Very little text back means the page is JavaScript-rendered, which that engine does not run: it says so in `uncertainty`, so say the same rather than claiming the page is empty.
 - An X question answered by a web engine means Grok Build is not set up. That entry reads `status: "degraded"`, `requestedSource: "x"`, `source: "web"`, with the reason in `warnings`. Relay that caveat instead of presenting it as X coverage. On a `--source web,x` run where X is unreachable, the X slot comes back as a separate entry with `status: "unavailable"` and empty `items`, so the gap is explicit: report that X could not be reached rather than treating the web entry as if it covered X.
@@ -102,13 +102,13 @@ searchfuse picks per role from what is installed and falls through on failure, s
     {
       "source": "web",
       "requestedSource": "web",
-      "engine": "antigravity-cli",
+      "engine": "firecrawl,keenable,anysearch,youcom,searxng",
       "status": "ok",
-      "summary": "synthesis of the findings",
-      "items": [{ "title": "...", "url": "...", "snippet": "...", "source": "example.com" }],
-      "uncertainty": ["gaps, conflicts, staleness"],
+      "summary": "Fused 12 result(s) from 5 engine(s) ... Read items for the sources.",
+      "items": [{ "title": "...", "url": "...", "snippet": "...", "source": "example.com", "foundIn": ["firecrawl", "keenable"] }],
+      "uncertainty": ["gaps, conflicts, staleness", "keenable: 处于冷却期，本次未参与"],
       "warnings": ["how the answer was routed: fallbacks, degrades, config typos"],
-      "attempts": [{ "engine": "antigravity-cli", "ok": true, "durationSeconds": 5.5 }],
+      "attempts": [],
       "durationSeconds": 5.5
     }
   ],
@@ -116,7 +116,9 @@ searchfuse picks per role from what is installed and falls through on failure, s
 }
 ```
 
-`results` is always an array, even for a single source, so the shape never changes. `source` is the corpus the evidence actually came from, `requestedSource` is what was asked for, `engine` names who answered, and `status` is `ok`, `degraded`, or `unavailable`. Read `status` before trusting a `source`: a `degraded` entry means a web engine stood in for X, so its `source` is `web` even though `requestedSource` is `x`. `uncertainty` is the engine's doubt about the facts, `warnings` is routing and runtime notices (see step 4), and `attempts` records each engine tried and whether it worked.
+`results` is always an array, even for a single source, so the shape never changes. `source` is the corpus the evidence actually came from, `requestedSource` is what was asked for, `engine` names who answered, and `status` is `ok`, `degraded`, or `unavailable`. Read `status` before trusting a source: a `degraded` entry means a web engine stood in for X, so its `source` is `web` even though `requestedSource` is `x`. `uncertainty` is the engine's doubt about the facts, `warnings` is routing and runtime notices (see step 4), and `attempts` records each engine tried and whether it worked.
+
+**Fusion is the default shape.** `engine` is a comma-separated list, `attempts` is always empty (failures and skips go into `uncertainty`, worded as "did not take part" rather than "failed"), and each item carries `foundIn` and a fusion `score`. Chain mode (`-e <engine>` or `aggregate.mode chain`) is the other shape: a single `engine` name, a populated `attempts`, no `foundIn`.
 
 Fetch mode replaces `items` with `content` (the page as text or markdown) and `links` (useful outbound links). Full schema: `references/output-schema.md`.
 
@@ -124,7 +126,7 @@ Fetch mode replaces `items` with `content` (the page as text or markdown) and `l
 
 Every error this CLI prints names its cause, and most already name the fix, so read the message first. When setup is the suspect, run `searchfuse doctor` (spends no quota): it reports each engine's readiness per role and the config in effect, with a fix command for anything missing. `--json` gives a machine-readable report.
 
-- `Every engine for the web source failed`: read the attempt list. A bare install includes keyless Firecrawl, Keenable, and You.com, so this means runtime failures such as no network, timeout, or exhausted limits rather than missing setup.
+- `Every engine for the web source failed`: read the attempt list. A bare install includes keyless Firecrawl, Keenable, AnySearch, You.com, and the bundled SearXNG, so this means runtime failures such as no network, timeout, or exhausted limits rather than missing setup.
 - `Every engine for the <source> source failed`: each engine's failure is listed, and `attempts` in a returned entry carries the same per-engine errors. Act on the first fixable one.
 - Quota exhausted (agy weekly quota, or `exa`/`firecrawl`/`keenable` out of credits, or Keenable's hourly or You.com's daily keyless allowance used up): not fatal when another search engine is set up, since search falls through on its own and cooldown moves the spent engine to the back. Otherwise relay the reset time from the message.
 - Timeouts: retry once with `--timeout 300000`. If it still fails, report the exact error instead of answering from stale memory.

@@ -1,13 +1,13 @@
 #!/bin/sh
-# modsearch skill launcher (macOS / Linux).
+# searchfuse skill launcher (macOS / Linux).
 #
-# One stable action for the agent ("run modsearch"); this script picks a working
+# One stable action for the agent ("run searchfuse"); this script picks a working
 # way to run it in the current environment. Written to POSIX sh so it runs under
 # dash, busybox ash, and bash alike. Invoke it with `bash run.sh ...` (or plain
 # `sh run.sh ...`) so a lost execute bit after a file copy never matters.
 #
 # Resolution order (kept identical in run.ps1):
-#   1. A compatible modsearch already on PATH  -> run it directly.
+#   1. A compatible searchfuse already on PATH -> run it directly.
 #   2. npx present                             -> run the pinned npm version.
 #   3. bunx present                            -> run the pinned version via Bun.
 #   4. (phase B placeholder) a native artifact -> not published yet.
@@ -20,8 +20,8 @@ set -eu
 # --- Version constants: stamped by scripts/release.mjs at release time. --------
 # Do not edit PINNED by hand; scripts/stamp.test.mjs asserts it equals the
 # package.json version, and the release script rewrites it on every bump.
-PKG="@liustack/modsearch"
-BIN="modsearch"
+PKG="@wenaixi/searchfuse"
+BIN="searchfuse"
 PINNED="0.1.0"
 # -------------------------------------------------------------------------------
 

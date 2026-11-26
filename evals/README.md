@@ -1,6 +1,6 @@
-# ModSearch evals (v1)
+# SearchFuse evals (v1)
 
-A small, honest harness for checking that modsearch behaves against the real
+A small, honest harness for checking that searchfuse behaves against the real
 world, not just against mocks. Unit tests stay offline and prove the routing and
 parsing logic. These evals run the built CLI end to end, so they exercise the
 actual engines, the network, and the SSRF guard, and they leave behind an
@@ -14,7 +14,7 @@ pnpm build   # evals run the built dist/main.js
 pnpm eval
 ```
 
-The runner reads `modsearch doctor --json` first and skips any case whose engine
+The runner reads `searchfuse doctor --json` first and skips any case whose engine
 is not set up here. The SSRF case needs nothing and always runs.
 
 ## Layout

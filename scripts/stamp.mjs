@@ -18,6 +18,11 @@ export function readPackageVersion(root = repoRoot) {
   return readPackage(root).version;
 }
 
+/** The full scoped package name, from package.json. */
+export function readPackageName(root = repoRoot) {
+  return readPackage(root).name;
+}
+
 /** The skill directory name, derived from the scoped package name. */
 export function skillName(root = repoRoot) {
   return readPackage(root).name.split('/').pop();

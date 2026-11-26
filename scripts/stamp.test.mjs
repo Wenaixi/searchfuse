@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   dshInstallTargets,
+  readPackageName,
   readPackageVersion,
   readStampedVersions,
+  repoRoot,
+  skillName,
   stampTargets,
 } from './stamp.mjs';
 
@@ -41,5 +46,25 @@ describe('launcher version stamping', () => {
       expect(restamped).toBe(target.format('9.9.9'));
       expect(restamped).not.toBe(original);
     }
+  });
+});
+
+describe('launcher package and command names', () => {
+  // 版本盖章只覆盖 PINNED / $Pinned 这两个常量，包名和命令名一直是手写的。
+  // 项目从 modsearch 改名 searchfuse 时，两个启动器里的 @liustack/modsearch
+  // 与 modsearch 就漏了：版本测试全绿，而 skill 一装好就会去拉一个不存在的
+  // 旧包。这条测试钉住启动器的名字必须与 package.json 一致。
+  const read = (file) => readFileSync(join(repoRoot, 'skills', skillName(), 'scripts', file), 'utf-8');
+
+  it('run.sh 的 PKG 与 BIN 跟 package.json 一致', () => {
+    const sh = read('run.sh');
+    expect(sh.match(/^PKG="([^"]*)"$/m)?.[1]).toBe(readPackageName());
+    expect(sh.match(/^BIN="([^"]*)"$/m)?.[1]).toBe(skillName());
+  });
+
+  it('run.ps1 的 $Package 与 $Bin 跟 package.json 一致', () => {
+    const ps1 = read('run.ps1');
+    expect(ps1.match(/^\$Package = '([^']*)'$/m)?.[1]).toBe(readPackageName());
+    expect(ps1.match(/^\$Bin = '([^']*)'$/m)?.[1]).toBe(skillName());
   });
 });
