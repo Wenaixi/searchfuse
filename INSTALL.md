@@ -175,9 +175,11 @@ searchfuse does three jobs, and none of them blocks on setup:
 - **Web search and page fetch (`-q`, `-u`) work as installed.** The default
   engine is Firecrawl's keyless tier: 1,000 free credits/month, no account, no
   key. Keenable's keyless search (1,000 requests/hour per IP, no signup) backs
-  it up, and so does You.com's keyless search (100 searches/day per IP, no
-  signup). A dependency-free local fetcher backs page fetch as the floor. If the
-  user wants nothing more, skip to Step 4.
+  it up, then AnySearch's anonymous tier (rate-limited per IP, a free key lifts
+  it), then You.com's keyless search (100 searches/day per IP, no signup), and
+  the bundled SearXNG instance needs no key at all. A dependency-free local
+  fetcher backs page fetch as the floor. If the user wants nothing more, skip to
+  Step 4.
 - **X (Twitter) search needs Grok Build** (SuperGrok or X Premium), installed and
   signed in. Set it up only if the user wants X. It needs no key beyond that login.
 - **More engines mean more quota and better failover.** Add them below when the
@@ -226,10 +228,11 @@ steps, each safe to re-run.
    agy   # opens the browser for the user's one-time sign-in, then they exit
    ```
 
-If a browser sign-in is not possible, the keyless Firecrawl, Keenable, and You.com defaults
-already keep the CLI fully usable. Add a key only when the user wants a personal
+If a browser sign-in is not possible, the keyless Firecrawl, Keenable, AnySearch, You.com, and
+bundled SearXNG defaults already keep the CLI fully usable. Add a key only when the user wants a personal
 quota on top. Tavily, Exa, and Firecrawl have a free tier and need no card. A free
-Keenable key (from https://app.keenable.ai) gives 100,000 requests a month. Run settings through
+Keenable key (from https://app.keenable.ai) gives 100,000 requests a month. A free
+AnySearch key (from https://anysearch.com) lifts its anonymous rate limit. Run settings through
 the launcher (replace the path with your TARGET from Step 1), so they work even on
 a host without npx:
 
@@ -243,6 +246,7 @@ bash ~/.claude/skills/searchfuse/scripts/run.sh config set tavily.apiKey <key>  
 bash ~/.claude/skills/searchfuse/scripts/run.sh config set exa.apiKey <key>          # $10/month credit, ~1,400 searches
 bash ~/.claude/skills/searchfuse/scripts/run.sh config set firecrawl.apiKey <key>    # personal 1,000 credits/month on top of the keyless quota
 bash ~/.claude/skills/searchfuse/scripts/run.sh config set keenable.apiKey <key>     # 100,000 requests/month, no hourly cap
+bash ~/.claude/skills/searchfuse/scripts/run.sh config set anysearch.apiKey <key>    # lifts the anonymous per-IP rate limit
 ```
 
 **If it fails:**
@@ -255,7 +259,7 @@ bash ~/.claude/skills/searchfuse/scripts/run.sh config set keenable.apiKey <key>
 > **Windows:** the `curl | bash` installer is for macOS and Linux. On Windows,
 > agy and grok are usable only if the tool ships a native Windows build on PATH
 > (see "Platform support" in the README). The HTTP engines (Tavily, Exa, Firecrawl,
-> Keenable, You.com) work the same on Windows.
+> Keenable, AnySearch, You.com, SearXNG) work the same on Windows.
 
 ---
 
@@ -279,19 +283,33 @@ Node
   version: 22.13.0
   status:  OK
 
+Aggregate
+  mode:     rrf (concurrent fanout, fused)
+  deadline: 8000 ms (whole run)
+  - tavily           FUSED    参与融合
+  - firecrawl        FUSED    参与融合
+  - keenable         FUSED    参与融合
+  - anysearch        FUSED    参与融合
+  - youcom           FUSED    参与融合
+  - searxng          FUSED    参与融合
+
 search (search the web)
   resolved: firecrawl
-  - firecrawl         READY    keyless: works with no key and no signup ...
-  - keenable          READY    keyless: works with no key and no signup (1,000 requests/hour, ...)
-  - youcom            READY    keyless: works with no key and no signup (100 searches/day, ...)
+  - firecrawl        READY    keyless: works with no key and no signup (Firecrawl grants 1,000 free credits/month ...)
+  - keenable         READY    keyless: works with no key and no signup (1,000 requests/hour, shared by everyone on this IP) ...
+  - anysearch        READY    built in, needs nothing installed
+  - youcom           READY    keyless: works with no key and no signup (100 searches/day, shared by everyone on this IP).
+  - searxng          READY    built in, needs nothing installed
 
 fetch (fetch a page)
   resolved: firecrawl
-  - firecrawl         READY    keyless fetch (default): public pages are read by a cloud browser ...
-  - local             READY    built in, needs nothing installed
+  - firecrawl        READY    keyless fetch (default): public pages are read by a cloud browser ...
+  - local            READY    built in, needs nothing installed
 
 social (search X)
   resolved: (none available)
+  - grok-cli         not set  binary "grok" found; login file ...\auth.json missing
+      fix: curl -fsSL https://x.ai/cli/install.sh | bash && grok
 ```
 
 How to read it:
@@ -299,7 +317,7 @@ How to read it:
 - **`Node status: OK`** means the runtime meets the floor (22.13+). If it says
   `TOO OLD`, upgrade Node and stop here, because nothing else will work.
 - **`search resolved: <engine>`** means a web engine is ready. Keyless Firecrawl,
-  Keenable, and You.com make this true on a bare install. agy or a configured key resolves ahead of
+  Keenable, AnySearch, You.com, and the bundled SearXNG make this true on a bare install. agy or a configured key resolves ahead of
   it when present. If it reads `(none available)`, the installation is
   inconsistent: reinstall this exact release before adding credentials. Each
   not-ready engine prints a `fix:` line when setup can help.
