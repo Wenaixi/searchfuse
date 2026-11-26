@@ -54,8 +54,11 @@ jobs:
       - run: npm install -g npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+      # build 必须在 test 之前，与 ci.yml 同一个理由：dist/ 与 dsh/*.js 都是
+      # gitignore 的产物，checkout 之后不存在，而 dshClient.test.ts 直接读
+      # dsh/client.js、kernel.contract.test.ts 跑真实 dist/kernel.js 子进程。
       - run: pnpm build
+      - run: pnpm test
       # Idempotent: a manual publish (e.g. during a registry or Actions
       # incident) must not turn this run red when the tag arrives later.
       #
