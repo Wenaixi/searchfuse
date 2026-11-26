@@ -149,7 +149,7 @@ Follow the WeChat official account **liustack** (Chinese-language): AI tools, pr
   <img src="https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/wechat-qrcode.png" width="420" alt="WeChat official account liustack" />
 </p>
 
-⭐ If it helps, star [SearchFuse](https://github.com/Wenaixi/searchfuse). Stars are how the next developer finds it.
+If it helps, star [SearchFuse](https://github.com/Wenaixi/searchfuse). Stars are how the next developer finds it.
 
 ## Star History
 

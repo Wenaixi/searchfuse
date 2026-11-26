@@ -142,10 +142,10 @@ mod 通过 `$.settings.read({ key: 'searchfuseHosts' })` 读回来。
 
 | 宿主 | 能 spawn | 启动责任 |
 |---|---|---|
-| dsh | ✅ Node 进程 | 启动时 `serve --ensure` |
-| omp 扩展 | ✅ Node 进程 | `session_start` 时 `serve --ensure` |
-| CLI | ✅ | `hosts sync` 末尾拉起 |
-| Claude Code | ✅ `$.process.run` | 不主动起（只当客户端，失败回退原生） |
+| dsh | 是，Node 进程 | 启动时 `serve --ensure` |
+| omp 扩展 | 是，Node 进程 | `session_start` 时 `serve --ensure` |
+| CLI | 是 | `hosts sync` 末尾拉起 |
+| Claude Code | 是，`$.process.run` | 不主动起（只当客户端，失败回退原生） |
 
 `--ensure` 幂等：已在跑就 exit 0，不会重复起。
 

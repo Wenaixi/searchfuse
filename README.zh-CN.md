@@ -149,7 +149,7 @@ Clash、Clash Verge Rev、mihomo、Surge 的代理 fake-ip 模式开箱即用：
   <img src="https://raw.githubusercontent.com/Wenaixi/searchfuse/main/assets/wechat-qrcode.png" width="420" alt="微信公众号 liustack" />
 </p>
 
-⭐ 如果它对你有用，请给 [SearchFuse](https://github.com/Wenaixi/searchfuse) 一个 star，这是其他开发者找到它的方式。
+如果它对你有用，请给 [SearchFuse](https://github.com/Wenaixi/searchfuse) 一个 star，这是其他开发者找到它的方式。
 
 ## Star History
 

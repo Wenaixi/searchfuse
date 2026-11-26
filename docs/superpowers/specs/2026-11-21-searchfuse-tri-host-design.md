@@ -90,9 +90,9 @@ v2 经第二轮 Architect 复审裁决 **CONDITIONAL**；v3 经第三轮 Critic 
 
 | 宿主 | 形态 | 版本 | 接入方式 | 是否有独立执行路径 |
 |---|---|---|---|---|
-| dsh | Cordis 插件 | 0.2.2-rc.3 | `ctx.web.registerSearchProvider` → 子进程调 `dist/kernel.js` | ✓ 不需要服务 |
-| Claude Code | Mod（插件） | 2.1.329 | `hooks/register.ts` 拦截 `tool.call` → 子进程调 `dist/kernel.js` | ✓ 不需要服务 |
-| omp | 原生 SearXNG provider | 19.0.1 | `searxng.endpoint` + 路由键 → 本地 HTTP 服务 | ✗ **只有这一条路** |
+| dsh | Cordis 插件 | 0.2.2-rc.3 | `ctx.web.registerSearchProvider` → 子进程调 `dist/kernel.js` | 有，不需要服务 |
+| Claude Code | Mod（插件） | 2.1.329 | `hooks/register.ts` 拦截 `tool.call` → 子进程调 `dist/kernel.js` | 有，不需要服务 |
+| omp | 原生 SearXNG provider | 19.0.1 | `searxng.endpoint` + 路由键 → 本地 HTTP 服务 | 无，**只有这一条路** |
 
 **非目标**：omp 自定义搜索 provider（宿主不支持，已证）、Claude Code 工具名去掉 `mcp__searchfuse__` 前缀（宿主强制）、为三家一致而降低主协议信息量。
 
@@ -100,11 +100,11 @@ v2 经第二轮 Architect 复审裁决 **CONDITIONAL**；v3 经第三轮 Critic 
 
 | 维度 | A：每宿主一份实现 | B1：服务服务三家 | **B1′：服务只服务 omp（选定）** | B2：寄宿在 dsh |
 |---|---|---|---|---|
-| 一份代码 | ✗ 三份漂移 | ✓ | ✓ | ✓ |
-| 额外进程 | ✗ 无 | ✓ 恒常驻 | ✓ 只为 omp 起 | ✓ 无（寄生 dsh） |
-| omp 可用性 | ✓ 独立 | ✓ 独立 | ✓ 独立 | ✗ 绑死 dsh |
-| dsh/Claude 有无单点 | ✓ 无 | ✗ **都依赖服务** | ✓ **无** | ✗ |
-| 缓存共享 | ✗ | ✓ 服务内 | ✓ 磁盘缓存（已存在） | ✓ |
+| 一份代码 | 否，三份漂移 | 是 | 是 | 是 |
+| 额外进程 | 无 | 有，恒常驻 | 有，只为 omp 起 | 无（寄生 dsh） |
+| omp 可用性 | 是，独立 | 是，独立 | 是，独立 | 否，绑死 dsh |
+| dsh/Claude 有无单点 | 有，无单点 | 有，**都依赖服务** | 有，**无单点** | 无 |
+| 缓存共享 | 无 | 有，服务内 | 有，磁盘缓存（已存在） | 有 |
 | 鉴权面 | 无 | 三家 | **仅 omp 一个消费者** | 三家 |
 
 **为什么排除 A**：已在 `claude/engine/` 上产生 22 文件 1996 行的分叉（9 个逐字节相同、10 个已分叉、3 个独有）。
@@ -579,9 +579,9 @@ v1 的验收可被 40 行桩骗过，v2 的 S4 经实测也无效——`claude p
 
 **已实测（Windows）**：
 
-1. ✅ `fs.renameSync(tmp, existing)` **成功覆盖**，内容为新值——原子写方案无需平台分支
-2. ✅ `spawn(process.execPath, [脚本, '--query', 'hello'])` 完整可用：exit 0、参数正确传递、stdout 可读
-3. ⬜ macOS 的 `0o600` 生效情况尚未实测（POSIX 语义与 Linux 一致，风险低）
+1. 已验证：`fs.renameSync(tmp, existing)` **成功覆盖**，内容为新值——原子写方案无需平台分支
+2. 已验证：`spawn(process.execPath, [脚本, '--query', 'hello'])` 完整可用：exit 0、参数正确传递、stdout 可读
+3. 未验证：macOS 的 `0o600` 生效情况尚未实测（POSIX 语义与 Linux 一致，风险低）
 
 **实测得到的平台差异只有一处需要代码分支**：`0o600` 在 Windows 静默无效（`stat` 仍 `666`）。其余（`execPath`、`rename`、路径拼接、换行）三平台行为一致，因此**不为它们写 `if (platform === 'win32')` ——那才是真正的过度工程**。
 
