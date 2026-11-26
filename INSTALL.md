@@ -280,7 +280,7 @@ like this (trimmed):
 
 ```
 Node
-  version: 22.13.0
+  version: 22.19.0
   status:  OK
 
 Aggregate
@@ -314,7 +314,7 @@ social (search X)
 
 How to read it:
 
-- **`Node status: OK`** means the runtime meets the floor (22.13+). If it says
+- **`Node status: OK`** means the runtime meets the floor (22.19+). If it says
   `TOO OLD`, upgrade Node and stop here, because nothing else will work.
 - **`search resolved: <engine>`** means a web engine is ready. Keyless Firecrawl,
   Keenable, AnySearch, You.com, and the bundled SearXNG make this true on a bare install. agy or a configured key resolves ahead of
@@ -339,7 +339,7 @@ who answered and an `items` list with `url`s. That is a working install.
 - The launcher printed a JSON diagnosis and exited 78 -> no runtime could run
   searchfuse: no compatible `searchfuse` on PATH, no `npx`, and no `bunx`. Read the
   `nextSteps` field in that JSON and relay it. The manual path in phase A is to
-  install Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh), then re-run
+  install Node 22.19+ (https://nodejs.org) or Bun (https://bun.sh), then re-run
   this step, since no native artifact is published yet. Do not report searchfuse
   as broken.
 - `Every engine for the web source failed` -> the engines themselves errored at

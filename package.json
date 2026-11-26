@@ -62,7 +62,7 @@
   },
   "homepage": "https://github.com/Wenaixi/searchfuse#readme",
   "engines": {
-    "node": ">=22.13",
+    "node": ">=22.19",
     "dsh": ">=0.2.2-rc.1 <0.3.0-0"
   },
   "exports": {

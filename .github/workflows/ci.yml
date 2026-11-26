@@ -59,8 +59,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+      # build 必须在 test 之前：dist/ 与 dsh/*.js 都是 gitignore 的构建产物，
+      # 而 kernel.contract.test.ts 跑的是真实的 dist/kernel.js 子进程，
+      # dshPlugin.test.ts 直接读 dsh/index.js 与 dsh/client.js。
+      # 顺序反过来的话 checkout 之后这些文件根本不存在，测试会报 ENOENT。
       - run: pnpm build
+      - run: pnpm test
 
   audit:
     # 依赖审计单独一个 job：它只需要一个 runner，而且失败信息与测试失败是

@@ -15,7 +15,7 @@ skill 如何启动 `searchfuse` CLI、钉在哪个版本、在什么都跑不了
 每次调用按这个顺序找一条能跑 CLI 的路：
 
 1. **`PATH` 上已有兼容的 `searchfuse`**，按名字直接跑。
-2. **有 `npx`，且 `node` 满足 CLI 的 22.13 下限**，跑 `npx --yes --package @wenaixi/searchfuse@<钉住版本> searchfuse <args>`。骑在老 node 上的 npx 会被跳过：那条路已知会在运行时失败。
+2. **有 `npx`，且 `node` 满足 CLI 的 22.19 下限**，跑 `npx --yes --package @wenaixi/searchfuse@<钉住版本> searchfuse <args>`。骑在老 node 上的 npx 会被跳过：那条路已知会在运行时失败。
 3. **有 `bunx`**，跑 `bunx --bun @wenaixi/searchfuse@<钉住版本> <args>`。
 4. **原生产物**，留给 B 阶段。目前没有发布任何产物，这个分支报告 `nativeArtifact.available: false` 后继续往下走。
 5. **什么都没有**，打印结构化诊断并以 `78`（`EX_CONFIG`）退出。
@@ -43,12 +43,12 @@ A 阶段不发原生产物。`npx` 和 `bunx` 路径首次使用时拉取钉住�
 - `tool`、`package`、`pinnedVersion`：这份 skill 的目标。
 - `os`、`arch`：归一化的主机标识（`darwin` / `linux` / `windows`，`arm64` / `x64`）。
 - `checked.pathCli`：`PATH` 上 `searchfuse` 的 `{ present, path, version, compatible }`，`compatible` 按上面的规则判定。
-- `checked.npx`：`{ present, path, nodeMeetsFloor }`，`nodeMeetsFloor` 是本机 node 是否满足 CLI 的 22.13 下限，npx 路径的前提。
+- `checked.npx`：`{ present, path, nodeMeetsFloor }`，`nodeMeetsFloor` 是本机 node 是否满足 CLI 的 22.19 下限，npx 路径的前提。
 - `checked.bunx`：`{ present, path }`。
 - `checked.node`：`{ present, version }`。
 - `nativeArtifact`：`{ available, note }`，A 阶段 `available` 为 `false`。
 - `selected`：选定的路：`path`、`npx`、`bunx` 或 `none`。
-- `nextSteps`：`selected` 为 `none` 时，给用户的一到两条直白建议（装 Node 22.13+ 或 Bun）。其余情况为空。
+- `nextSteps`：`selected` 为 `none` 时，给用户的一到两条直白建议（装 Node 22.19+ 或 Bun）。其余情况为空。
 - `cliDoctor`：CLI 可用时，把 CLI 自己的 `doctor --json` 报告（引擎与配置诊断）嵌在这里，否则为 `null`。
 
 `doctor` 不花额度。启动器自己的诊断是离线的：只检查本地环境，不发任何网络请求。经 npx 或 bunx 转接 CLI 的 `doctor` 时，首次可能会下载钉住的包（这两个运行器就是这样工作的），之后走本地缓存。

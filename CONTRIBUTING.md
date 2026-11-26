@@ -24,7 +24,7 @@ pnpm build       # vite lib build to dist/
 pnpm lint        # Biome
 ```
 
-Requires Node 22.13+. CI runs the full gate on Linux (Node 22, 24, 26) and Windows (Node 22, 26). Platform-specific test suites are gated in code (see docs/testing.md).
+Requires Node 22.19+. CI runs the full gate on Linux (Node 22, 24, 26) and Windows (Node 22, 26). Platform-specific test suites are gated in code (see docs/testing.md).
 
 ## Tests never go online
 

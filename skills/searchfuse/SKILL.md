@@ -44,7 +44,7 @@ Some harnesses forbid running scripts. Reason through the same order by hand and
 1. A `searchfuse` on `PATH` whose major version is 0 and is at least 0.1.0: `searchfuse <args>`.
 2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.0 searchfuse <args>`.
 3. Otherwise, if `bunx` exists: `bunx --bun @wenaixi/searchfuse@0.1.0 <args>`.
-4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.13+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim searchfuse itself failed.
+4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.19+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim searchfuse itself failed.
 
 `references/runtime.md` documents the version pin, the compatibility rule, and the diagnostic fields.
 

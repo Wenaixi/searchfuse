@@ -38,7 +38,7 @@ import { commandOnPath } from './system.ts';
 import { splitApiKeys } from './util/apiKeys.ts';
 
 /** 这个构建承诺的 Node 版本下限。与 package.json 的 engines 字段保持一致。 */
-export const MIN_NODE = '22.13.0';
+export const MIN_NODE = '22.19.0';
 
 export interface EngineDiagnosis {
   engine: string;
