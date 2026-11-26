@@ -92,7 +92,10 @@ describe('dsh plugin bundle', () => {
     expect(pkg.exports?.['.']).toBe('./dsh/index.js');
     expect(pkg.exports?.['./dsh']).toBe('./dsh/index.js');
     expect(pkg.exports?.['./client']).toBe('./dsh/client.js');
-    expect(pkg.files).toContain('dsh');
+    // `files` 必须能把 dsh 目录下的编译产物带进包。写成 `dsh` 或
+    // `dsh/*.js` 都算数：后者把 TypeScript 源码留在仓库里，只发 .js。
+    // 这里断言的是「有覆盖 dsh 的条目」，不是某个具体写法。
+    expect((pkg.files ?? []).some((entry) => entry === 'dsh' || entry.startsWith('dsh/'))).toBe(true);
     expect(pkg.files).toContain('cordis.patch.yml');
     const patch = fs.readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf-8');
     expect(patch).toContain("name: '@wenaixi/searchfuse'");

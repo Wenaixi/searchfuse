@@ -31,8 +31,14 @@ afterEach(() => {
   vi.resetModules();
 });
 
+// 这个文件里凡是 `import('./main.ts')` 的用例都要放宽超时：那次导入要把
+// commander、全部 provider 与 MCP 客户端一起拉起来，低配机器上单是模块加载
+// 就能超过 vitest 默认的 5 秒。并行跑全量时 CPU 被别的文件抢走，超时最先在
+// 这里发生，而报出来的是 STACK_TRACE_ERROR，看不出根因。
+const SLOW_IMPORT = { timeout: 30_000 } as const;
+
 describe('CLI entry point', () => {
-  it('uses Node argv layout when Electron runs as Node', async () => {
+  it('uses Node argv layout when Electron runs as Node', SLOW_IMPORT, async () => {
     ({ restore: restoreHome } = withTempHome());
     process.env.ELECTRON_RUN_AS_NODE = '1';
     process.argv = [
@@ -60,7 +66,7 @@ describe('CLI entry point', () => {
     });
   });
 
-  it('refuses to run when spawned from inside an engine', async () => {
+  it('refuses to run when spawned from inside an engine', SLOW_IMPORT, async () => {
     process.env.MODSEARCH_NESTED = '1';
     process.argv = [process.execPath, '/package/dist/main.js', 'doctor', '--json'];
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -98,9 +104,12 @@ describe('search flags', () => {
     // The entry awaits the whole action at top level, pending kills included,
     // so the import is not awaited here: a test may be holding those kills.
     const loading = import('./main.ts');
-    await vi.waitFor(() => {
-      expect(runSearch.mock.calls.length + stderr.mock.calls.length).toBeGreaterThan(0);
-    });
+    await vi.waitFor(
+      () => {
+        expect(runSearch.mock.calls.length + stderr.mock.calls.length).toBeGreaterThan(0);
+      },
+      { timeout: 25_000 },
+    );
     return { runSearch, stderr, exit, waitForPendingKills, loading };
   }
 
@@ -111,7 +120,7 @@ describe('search flags', () => {
     process.exitCode = undefined;
   });
 
-  it('passes --deadline through as the run-wide budget', async () => {
+  it('passes --deadline through as the run-wide budget', SLOW_IMPORT, async () => {
     const { runSearch } = await runCli([
       '-q',
       'anything',
@@ -131,7 +140,7 @@ describe('search flags', () => {
     );
   });
 
-  it('lets the event loop drain after pending engine kills land', async () => {
+  it('lets the event loop drain after pending engine kills land', SLOW_IMPORT, async () => {
     // Exiting on the spot tore down fetch sockets mid-close, which aborts Node
     // on Windows (libuv async.c assertion, exit 0xC0000409) after a good
     // result was already written (#38). So the CLI sets its exit code and lets
@@ -154,12 +163,12 @@ describe('search flags', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
-  it('leaves the run uncapped without --deadline', async () => {
+  it('leaves the run uncapped without --deadline', SLOW_IMPORT, async () => {
     const { runSearch } = await runCli(['-q', 'anything']);
     expect(runSearch).toHaveBeenCalledWith(expect.objectContaining({ deadlineMs: undefined }));
   });
 
-  it('rejects a --deadline that is not a positive integer', async () => {
+  it('rejects a --deadline that is not a positive integer', SLOW_IMPORT, async () => {
     const { runSearch, stderr, loading } = await runCli(['-q', 'anything', '--deadline', '0']);
     await loading;
     expect(process.exitCode).toBe(1);

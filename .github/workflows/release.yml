@@ -1,20 +1,22 @@
 name: release
 
 # Publishes to npm and creates the GitHub release when a version tag is pushed
-# (e.g. v3.4.0). Verifies first, then publishes with provenance. This is the
-# single publisher: `pnpm release` only prepares and pushes the tag, it does not
-# publish, so there is no second process racing this one.
+# (e.g. v0.1.0). Verifies first, then publishes. This is the single publisher:
+# `pnpm release` only prepares and pushes the tag, it does not publish, so there
+# is no second process racing this one.
 #
-# PREREQUISITE (cannot be done from this repo): npm-side trusted publishing must
-# be enabled once, by hand, before this workflow can publish without a token.
-# On npmjs.com, open the @wenaixi/searchfuse package settings and add a Trusted
-# Publisher pointing at this repository and this workflow file (.github/workflows/
-# release.yml). With that in place, the id-token permission below lets npm mint a
-# short-lived OIDC credential, so no NPM_TOKEN secret is needed and --provenance
-# attaches a verifiable build attestation.
+# AUTHORIZATION, in the order it actually works:
+#   - First publish of a brand-new package CANNOT use OIDC trusted publishing:
+#     npm only lets you attach a Trusted Publisher to a package that already
+#     exists (`npm trust list` answers 403 for an unclaimed name). The bootstrap
+#     publish therefore authenticates with the NPM_TOKEN secret.
+#   - Once the package exists, run `npm trust github @wenaixi/searchfuse
+#     --file .github/workflows/release.yml --allow-publish` once. From then on
+#     OIDC works and the token can be deleted from the repo secrets.
 #
-# If you have not set up trusted publishing yet, add an NPM_TOKEN secret and set
-# `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` on the publish step instead.
+# The job tries OIDC first and falls back to the token, so neither setup has to
+# be torn down for the other: `--provenance` attaches a verifiable build
+# attestation whenever the run is authenticated by OIDC.
 
 on:
   push:
@@ -49,15 +51,30 @@ jobs:
       - run: pnpm build
       # Idempotent: a manual publish (e.g. during a registry or Actions
       # incident) must not turn this run red when the tag arrives later.
+      #
+      # OIDC 优先、token 兜底。npm 对已有 Trusted Publisher 的包才会给 OIDC
+      # 换发凭据；一个全新的包名只能靠 NODE_AUTH_TOKEN 引导第一次。先试 OIDC，
+      # 失败且确实有 secret 时再退回 token，这样配好 trust 之后不需要回来删代码。
       - name: Publish to npm (skipped when the version is already live)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').name")"
           if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
             echo "$PKG@$VERSION is already on the registry; skipping publish."
-          else
-            npm publish --provenance --access public
+            exit 0
           fi
+          echo "Publishing $PKG@$VERSION"
+          if npm publish --provenance --access public; then
+            exit 0
+          fi
+          echo "OIDC publish failed; retrying with the NPM_TOKEN secret (bootstrap path)." >&2
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "No NPM_TOKEN secret is configured, and trusted publishing is not set up for this package." >&2
+            exit 1
+          fi
+          npm publish --access public
       - name: Build release notes from CHANGELOG
         run: >
           node --input-type=module -e "

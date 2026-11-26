@@ -15,6 +15,14 @@ export default defineConfig({
       // Test scaffolding and the CLI entry are not unit-tested targets.
       exclude: ['**/*.test.*', 'src/testing/**', 'src/fixtures/**', 'src/main.ts'],
     },
+    // 这几类文件跑的是真实子进程、真实计时或模块级缓存，按 CPU 核数无上限并发
+    // 一起上会把彼此的计时顶过默认的 5 秒，报出来的是 STACK_TRACE_ERROR，
+    // 看不出根因。它们各自单独跑都是绿的。并发上限压到 CPU 的一半，让这类
+    // 文件有 CPU 可用，又不至于把整套测试拖成串行。
+    maxWorkers: '50%',
+    // 默认 5 秒对一个要 import 整条 CLI 或起子进程的用例不够。
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
   },
   build: {
     lib: {

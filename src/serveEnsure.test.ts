@@ -190,7 +190,12 @@ describe('ensureServeRunning', () => {
       expect(outcome.started).toBe(false);
       expect(outcome.reason).toBe('runtime.json not written');
       // 早退：耗时必须明显小于超时。等满超时的实现会 ≥ 3000。
-      expect(Date.now() - t0).toBeLessThan(timeoutMs - 500);
+      //
+      // 判据取「超时的一半」而不是「超时减 500」：后者的余量只够一次重试，
+      // 并行跑全量时机器被别的文件抢走 CPU，一次正常的子进程启动就能顶到
+      // 2900ms，测试随负载变红而实现是对的。一半的余量（1500ms）能容下
+      // 真实抖动，同时又咬死「等满超时」这个错误实现——那是 ≥ 3000 的差距。
+      expect(Date.now() - t0).toBeLessThan(timeoutMs / 2);
     } finally {
       restore();
     }
