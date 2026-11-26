@@ -48,18 +48,36 @@ function fail(message: string): never {
  *
  * 手写而不是用 commander：这个入口要极薄，多加一个依赖就多一层要与
  * 宿主版本对齐的东西。参数只有六个，手写更可靠。
+ *
+ * 别名必须把 CLI（`dist/main.js`）的短选项也列上：两边共用同一套 argv
+ * 契约，只认长选项会让 `-e foo`、`-s x` 被**整个跳过**，而不是报错。
+ * 那种跳过是最坏的一种沉默——参数看着给了，行为却是「按默认来」，
+ * 于是 `-e <拼错的引擎名>` 会回退成一次全引擎融合，花掉谁的额度都不会有人知道。
  */
 function takeOption(args: string[], ...names: string[]): string | undefined {
   for (let i = 0; i < args.length; i++) {
     if (names.includes(args[i]!)) {
       const value = args[i + 1];
-      if (value === undefined || value.startsWith('--')) {
+      // 下一个词如果本身是一个选项，说明这个选项没带值。长选项以 `--`
+      // 开头，短选项是单破折号加一个字母（`-q`、`-e` 等），两种都要拦住，
+      // 否则 `--engine -q x` 会把 `-q` 当成引擎名。
+      if (value === undefined || looksLikeOption(value)) {
         return undefined;
       }
       return value;
     }
   }
   return undefined;
+}
+
+/** 一个词是不是选项本身（而不是它的值）。 */
+function looksLikeOption(word: string): boolean {
+  if (word.startsWith('--')) {
+    return true;
+  }
+  // 单个破折号加一个字母：`-q`、`-e`、`-s`、`-m`、`-u`、`-o`。
+  // 只认这种形状，才不会把 `-1` 这类负数或 `-` 本身当成选项。
+  return /^-[A-Za-z]$/.test(word);
 }
 
 /** 解析成整数；给了但不成整数就报错，而不是静默回落默认值。 */
@@ -95,8 +113,10 @@ async function main(): Promise<void> {
   const result = await runSearch({
     query,
     url,
-    engine: takeOption(args, '--engine'),
-    sources: takeOption(args, '--source'),
+    // 短选项与 CLI 对齐：Claude Code 与 omp 侧的调用方按 CLI 手册传 `-e`
+     // 与 `-s`，只认长选项会让它们被静默忽略（见 takeOption 的注释）。
+    engine: takeOption(args, '-e', '--engine'),
+    sources: takeOption(args, '-s', '--source'),
     timeoutMs: takeNumber(args, '--timeout') ?? DEFAULT_TIMEOUT_MS,
     deadlineMs: takeNumber(args, '--deadline'),
     // 从进程启动开始算，这样 Node 启动与配置加载都从调用方的预算里扣。

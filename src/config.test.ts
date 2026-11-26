@@ -65,6 +65,29 @@ describe('config file', () => {
     expect(config.serve).toEqual({ port: 7799, idleExitSeconds: 0 });
   });
 
+  it('accepts both hosts.omp and hosts.omp.enabled, and rejects any other shape', () => {
+    // 回归：早先只认两段式 `hosts.omp`，而文档与帮助文本写的是三段式
+    // `hosts.omp.enabled`。三段式会落到引擎解析，报出「Unknown engine: hosts」，
+    // 那条错误指错了地方。现在两种写法都必须落盘，且第三段只允许 enabled。
+    const p = tempConfigPath();
+
+    setConfigValue('hosts.omp.enabled', 'false', p);
+    expect(loadConfigFile(p).hosts?.omp).toEqual({ enabled: false });
+
+    setConfigValue('hosts.omp', 'true', p);
+    expect(loadConfigFile(p).hosts?.omp).toEqual({ enabled: true });
+
+    setConfigValue('hosts.claudeCode.enabled', 'false', p);
+    expect(loadConfigFile(p).hosts?.claudeCode).toEqual({ enabled: false });
+
+    // 第三段拼错：必须点名正确的写法，而不是静默当成两段式写进配置。
+    expect(() => setConfigValue('hosts.omp.foo', 'true', p)).toThrow(/hosts\.omp\.enabled/);
+    // 宿主名拼错：必须列出现有的三个。
+    expect(() => setConfigValue('hosts.nope.enabled', 'true', p)).toThrow(/Known hosts: dsh, claudeCode, omp/);
+    // 值不是布尔：必须拒收。
+    expect(() => setConfigValue('hosts.omp.enabled', 'maybe', p)).toThrow(/Use true or false/);
+  });
+
   it('rejects unknown fields and malformed keys', () => {
     const p = tempConfigPath();
     expect(() => setConfigValue('tavily.password', 'x', p)).toThrow('Unknown engine setting');

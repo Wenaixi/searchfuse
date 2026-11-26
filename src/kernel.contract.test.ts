@@ -62,6 +62,25 @@ describe('kernel 的入口契约', () => {
     expect(code).not.toBe(2);
   }, 30_000);
 
+  it('短选项 -e 会被解析，无效引擎当场报错而不是静默去搜', () => {
+    // 这一条守的是 takeOption 的别名表：早先 kernel 只把 `--engine` 传进去，
+    // `-e` 被整个跳过 —— `engine` 变成 undefined，于是回退成一次全引擎融合，
+    // 退出码 0、真的花掉几十秒额度。断言必须同时钉住「该报错」的措辞和
+    // 「不该退 0」，只断言「不是 2」的话，那个坏行为（退 0）照样满足。
+    const { code, output } = runKernel(['-q', 'x', '-e', '__no-such-engine__']);
+    expect(code).not.toBe(0);
+    expect(output).toMatch(/Unknown engine/);
+    expect(output).toMatch(/__no-such-engine__/);
+  }, 30_000);
+
+  it('短选项 -s 与 --source 等价', () => {
+    // 同一条别名表的另一格。-s x 若被忽略，运行会默认去搜 web；
+    // 用不存在的引擎把两条路的差异放大成可断言的错误文案。
+    const short = runKernel(['-q', 'x', '-s', 'x', '-e', '__no-such-engine__']);
+    expect(short.code).not.toBe(0);
+    expect(short.output).toMatch(/Unknown engine/);
+  }, 30_000);
+
   it('--url 与 -q 同时给时按抓页处理，-q 当关注点', () => {
     // 引擎全失败时 kernel 只往 stderr 写原因、stdout 为空（这是既有契约），
     // 所以判据只能是 stderr 的措辞：抓页失败会点名 fetch 那条链路，

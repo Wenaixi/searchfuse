@@ -969,17 +969,36 @@ export function setConfigValue(
       throw new Error(`Invalid allowPrivateNetwork value: ${value}. Use true or false.`);
     }
     config.allowPrivateNetwork = parsed;
-  } else if (parts.length === 2 && parts[0] === 'hosts') {
+  } else if (parts[0] === 'hosts') {
     // `hosts.<name>.enabled` 是宿主开关。名字必须是我们认识的那几个，
     // 否则用户以为自己关掉了某个宿主，实际什么也没发生。
+    //
+    // 两种写法都接受：文档、`CLAUDE.md` 与帮助文本写的是三段式
+    // `hosts.omp.enabled`，而早期实现只认两段式 `hosts.omp`。只留一种会让
+    // 另一种静默落到下面的引擎解析，报出「Unknown engine: hosts」——那条
+    // 错误指错了地方，用户以为是自己拼错了引擎名。
+    //
+    // 第三段只允许是 `enabled`：`hosts.omp.foo` 这种拼写要当场拒绝，
+    // 而不是把它当成两段式、把整段写进配置。
+    if (parts.length !== 2 && parts.length !== 3) {
+      throw new Error(
+        `Unknown hosts setting: ${dottedKey}. Use hosts.<name> or hosts.<name>.enabled.`,
+      );
+    }
     const hostName = parts[1]!;
+    const field = parts[2];
+    if (field !== undefined && field !== 'enabled') {
+      throw new Error(
+        `Unknown hosts setting: hosts.${hostName}.${field}. Use hosts.${hostName}.enabled.`,
+      );
+    }
     const knownHosts = ['dsh', 'claudeCode', 'omp'] as const;
     if (!(knownHosts as readonly string[]).includes(hostName)) {
       throw new Error(`Unknown host: ${hostName}. Known hosts: ${knownHosts.join(', ')}.`);
     }
     const parsed = coerceBoolean(value);
     if (parsed === undefined) {
-      throw new Error(`Invalid hosts.${hostName} value: ${value}. Use true or false.`);
+      throw new Error(`Invalid hosts.${hostName}.enabled value: ${value}. Use true or false.`);
     }
     config.hosts = { ...config.hosts, [hostName]: { ...config.hosts?.[hostName as 'dsh'], enabled: parsed } };
   } else if (parts.length === 2 && parts[0] === 'serve') {

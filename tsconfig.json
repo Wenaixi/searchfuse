@@ -23,7 +23,8 @@
     "include": [
         "src/**/*",
         "test/**/*",
-        "vite.config.ts"
+        "vite.config.ts",
+        "omp/host-types.d.ts"
     ],
     "exclude": [
         "node_modules",

@@ -58,6 +58,34 @@ interface KernelHit {
   summary?: unknown;
 }
 
+/**
+ * 一条结果条目的完整形状。
+ *
+ * 搜索与抓页返回的是**两种不同结构**：搜索有 `items`，抓页有 `content` /
+ * `links`。把它们当成同一种来翻译，正是 read_page 只回一句标题的原因。
+ */
+interface KernelEntry {
+  summary?: unknown;
+  items?: unknown;
+  content?: unknown;
+  links?: unknown;
+  uncertainty?: unknown;
+  warnings?: unknown;
+  status?: unknown;
+}
+
+/** 抓页正文与链接的展示上限，对齐 dsh 侧的 RENDER_CONTENT_CAP / RENDER_LINK_CAP。 */
+const FETCH_CONTENT_CAP = 20_000;
+const FETCH_LINK_CAP = 20;
+
+/** 从任意值里取出一组字符串，非数组或空项一律跳过。 */
+function stringList(value: unknown, cap: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    .slice(0, cap);
+}
+
 /** 跑一次 kernel，拿回结构化结果。失败返回 undefined，由调用方回退。 */
 /**
  * 跑一次 kernel。`args` 是附加参数（`--query ...` / `--url ...` 等）。
@@ -222,9 +250,18 @@ async function fetchOrSpawn(args: string[], signal: AbortSignal | undefined): Pr
  * 把 kernel 的输出翻译成 omp 的工具结果。
  *
  * 形状：`{ content: [{ type: 'text', text }], isError?, details? }`。
- * 文本用 Markdown 列表，模型读起来比裸 JSON 省 token。
+ * 文本用 Markdown，模型读起来比裸 JSON 省 token。
+ *
+ * **必须按 `mode` 分流。** 搜索与抓页是两种结构：搜索有 `items`，抓页有
+ * `content` 与 `links`。早先这里只遍历 `items`，于是 read_page 对任何页面
+ * 都只回一句标题——正文被整段丢掉，实测同一次抓取 HTTP 侧返 9614 字节、
+ * 工具只返 27 字节。
+ *
+ * `uncertainty` 与 `warnings` 两种模式都要带上：它们是「这个答案有多可信」
+ * 的唯一载体。漏掉 warnings 会让「X 不可达、答案来自公网」这类降级
+ * 完全不可见，模型于是照着公网结果答 X 上的事。
  */
-function toToolResult(raw: string): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
+export function toToolResult(raw: string): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -236,33 +273,94 @@ function toToolResult(raw: string): { content: Array<{ type: 'text'; text: strin
 
   const root = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
   const results = Array.isArray(root.results) ? root.results : [];
-  const entry = typeof results[0] === 'object' && results[0] !== null ? (results[0] as Record<string, unknown>) : {};
-  const items = Array.isArray(entry.items) ? entry.items : [];
+  const entry = (typeof results[0] === 'object' && results[0] !== null ? results[0] : {}) as KernelEntry;
 
   const lines: string[] = [];
   const summary = typeof entry.summary === 'string' ? entry.summary : undefined;
   if (summary !== undefined && summary !== '') {
-    lines.push(summary, '');
+    lines.push(summary);
   }
 
-  for (const item of items) {
-    if (typeof item !== 'object' || item === null) continue;
-    const hit = item as KernelHit;
-    const url = typeof hit.url === 'string' ? hit.url : undefined;
-    if (url === undefined) continue;
-    const title = typeof hit.title === 'string' ? hit.title : url;
-    lines.push(`- [${title}](${url})`);
-    const snippet =
-      typeof hit.snippet === 'string' ? hit.snippet : typeof hit.summary === 'string' ? hit.summary : undefined;
-    if (snippet !== undefined && snippet !== '') {
-      lines.push(`  ${snippet.replace(/\s+/g, ' ').slice(0, 200)}`);
+  // 抓页模式：正文是这次调用存在的全部理由，必须原样交出去。
+  const isFetch = root.mode === 'fetch' || typeof entry.content === 'string';
+  if (isFetch) {
+    const content = typeof entry.content === 'string' ? entry.content.trim() : '';
+    if (content !== '') {
+      lines.push(
+        '',
+        'Content:',
+        content.length > FETCH_CONTENT_CAP ? `${content.slice(0, FETCH_CONTENT_CAP)}…` : content,
+      );
+    }
+    const links = Array.isArray(entry.links) ? entry.links : [];
+    const usable = links
+      .filter((link): link is Record<string, unknown> => typeof link === 'object' && link !== null)
+      .filter((link) => typeof link.url === 'string')
+      .slice(0, FETCH_LINK_CAP);
+    if (usable.length > 0) {
+      lines.push('', 'Links:');
+      for (const link of usable) {
+        const text = typeof link.text === 'string' ? link.text : String(link.url);
+        lines.push(`- [${text}](${String(link.url)})`);
+      }
+    }
+  } else {
+    // 搜索模式：一条命中一行，标题 + 摘要。
+    const items = Array.isArray(entry.items) ? entry.items : [];
+    for (const item of items) {
+      if (typeof item !== 'object' || item === null) continue;
+      const hit = item as KernelHit;
+      const url = typeof hit.url === 'string' ? hit.url : undefined;
+      if (url === undefined) continue;
+      const title = typeof hit.title === 'string' ? hit.title : url;
+      lines.push('', `- [${title}](${url})`);
+      const snippet =
+        typeof hit.snippet === 'string' ? hit.snippet : typeof hit.summary === 'string' ? hit.summary : undefined;
+      if (snippet !== undefined && snippet !== '') {
+        lines.push(`  ${snippet.replace(/\s+/g, ' ').slice(0, 200)}`);
+      }
     }
   }
 
-  if (lines.length === 0) {
-    return { content: [{ type: 'text', text: '所有引擎都没有返回结果。' }], isError: true };
+  // 两种模式共用的可信度尾注。
+  const uncertainty = stringList(entry.uncertainty, 10);
+  if (uncertainty.length > 0) {
+    lines.push('', `Uncertain: ${uncertainty.join('; ')}`);
   }
+  const warnings = stringList(entry.warnings, 10);
+  if (warnings.length > 0) {
+    lines.push('', `Warnings: ${warnings.join('; ')}`);
+  }
+
+  // 判「有没有结果」不能看行数。空结果也会带 warnings（「所有引擎都失败」
+  // 这类原因必须交给模型看），于是 lines 非空、isError 却是该为真的。
+  // 真正的判据只有一条：这次调用有没有拿到可用的内容。
+  const hasBody = isFetch
+    ? typeof entry.content === 'string' && entry.content.trim() !== ''
+    : Array.isArray(entry.items) && entry.items.length > 0;
+
+  if (!hasBody) {
+    const reason = [...uncertainty, ...warnings].join('; ');
+    const fallback = isFetch ? '这个页面没有取到内容。' : '所有引擎都没有返回结果。';
+    lines.unshift(reason === '' ? fallback : `${fallback} 原因：${reason}`);
+    return { content: [{ type: 'text', text: lines.join('\n') }], isError: true };
+  }
+
   return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+/**
+ * 从宿主传来的参数里取一个非空字符串。
+ *
+ * 宿主的参数对象是 `unknown` 形状：`parameters` 里的 zod schema 决定的是
+ * 「模型该传什么」，不是「运行时一定是那个类型」。直接拼进 argv 之前必须
+ * 收窄，否则 `undefined` 会被当成字符串送下去，kernel 读到的是 `-q undefined`。
+ */
+function requiredString(params: Record<string, unknown>, key: string): string | undefined {
+  const value = params[key];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 export default function searchfuse(pi: ExtensionAPI): void {
@@ -279,7 +377,11 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await fetchOrSpawn(['--query', params.query, '--source', 'web'], signal);
+      const query = requiredString(params, 'query');
+      if (query === undefined) {
+        return { content: [{ type: 'text', text: 'web_search 需要一个非空的 query 参数。' }], isError: true };
+      }
+      const raw = await fetchOrSpawn(['--query', query, '--source', 'web'], signal);
       if (raw === undefined) {
         return {
           content: [{ type: 'text', text: '搜索暂时不可用（超时或无法启动本地聚合器）。' }],
@@ -302,7 +404,11 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await fetchOrSpawn(['--query', params.query, '--source', 'x'], signal);
+      const query = requiredString(params, 'query');
+      if (query === undefined) {
+        return { content: [{ type: 'text', text: 'x_search 需要一个非空的 query 参数。' }], isError: true };
+      }
+      const raw = await fetchOrSpawn(['--query', query, '--source', 'x'], signal);
       if (raw === undefined) {
         return { content: [{ type: 'text', text: 'X 搜索暂时不可用。' }], isError: true };
       }
@@ -321,7 +427,11 @@ export default function searchfuse(pi: ExtensionAPI): void {
     loadMode: 'essential',
     approval: 'read',
     execute: async (_toolCallId, params, signal) => {
-      const raw = await fetchOrSpawn(['--url', params.url], signal);
+      const url = requiredString(params, 'url');
+      if (url === undefined) {
+        return { content: [{ type: 'text', text: 'read_page 需要一个非空的 url 参数。' }], isError: true };
+      }
+      const raw = await fetchOrSpawn(['--url', url], signal);
       if (raw === undefined) {
         return { content: [{ type: 'text', text: '页面读取暂时不可用。' }], isError: true };
       }
