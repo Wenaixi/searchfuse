@@ -19,17 +19,32 @@ searchfuse -q "reactions on X" --source x       # 搜 X，关于 X 的查询会�
   "mode": "search",
   "results": [{
     "source": "web",
-    "engine": "antigravity-cli",
-    "summary": "The current Node.js LTS is v24.19.0 (Krypton), released 2026-08-03.",
-    "items": [{ "title": "...", "url": "https://...", "published_at": "2026-08-03" }],
+    "engine": "firecrawl,keenable,anysearch,youcom,searxng",
+    "summary": "Fused 12 result(s) from 5 engine(s) (firecrawl, keenable, anysearch, youcom, searxng). 3 result(s) were returned by more than one engine.",
+    "items": [{
+      "title": "...",
+      "url": "https://...",
+      "published_at": "2026-08-03",
+      "score": 0.0328,
+      "foundIn": ["firecrawl", "keenable"]
+    }],
     "uncertainty": [],
     "warnings": [],
+    "attempts": [],
     "durationSeconds": 5.5
   }]
 }
 ```
 
-`uncertainty` 是引擎对事实本身没把握的地方。`warnings` 是答案的产生方式（一次回退、X 由网页顶替、重定向），`attempts` 记录每个试过的引擎。
+**默认是融合模式，形状与链式有两处不同：**
+
+| | 融合（默认） | 链式（`-e` 或 `aggregate.mode chain`） |
+| :-- | :-- | :-- |
+| `engine` | 逗号连接的多引擎列表 | 单个引擎名 |
+| `attempts` | 空数组，失败与跳过写进 `uncertainty` | 每次请求一条记录 |
+| 每条 `items` | 带 `score` 与 `foundIn` | 不带这两个字段 |
+
+融合结果的 `summary` 是机械生成的，说明融合了多少条、来自几家引擎、其中几条被多家共同返回；链式的 `summary` 才是引擎自己写的综述。`uncertainty` 在融合模式下也承载「某个引擎失败或被跳过」，措辞区分「未参与」与「失败」。链式的完整信封见[输出契约](output-schema.md)。
 
 ## 参数
 
@@ -58,6 +73,6 @@ macOS 和 Linux 完整支持，CI 在 Linux 的 Node 22 / 24 / 26 与 Windows �
 
 CI 矩阵同样包含 `windows-latest` 的 Node 22 和 26，跑同一套 typecheck、测试、构建关卡。各部分在 Windows 上的可用性取决于它依赖什么：
 
-- **CLI 本体、路由与配置逻辑、HTTP 引擎**（`local` 抓取、Tavily、Exa、Firecrawl、Keenable、You.com）是纯 Node：只用 `fetch` 和文件系统，天然跨平台。
+- **CLI 本体、路由与配置逻辑、HTTP 引擎**（`local` 抓取、Tavily、Exa、Firecrawl、Keenable、AnySearch、You.com、SearXNG）是纯 Node：只用 `fetch` 和文件系统，天然跨平台。
 - **agy 和 grok 是外部 CLI。** searchfuse 不经 shell 按名字直接运行它们，所以 PATH 上的原生 Windows 可执行文件可用，npm 风格的 `.cmd` 垫片不可用。有没有 Windows 构建是每个工具自己的决定，不是 searchfuse 的。每个直接子进程都会带 `windowsHide: true` 启动，因此没有控制台的 GUI 宿主不会在每次调用时闪出黑框。
 - **冷却状态文件**通过临时文件加原子重命名写入。Windows 上这个重命名能替换目标，但替换不了被其他进程占用的文件，所以极少数的同时写入竞争可能丢掉一次写。这个存储是读取时合并的尽力缓存，丢掉的内容后续运行会重新发现。

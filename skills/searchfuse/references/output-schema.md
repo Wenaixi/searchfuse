@@ -42,6 +42,7 @@ CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样�
 要点：
 
 - `results` 永远是数组，每个语料一条，所以哪怕单语料运行，结构也不变。
+- **下面的示例信封是链式的形状**（`engine` 是单个引擎名、`attempts` 有记录、条目不带 `foundIn`）。融合是默认模式，它把这三处换掉：`engine` 变成逗号连接的多引擎列表，`attempts` 恒为空数组（失败与跳过写进 `uncertainty`），条目额外带 `score` 与 `foundIn`。字段集合本身不变，只是取值形状不同。
 - `meta` 只记录整次运行何时完成、总共多久。每个语料的耗时、引擎、模型在各自的 `results` 条目里，因为一次运行可能跨多个引擎。
 - 路由事实（`source`、`engine`、`model`、`durationSeconds`）由 searchfuse 在引擎作答后盖章写入，引擎伪造不了是谁答的。
 
@@ -53,7 +54,7 @@ CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样�
 | :-- | :-- |
 | `source` | `web` 或 `x`，这条证据实际来自的语料 |
 | `requestedSource` | `web` 或 `x`，被请求的语料。运行降级时与 `source` 不同 |
-| `engine` | 实际作答的引擎（`antigravity-cli`、`tavily`、`keenable`、`youcom`、`grok-cli`、`local`），语料不可达时为 `null` |
+| `engine` | 实际作答的引擎。融合模式下是逗号连接的多引擎列表（`firecrawl,keenable,anysearch,...`），因为一份融合答案来自多家；用 `-e` 钉住单个引擎时才是单个名字。语料不可达时为 `null` |
 | `model` | 使用的模型，引擎有模型时才有值（没有时是空字符串） |
 | `status` | `ok`、`degraded` 或 `unavailable`（见下文） |
 | `warnings` | 这个语料的路由与运行警告：一次回退、一条降级说明、一个配置笔误、本地引擎的「无综述」和「已放行私有网络」提示。说的是答案怎么产生的，不是答案里的事实。永远是数组，常为空 |
@@ -133,6 +134,7 @@ CLI 向 stdout 打印一个 JSON 对象。顶层信封对每次运行都一样�
 ```
 
 - `items` 的顺序就是相关性排序。没有数值型 `relevance` 分数：模型会编造它，顺序本身已经携带了相关性。
+- 融合模式下每条额外带 `score`（倒数排名融合得分）和 `foundIn`（返回过这个页面的引擎名列表）。`foundIn` 只在融合结果里出现；链式运行只由一个引擎作答，所以那里没有这个字段，而不是给一个长度为 1 的列表。
 - `items` 为空且 `uncertainty` 有内容，表示这次搜索没找到可靠的东西。
 
 ## 抓取模式（`-u`）
