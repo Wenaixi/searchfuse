@@ -60,14 +60,15 @@ git add <具体文件>
 # 3. 复核将要提交的内容
 git diff --staged
 
-# 4. 提交（HEREDOC 格式）
-git commit -m "$(cat <<'EOF'
+# 4. 提交（HEREDOC 格式，正文里说清「为什么」而不是「改了什么」）
+git commit -F- <<'EOF'
 <类型>[范围]: <摘要>
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+<正文：问题是什么、为什么这样改、验证过什么>
 EOF
-)"
 ```
+
+不要加 `Co-Authored-By` 之类的署名尾巴：这个仓库的提交历史里没有，作者的署名由 git 配置决定。
 
 ## 注意事项
 
