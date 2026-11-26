@@ -21,7 +21,7 @@ npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.0
 
 一次落地三件事：
 
-- **`web_search` 开始跑在 searchfuse 上。** dsh 本就带一个原生 `web_search` 工具，架在可插拔的 provider 接缝上，默认钉在 DeepSeek 的带 key 搜索 API。bundle 把 searchfuse 引擎链注册为 provider 并把接缝指过来（`searchProvider: modsearch`），于是搜索完全不需要 API key：Firecrawl 免注册免费额度开箱就能答，装了 agy 或配了 key 时它们优先，Web UI 的原生引用卡片也全部保留。想切回去，在更后的 profile patch 里把 `searchProvider` 钉回其他 provider，同一行保留 `fetchProvider: http`（patch 行会整体替换 web 配置）。
+- **`web_search` 开始跑在 searchfuse 上。** dsh 本就带一个原生 `web_search` 工具，架在可插拔的 provider 接缝上，默认钉在 DeepSeek 的带 key 搜索 API。bundle 把 searchfuse 引擎链注册为 provider 并把接缝指过来（`searchProvider: modsearch`；注意这个 id 不是包名，包名是 `@wenaixi/searchfuse`），于是搜索完全不需要 API key：Firecrawl 免注册免费额度开箱就能答，后面还有 Keenable、AnySearch、You.com 三条免注册通道和随包的 SearXNG 兜底，装了 agy 或配了 key 时它们优先，Web UI 的原生引用卡片也全部保留。想切回去，在更后的 profile patch 里把 `searchProvider` 钉回其他 provider，同一行保留 `fetchProvider: http`（patch 行会整体替换 web 配置）。
 - **`x_search`** 覆盖 dsh 没有接缝的语料。Grok Build 装好并登录时路由给它，网页顶替的答案会在工具输出里标注降级，绝不无声。
 - **`read_page`** 把一个 URL 读成结构化证据（summary、正文提取、外链、不确定项），可带答案焦点。dsh 也自带 `web_fetch`，返回原始正文和状态码。要摘要、要按问题聚焦、或者页面靠 JavaScript 渲染时用 `read_page`，工具描述里也这样告诉模型。SearchFuse 默认拦截私网目标，这个工具也不暴露绕开开关。公网 URL 默认走 Firecrawl 免注册云端浏览器，能读 JavaScript 渲染的页面。结果会带一条注明云端路径的 warning，`searchfuse config set firecrawl.keylessFetch false` 可让自动抓取只走本地。
 
