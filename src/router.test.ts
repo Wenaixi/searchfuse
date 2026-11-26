@@ -253,12 +253,12 @@ describe('engine chains per role', () => {
 
   it('forces exactly the --engine given, with no floor and no other engine', () => {
     // -e is a hard force: no http floor, no silent switch to another engine's
-    // quota. A bad or unfetchable choice yields an empty chain plus a note, and
-    // search.ts turns that into a loud error.
-    expect(planRole('fetch', config(), 'nonsense', BARE).chain).toEqual([]);
-    expect(planRole('fetch', config(), 'nonsense', BARE).notes[0]).toContain('Unknown engine');
-    expect(planRole('fetch', config(), 'tavily', BARE).chain).toEqual([]);
-    expect(planRole('fetch', config(), 'tavily', BARE).notes[0]).toContain('cannot fetch');
+    // quota. 无效或干不了这活的引擎直接抛错——原来这里期望「空链 + note，
+    // 由 search.ts 变成响亮的错误」，但 search.ts 从没做那一步，空链在上层
+    // 被当成「没有候选」退回自动链，实测 `-e nonsense` 会返回 6 台引擎的
+    // 真实结果。所以判据落在抛错上。
+    expect(() => planRole('fetch', config(), 'nonsense', BARE)).toThrow(/Unknown engine/);
+    expect(() => planRole('fetch', config(), 'tavily', BARE)).toThrow(/cannot fetch/);
     // The http alias still forces the local engine.
     expect(names(planRole('fetch', config(), 'http', BARE).chain)).toEqual(['local']);
     // A search force does not fall through to the other search engine.
@@ -384,9 +384,10 @@ describe('fetch follows the chosen engine without being configured', () => {
   });
 
   it('complains and refuses to fall back when --engine names something that cannot fetch', () => {
-    const chain = planRole('fetch', config(), 'tavily', BARE);
-    expect(chain.chain).toEqual([]);
-    expect(chain.notes[0]).toContain('cannot fetch');
+    // 抛错而不是返回空链。空链会被上层当成「没有候选」而退回自动链，
+    // 于是 `-e tavily -u <url>` 会静默换成 agy 或 local 去抓——那是
+    // 悄悄花掉别家的额度，而 planRole 自己的注释写明这种情况要 fail loudly。
+    expect(() => planRole('fetch', config(), 'tavily', BARE)).toThrow(/cannot fetch/);
   });
 });
 
