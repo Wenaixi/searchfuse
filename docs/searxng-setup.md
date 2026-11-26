@@ -2,9 +2,30 @@
 
 SearXNG 是"我还想要 Google 的索引"这个需求的答案。searchfuse 自己不去抓 Google、Bing 或百度：那些需要 TLS 指纹伪装和挑战求解器，而 SearXNG 维护的正是这一套。把 searchfuse 指向一个实例，那个实例启用的每个引擎就都通过一个适配器进来。
 
-## 为什么需要一个实例
+## 默认已经能用：随包实例
 
-公开的 SearXNG 实例几乎总是对 `format=json` 返回 403，因为 JSON API 在它的 `settings.yml` 里是关的。所以没有默认主机：必须设 `engines.searxng.baseURL`，不设的话这个引擎报"未就绪"，而不是等到搜索时才失败。
+**不配置任何东西，`searxng` 引擎就已经可用。** `searxng.embedded` 默认开启：留空 `engines.searxng.baseURL` 时，searchfuse 在本进程里拉起一个随包的 SearXNG 实例，搜完即走（自动挑空闲端口、生成临时 `settings.yml`、并发健康轮询，闲置十分钟后回收）。代价只是首次冷启动要解包两三秒。
+
+想用自己的实例、或想彻底关掉它：
+
+```bash
+searchfuse config set searxng.baseURL http://127.0.0.1:8888   # 用自己的
+```
+
+关掉随包实例只能**手改配置文件**（`config set` 的字段白名单里没有它，写了会报
+`Unknown engine setting: embedded`）：
+
+```jsonc
+{ "searxng": { "embedded": false } }
+```
+
+填了 `baseURL` 就以它为准，`embedded` 不再起作用。
+
+## 为什么要自己搭一个
+
+随包实例适合"够用就行"。要自己搭的理由通常是：想让实例常驻、想用它自己的上游引擎组合与代理、或者想让多个工具共用同一个实例。
+
+公开的 SearXNG 实例几乎总是对 `format=json` 返回 403，因为 JSON API 在它的 `settings.yml` 里是关的。所以不要随便填一个公共地址：要么指向你自己搭的实例，要么用随包实例。
 
 ## 起一个
 
@@ -66,6 +87,8 @@ engines:
 
 ## 接进 searchfuse
 
+下面是**用自己的实例**的写法。用随包实例的话，这一段整个可以跳过。
+
 ```jsonc
 {
   "engines": {
@@ -77,7 +100,7 @@ engines:
 
 这里 `proxy: "direct"` 是对的：容器自己通过 `outgoing.proxies` 做代理，所以从 searchfuse 到 `127.0.0.1:8888` 的这一跳不能走系统代理。
 
-`aggregate.deadlineMs` 需要从 8 秒的默认值往上调：一个 SearXNG 实例会向它自己那批引擎扇出，慢的那些要十秒以上。
+`aggregate.deadlineMs` 需要从 8 秒的默认值往上调：一个 SearXNG 实例会向它自己那批引擎扇出，慢的那些要十秒以上。随包实例同样是这个道理，冷启动时尤其明显。
 
 ## 实测结果
 

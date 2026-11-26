@@ -38,7 +38,7 @@ DeepSeek 和 GLM 等模型没有联网能力或联网能力羸弱。SearchFuse �
 
 - **全网最强的 DeepSeek Harness (dsh) 免费联网搜索插件：** 一条命令即刻安装 `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.0`。桌面版「添加插件」里填 `@wenaixi/searchfuse`，不要填 GitHub 地址。细节见[接入指南](docs/harness-setup.md#deepseek-harness-dsh)。
 - **开箱免费，免注册。** 搜索和单页抓取默认跑在 Firecrawl 免注册通道上：[每月 1,000 免费 credits](https://www.firecrawl.dev/blog/firecrawl-keyless-launch)，没有账号、没有 API key、没有绑卡。后备通道也全部免费：Keenable、AnySearch 和 You.com 各有一条免注册额度，随包的 SearXNG 实例完全不需要 key，Antigravity CLI 只需浏览器登录，Tavily、Exa 和免费的 Firecrawl key 各带独立的月度额度，均不要求绑卡。
-- **融合搜索，不是故障转移。** 默认情况下 `web_search` 同时询问每个可达引擎，用倒数排名融合合并它们的排序列表，于是答案反映多个索引；两个引擎都认可的页面，排在只有一个引擎喜欢的页面之前。想要旧的串行行为就设 `aggregate.mode chain`。
+- **融合搜索，不是故障转移。** 默认情况下 `web_search` 同时询问每个可达引擎，用倒数排名融合合并它们的排序列表，于是答案反映多个索引；两个引擎都认可的页面，排在只有一个引擎喜欢的页面之前。想要旧的串行行为，在 `~/.searchfuse/config.json` 里写 `aggregate.mode: chain`。
 - **自动故障转移。** 一个通道失败或额度耗尽时自动切换下一个。融合模式下，一个引擎报错只损失它自己那份贡献，答案其余部分照常成立，失败原因写进 `uncertainty`。
 - **单引擎多密钥轮换。** Tavily、Exa、Firecrawl、Keenable、AnySearch 都可配置逗号分隔的多个密钥。鉴权、限流或配额失败时先轮换到下一个密钥，再按引擎链故障转移。
 - **每个引擎各有缰绳。** 每个引擎可以独立地选择：参与融合、作为独立工具供模型点名调用、两者兼得、或关闭。每个引擎还可以单独配代理，让其中一个离开本机代理而其余照旧。

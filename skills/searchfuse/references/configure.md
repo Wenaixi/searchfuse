@@ -102,7 +102,7 @@ JSON 不支持注释，所以每个字段的说明在这里：
 | `engines.firecrawl.keylessFetch` | boolean | `firecrawl` | 允许 Firecrawl 在无 key 时抓取公网页面。默认 `true`（免注册抓取开箱即开）。设为 `false` 可让自动抓取远离 Firecrawl 云端。配置了 key 或显式选择 Firecrawl 引擎时仍会启用。 |
 | `engines.<name>.bin` | string | `antigravity-cli`、`grok-cli` | 该引擎 CLI 的路径。默认在 `PATH` 上找 `agy` 和 `grok`。 |
 | `engines.<name>.model` | string | `antigravity-cli` | 引擎使用的模型。默认 `gemini-3.8-flash-low`。 |
-| `searxng` | object | 顶层 | 随包 SearXNG 实例的设置。只影响 `searxng` 引擎，其他引擎一律不读。 |
+| `searxng` | object | 顶层 | 随包 SearXNG 实例的设置。只影响 `searxng` 引擎，其他引擎一律不读。**这几个字段只能手改配置文件**，`config set` 的字段白名单里没有它们（写了会报 `Unknown engine setting`）。例外是实例地址：`searchfuse config set searxng.baseURL <url>` 可用，因为它走的是引擎字段那条路。 |
 | `searxng.embedded` | boolean | `searxng` | 是否启用随包实例。**默认 `true`**：留空 `baseURL` 时装完即可搜索，无需先配外部实例。显式写 `false` 才关闭。配了 `baseURL` 时以 `baseURL` 为准，这个开关不再起作用。 |
 | `searxng.outgoing` | object | `searxng` | 随包实例自己去抓网页时的代理设置（`http_proxy` 等），与 `engines.searxng.proxy`（管 searchfuse 直连那一跳）互不覆盖。 |
 | `searxng.extra_proxy_timeout` | number | `searxng` | 走代理时额外多等的秒数。必须放在 `searxng` 顶层，写进 `networks.<name>` 会让实例启动直接失败。 |
@@ -216,8 +216,14 @@ SearXNG 是自托管的元搜索引擎，一个实例背后扇出到几十个上
 **默认不需要任何配置。** `searxng.embedded` 默认开启，留空 `baseURL` 时 searchfuse 会拉起一个随包的 SearXNG 实例，搜完即走：自动挑空闲端口、生成临时 `settings.yml`、并发健康轮询，闲置十分钟后回收。这带来了第二层免注册后备，代价是首次冷启动要解包两三秒。
 
 ```bash
-searchfuse config set searxng.baseURL http://127.0.0.1:8088   # 用自己的实例
-searchfuse config set searxng.embedded false                  # 关掉随包实例
+searchfuse config set searxng.baseURL http://127.0.0.1:8888   # 用自己的实例
+```
+
+关掉随包实例只能手改配置文件（`config set` 的字段白名单里没有 `embedded`，写了会报
+`Unknown engine setting: embedded`）：
+
+```jsonc
+{ "searxng": { "embedded": false } }
 ```
 
 填了 `baseURL` 就用用户的实例，`embedded` 不再起作用；留空则用随包实例。公共实例几乎总返回 403，因为它的 `settings.yml` 里 `format: json` 是关的，所以要么指向自己实例、要么用随包实例，不要随便填一个公共地址。
@@ -309,7 +315,13 @@ searchfuse state clear               # 立即忘掉所有冷却
 
 **没有缓存，这是有意的。** 曾经有一份短期磁盘缓存（旧文档里的 `aggregate.cacheTtlMs`），把重复查询变成一次磁盘读取。它被移除了：代价是「同一个问题问两次，第二次可能拿到旧答案，而你无从知道」。检索场景要的往往正是最新的那条，所以新鲜度优先。额度压力交给引擎自己的限流与冷却处理。
 
-**关掉它。** `searchfuse config set aggregate.mode chain` 精确恢复旧的串行行为。
+**关掉它。** 手改配置文件（`config set` 的字段白名单里没有 `aggregate`，写了会报 `Unknown engine: aggregate`）：
+
+```jsonc
+{ "aggregate": { "mode": "chain" } }
+```
+
+这精确恢复旧的串行行为。
 
 ## 能力矩阵
 
