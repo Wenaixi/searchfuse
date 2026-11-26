@@ -196,7 +196,13 @@ afterEach(async () => {
   } else {
     process.env.USERPROFILE = INITIAL_HOME;
   }
-  originalHome = undefined;
+  originalUserProfile = undefined;
+  if (originalHomeEnv === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHomeEnv;
+  }
+  originalHomeEnv = undefined;
   delete process.env.MODSEARCH_DSH_CLI;
   if (originalElectronRunAsNode === undefined) {
     delete process.env.ELECTRON_RUN_AS_NODE;
@@ -225,7 +231,8 @@ interface StubServe {
 
 let stubServe: StubServe | undefined;
 let stubServer: import('http').Server | undefined;
-let originalHome: string | undefined;
+let originalUserProfile: string | undefined;
+let originalHomeEnv: string | undefined;
 
 /** 起桩服务并让插件指向它；测试只需要给一份响应。 */
 async function serveWith(status: number, body: unknown): Promise<StubServe> {
@@ -274,8 +281,15 @@ async function pointPluginAtStub(): Promise<void> {
     path.join(home, '.searchfuse', 'runtime.json'),
     JSON.stringify({ port, token: 'test-token' }),
   );
-  originalHome = process.env.USERPROFILE;
+  // 两个都要设：`os.homedir()` 在 POSIX 上读 HOME、在 Windows 上读
+  // USERPROFILE。只设 USERPROFILE 的话，ubuntu 上的 CI 会去读 runner 真实的
+  // ~/.searchfuse/runtime.json——如果那台机器上恰好有服务在跑，测试就打真实
+  // 网络，拿到 13 条真结果，而不是桩里的 'What the web says.'。
+  // 这个缺陷在 windows 的 CI 上永远看不见。
+  originalUserProfile = process.env.USERPROFILE;
+  originalHomeEnv = process.env.HOME;
   process.env.USERPROFILE = home;
+  process.env.HOME = home;
 }
 
 /** Point MODSEARCH_DSH_CLI at a node script whose stdout is this envelope. */
@@ -376,6 +390,8 @@ describe('dsh web search provider', () => {
     // 必须同时屏蔽真实家目录：那台机器上跑着一个真实服务时，第一级 HTTP
     // 就会成功，这个用例根本走不到检查构建的那一步。
     process.env.USERPROFILE = dir;
+    process.env.HOME = dir;
+    process.env.HOME = dir;
     process.env.MODSEARCH_DSH_CLI = path.join(dir, 'dist', 'main.js');
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
@@ -387,8 +403,8 @@ describe('dsh web search provider', () => {
     // runtime.json 缺失 + 唤醒失败（这里用不存在的 CLI 制造失败），
     // 结果必须是一句可行动的报错，而不是悄悄退化成一个并行实现。
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modsearch-dsh-nohome-'));
-    created.push(home);
     process.env.USERPROFILE = home;
+    process.env.HOME = home;
     process.env.MODSEARCH_DSH_CLI = path.join(home, 'definitely-missing-cli.js');
     const { providers } = await load();
     await expect(providers[0].search({ query: 'anything' })).rejects.toThrow(
