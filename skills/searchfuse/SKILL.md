@@ -39,11 +39,11 @@ Nothing else needs setting up first: searchfuse works with no config file. Web s
 
 ### If you cannot run the launcher script
 
-Some harnesses forbid running scripts. Reason through the same order by hand and run the first line that works (the pinned version is 0.1.0):
+Some harnesses forbid running scripts. Reason through the same order by hand and run the first line that works (the pinned version is 0.1.1):
 
-1. A `searchfuse` on `PATH` whose major version is 0 and is at least 0.1.0: `searchfuse <args>`.
-2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.0 searchfuse <args>`.
-3. Otherwise, if `bunx` exists: `bunx --bun @wenaixi/searchfuse@0.1.0 <args>`.
+1. A `searchfuse` on `PATH` whose major version is 0 and is at least 0.1.1: `searchfuse <args>`.
+2. Otherwise, if `npx` exists: `npx --yes --package @wenaixi/searchfuse@0.1.1 searchfuse <args>`.
+3. Otherwise, if `bunx` exists: `bunx --bun @wenaixi/searchfuse@0.1.1 <args>`.
 4. Otherwise none of these runtimes is here. Tell the user no JavaScript runtime was found and that installing Node 22.19+ (https://nodejs.org) or Bun (https://bun.sh) is the next step. Do not claim searchfuse itself failed.
 
 `references/runtime.md` documents the version pin, the compatibility rule, and the diagnostic fields.
