@@ -79,6 +79,45 @@ return identityOfHome;
   return factory(crypto.createHash, path.resolve, path.join);
 }
 
+const ompSource = fs.readFileSync(path.join(repoRoot, 'omp', 'extension.ts'), 'utf-8');
+
+/**
+ * 抽取 omp 扩展里的同一套算法求值。
+ *
+ * omp 与 dsh 的差别只有一处：它用 `realpathSync` 做归一化（与主包一致），
+ * 而 dsh 那两份同样有 realpathSync——所以注入表多一个 `realpathSync`。
+ */
+function evalOmpIdentity(): (home: string) => { fingerprint: string; ports: number[] } {
+  const grab = (pattern: RegExp, what: string): string => {
+    const match = ompSource.match(pattern);
+    if (match === null) throw new Error(`omp/extension.ts 里找不到 ${what}——声明被改名或删掉了`);
+    return match[0];
+  };
+
+  const baseDecl = grab(/const IDENTITY_PORT_BASE = [0-9_]+;/, 'IDENTITY_PORT_BASE');
+  const spanDecl = grab(/const IDENTITY_PORT_SPAN = [0-9_]+;/, 'IDENTITY_PORT_SPAN');
+  const fpFn = grab(/function identityFingerprintOf[\s\S]*?\n}/, 'identityFingerprintOf');
+  const portsFn = grab(/function identityCandidatePorts[\s\S]*?\n}/, 'identityCandidatePorts');
+  const ofHomeFn = grab(/function identityOfHome[\s\S]*?\n}/, 'identityOfHome');
+
+  const program = stripTypes(`
+${baseDecl}
+${spanDecl}
+${fpFn}
+${portsFn}
+${ofHomeFn}
+return identityOfHome;
+`);
+  // eslint-disable-next-line no-new-func
+  const factory = new Function('createHash', 'realpathSync', 'resolve', 'join', program) as (
+    createHash: typeof crypto.createHash,
+    realpathSync: typeof fs.realpathSync,
+    resolve: typeof path.resolve,
+    join: typeof path.join,
+  ) => (home: string) => { fingerprint: string; ports: number[] };
+  return factory(crypto.createHash, fs.realpathSync, path.resolve, path.join);
+}
+
 describe('三端的身份推导必须一致', () => {
   const cases = [
     '/home/a',
@@ -145,6 +184,18 @@ describe('三端的身份推导必须一致', () => {
         expect(ports[i]).toBe(ports[i - 1]! + 1);
       }
       expect(ports).toEqual(identityOf(home).ports);
+    }
+  });
+
+  it('omp 扩展的真实实现与主包对同一目录给出同一组结果', () => {
+    // omp 是第三份拷贝（见 omp/extension.ts 顶部注释）。它同样被原样抽取
+    // 求值，所以任何实现细节漂移都会当场暴露。
+    const ompIdentityOf = evalOmpIdentity();
+    for (const home of cases) {
+      const fromOmp = ompIdentityOf(home);
+      const fromMain = identityOf(home);
+      expect(fromOmp.fingerprint, `指纹不同：${home}`).toBe(fromMain.fingerprint);
+      expect(fromOmp.ports, `候选端口不同：${home}`).toEqual(fromMain.ports);
     }
   });
 

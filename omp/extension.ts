@@ -13,10 +13,11 @@
 //   __SEARCHFUSE_KERNEL_PATH__  → dist/kernel.js 的绝对路径
 // 渲染而不是裸复制，因为复制之后扩展与包的 dist/ 已无相对关系。
 
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
 
 /** 渲染时替换成真实的绝对路径。 */
@@ -98,6 +99,75 @@ interface ServeRuntime {
   token: string;
 }
 
+// ── 服务身份：与 src/serveIdentity.ts、dsh/index.ts 逐字一致的三份拷贝 ──
+//
+// 为什么 omp 也要有一份：本扩展是模板渲染出的独立文件，只能 import node
+// 内置模块与宿主类型，够不到 `src/`。而「同一个 `.searchfuse` 目录一定是
+// 同一个服务」这条承诺在三端必须同真同假，否则出现「CLI 找得到、omp 找不到」
+// 的错配，症状与「服务没起来」一模一样。
+//
+// 一致性由 `src/serveIdentity.parity.test.ts` 锁住：它抽取本节函数体求值，
+// 与主包逐组比对。改这里要同步改另外两份。
+
+/** 候选端口起点。避开常见服务端口并远离临时端口区。 */
+const IDENTITY_PORT_BASE = 42000;
+/** 候选端口数量，给同机多实例留余量。 */
+const IDENTITY_PORT_SPAN = 8;
+
+/** 目录指纹：sha256(realpath(目录).toLowerCase()) 的前 8 位。 */
+function identityFingerprintOf(stateDir: string): string {
+  let resolved: string;
+  try {
+    resolved = realpathSync(stateDir);
+  } catch {
+    resolved = resolve(stateDir);
+  }
+  return createHash('sha256').update(resolved.toLowerCase()).digest('hex').slice(0, 8);
+}
+
+/** 从指纹推出一组确定性候选端口。 */
+function identityCandidatePorts(fingerprint: string): number[] {
+  const seed = Number.parseInt(fingerprint, 16);
+  const base = IDENTITY_PORT_BASE + (seed % 2_000);
+  const ports: number[] = [];
+  for (let i = 0; i < IDENTITY_PORT_SPAN; i += 1) {
+    ports.push(base + i);
+  }
+  return ports;
+}
+
+/** 从一个 home 目录推出服务身份。 */
+function identityOfHome(home: string): { fingerprint: string; ports: number[] } {
+  const fingerprint = identityFingerprintOf(join(home, '.searchfuse'));
+  return { fingerprint, ports: identityCandidatePorts(fingerprint) };
+}
+
+/** 探一次服务的 `/identity`，返回它自称的指纹；不通就是 undefined。 */
+async function identityOnce(port: number): Promise<string | undefined> {
+  try {
+    const timeout = AbortSignal.timeout(2000);
+    const response = await fetch(`http://127.0.0.1:${port}/identity`, {
+      headers: { accept: 'application/json', Connection: 'close' },
+      signal: timeout,
+    });
+    if (!response.ok) return undefined;
+    const parsed = (await response.json()) as { fingerprint?: unknown };
+    return typeof parsed.fingerprint === 'string' ? parsed.fingerprint : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读 `serve-token`。候选探测找回服务时，token 只能从这里拿。 */
+function readServeTokenFile(): string | undefined {
+  try {
+    const token = readFileSync(join(homedir(), '.searchfuse', 'serve-token'), 'utf-8').trim();
+    return token === '' ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 读服务的运行时信息。
  *
@@ -116,6 +186,32 @@ function readServeRuntime(): ServeRuntime | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 按目录推导出的候选端口逐个探测，找出真正属于这份 `.searchfuse` 的服务。
+ *
+ * `runtime.json` 在服务被 kill 时来不及清理就已消失，那时它是唯一的线索。
+ * **必须校验指纹**：只看 `/healthz` 200 会把恰好占着候选端口的别的程序认成
+ * 自己的服务，然后把 token 发过去。
+ */
+async function discoverServeRuntime(): Promise<{ port: number; token: string } | undefined> {
+  const identity = identityOfHome(homedir());
+  for (const port of identity.ports) {
+    if ((await identityOnce(port)) !== identity.fingerprint) continue;
+    const fromFile = readServeRuntime();
+    if (fromFile !== undefined && fromFile.port === port) return fromFile;
+    const fileToken = readServeTokenFile();
+    return fileToken === undefined ? undefined : { port, token: fileToken };
+  }
+  return undefined;
+}
+
+/** 找服务：文件优先，文件不在才走候选探测。 */
+async function locateServeRuntime(): Promise<{ port: number; token: string } | undefined> {
+  const fromFile = readServeRuntime();
+  if (fromFile !== undefined) return fromFile;
+  return discoverServeRuntime();
 }
 
 /**
@@ -155,7 +251,7 @@ function toServeRequest(args: string[]): { endpoint: string; params: Record<stri
  * 请求里根本没有引擎在搜，那句文案本身就说错了地方。
  */
 async function tryServe(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
-  const runtime = readServeRuntime();
+  const runtime = await locateServeRuntime();
   if (runtime === undefined) return undefined;
   const request = toServeRequest(args);
   if (request === undefined) return undefined;
@@ -223,9 +319,9 @@ async function wakeServe(signal: AbortSignal | undefined): Promise<boolean> {
   return false;
 }
 
-/** 探一次本地服务的 `/healthz`。读不到 runtime.json 就是没起。 */
+/** 探一次本地服务的 `/healthz`。文件与候选探测都找不到就是没起。 */
 async function healthOnce(signal: AbortSignal | undefined): Promise<boolean> {
-  const runtime = readServeRuntime();
+  const runtime = await locateServeRuntime();
   if (runtime === undefined) return false;
   try {
     const timeout = AbortSignal.timeout(2000);
