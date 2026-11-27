@@ -500,7 +500,28 @@ program
         // 没有 runtime.json」判成「文件没写出来」这个真故障；并发等待失败若
         // 也退 0，一次正常的并发启动会被误报成文件级故障。等不到就用非 0
         // 退出，让调用方的失败分支说实话。
-        process.stderr.write('Error: another serve --ensure is starting up; gave up waiting.\n');
+        //
+        // 文案必须区分两种真相：持锁者还在跑（正常的并发启动，稍后重试即可）
+        // 与持锁者已经死了（它启动失败了，等下去不会好）。早先这里无条件报
+        // 「another serve --ensure is starting up」，而持锁者因候选端口全被
+        // 占而 exit 1 时，那句话把用户指向锁去查，可锁根本没问题。
+        //
+        // 重新读一次锁里的 pid：`ownerPid` 属于上面那个回收分支的块，
+        // 而这里是等待超时之后的独立块。
+        let waitingOnPid = 0;
+        try {
+          waitingOnPid = Number(fs.readFileSync(lockFile, 'utf-8').trim());
+        } catch {
+          // 锁已消失：持锁者正常退出但没写出文件。
+        }
+        if (waitingOnPid > 0 && !isAlive(waitingOnPid)) {
+          process.stderr.write(
+            `Error: the process that was starting the service (pid ${waitingOnPid}) exited without writing runtime.json. ` +
+              'Check that its candidate ports are free (or set serve.port to a free number).\n',
+          );
+        } else {
+          process.stderr.write('Error: another serve --ensure is starting up; gave up waiting.\n');
+        }
         process.exit(1);
       }
       // 持锁期间进程被外部杀掉时，锁会留在原地；上面的陈旧检测会在
