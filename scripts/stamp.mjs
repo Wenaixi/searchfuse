@@ -36,6 +36,7 @@ export function skillName(root = repoRoot) {
  */
 export function stampTargets(base, pkgName) {
   const skillFile = join(base, 'SKILL.md');
+  const root = join(base, '..', '..');
   const escaped = pkgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return [
     {
@@ -79,6 +80,15 @@ export function stampTargets(base, pkgName) {
       file: skillFile,
       pattern: new RegExp(`bunx --bun ${escaped}@(\\d+\\.\\d+\\.\\d+)`),
       format: (version) => `bunx --bun ${pkgName}@${version}`,
+    },
+    {
+      // Claude Code 的 mod 清单。它单独写一份版本号，宿主用它显示已装的
+      // 版本；漏戳会让插件在宿主里永远显示旧版本，与 `searchfuse --version`
+      // 对不上。
+      name: 'plugin.json',
+      file: join(root, 'claude', '.claude-plugin', 'plugin.json'),
+      pattern: /^ {2}"version": "(\d+\.\d+\.\d+)",$/m,
+      format: (version) => `  "version": "${version}",`,
     },
   ];
 }

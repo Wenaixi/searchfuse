@@ -47,6 +47,17 @@ describe('launcher version stamping', () => {
       expect(restamped).not.toBe(original);
     }
   });
+
+  // Claude Code 的 mod 清单曾经漏在盖章表外：`searchfuse --version` 报 0.1.1
+  // 而宿主里显示的仍是 0.1.0。这条钉住它必须在表内，且戳出来是合法 JSON。
+  it('stamps the Claude Code plugin manifest too', () => {
+    const names = stampTargets('/base', '@scope/pkg').map(({ name }) => name);
+    expect(names).toContain('plugin.json');
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, 'claude', '.claude-plugin', 'plugin.json'), 'utf-8'),
+    );
+    expect(manifest.version).toBe(readPackageVersion());
+  });
 });
 
 describe('launcher package and command names', () => {
