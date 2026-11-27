@@ -35,6 +35,7 @@ import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, runtimePath, startServe } from './serve.ts';
+import { findRunningServe } from './serveEnsure.ts';
 import { identityOf } from './serveIdentity.ts';
 import { readSecret } from './util/secretInput.ts';
 import { isAlive } from './util/isAlive.ts';
@@ -321,23 +322,19 @@ program
     let releaseLockFn: (() => void) | undefined;
 
     if (options.ensure) {
-      // 不能拿 requested 去探：端口可能由内核分配过，真正的值在 runtime.json。
-      // 用固定的默认端口去猜，端口一随机就会判成「没在跑」并起第二个实例，
-      // 两个实例抢同一份状态文件，谁都不对。
-      const running = readRuntimeFile();
-      if (running !== undefined) {
-        try {
-          const res = await fetch(`http://127.0.0.1:${running.port}/healthz`, {
-            signal: AbortSignal.timeout(2000),
-          });
-          if (res.ok) {
-            process.stdout.write(`Already running on 127.0.0.1:${running.port}.\n`);
-            process.exit(0);
-          }
-        } catch {
-          // 文件在但连不上：那是上一次没清理干净的残留，往下启动，
-          // 新实例就绪后会覆盖它。
-        }
+      // 「已在跑」的判据与插件侧**共用同一个函数**，不只是为了少写一遍：
+      // 两处若宽严不一，就会出现「一个判在跑、一个判没在跑」的错配——宽的
+      // 那个 exit 0 不动手，严的那个去起新服务，结果是想用的服务根本没起来
+      // （或者更糟：多起了一个同指纹实例）。
+      //
+      // findRunningServe 内部是两级：runtime.json 指向的服务健康就直接认；
+      // 否则按目录指纹推导的候选端口逐个探 `/identity`，指纹匹配的才算。
+      // 第二级正是「同目录 = 同服务」在服务生命周期侧的落地——文件被 kill
+      // 掉的进程来不及删时，这一级能把还活着的服务认回来，不再起第二个。
+      const runningPort = await findRunningServe();
+      if (runningPort !== undefined) {
+        process.stdout.write(`Already running on 127.0.0.1:${runningPort}.\n`);
+        process.exit(0);
       }
 
       // 跨进程互斥。**没有这一步，并发 `--ensure` 会雪崩。**

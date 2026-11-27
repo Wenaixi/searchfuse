@@ -175,6 +175,36 @@ function readServeTokenFile(file = serveTokenPath()): string | undefined {
 }
 
 /**
+ * 判断服务是否已经在跑，返回它的端口。
+ *
+ * `serve --ensure` 与插件侧共用这一个判据。顺序是：
+ *
+ * 1. `runtime.json` 里记的端口健康就直接认。
+ * 2. 否则按目录指纹推导的候选端口逐个探 `/identity`，指纹匹配的才算。
+ *
+ * **第 2 步是「同目录 = 同服务」在服务生命周期侧成立的关键。** 早先 CLI 的
+ * `--ensure` 只信文件：文件一消失（服务被 kill 时 close 跑不到）就判「没在
+ * 跑」，于是在下一个候选端口上起第二个实例。实测复现过 A 活 42800、删文件、
+ * B 起在 42801、两个都在听——此后客户端按候选探到 A、dsh 按文件连 B，同一台
+ * 机器两个聚合器轮流接管搜索。
+ *
+ * 判据必须是指纹匹配而不是只看 `/healthz` 200：否则恰好占着候选端口的别的
+ * 程序会被当成「已有服务」，于是拒绝启动——那比多起一个更糟。
+ */
+export async function findRunningServe(
+  file = runtimePath(),
+): Promise<number | undefined> {
+  const fromFile = readServeRuntimeFile(file);
+  if (fromFile !== undefined && (await healthOnce(fromFile.port))) {
+    return fromFile.port;
+  }
+  const identity = identityOf(os.homedir());
+  const discovered = await discoverServe(identity.fingerprint, identity.ports);
+  if (discovered === undefined) return undefined;
+  return (await healthOnce(discovered.port)) ? discovered.port : undefined;
+}
+
+/**
  * 确保本地服务在跑。已在跑就什么都不做。
  *
  * 顺序是「先探文件、再探 /healthz、最后才 spawn」：文件在但服务已死是最阴的
