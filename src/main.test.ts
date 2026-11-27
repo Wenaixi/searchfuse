@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanupTempDirs, withTempHome } from './testing/helpers.ts';
 
+/** 与 src/main.ts 的 EXIT_BACKSTOP_KEY 同一个符号，用来测试收尾时清计时器。 */
+const EXIT_BACKSTOP_KEY = Symbol.for('searchfuse.exitBackstop');
+
 const originalArgv = process.argv;
 const originalElectronDescriptor = Object.getOwnPropertyDescriptor(process.versions, 'electron');
 const originalElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE;
@@ -8,6 +11,15 @@ const originalNested = process.env.MODSEARCH_NESTED;
 let restoreHome: (() => void) | undefined;
 
 afterEach(() => {
+  // `main.ts` 在收尾时挂一个 2 秒的 unref 退出兜底计时器。它会在测试结束后
+  // 才触发 `process.exit`，那时 spy 已恢复，Vitest 报「unexpected
+  // process.exit」。每轮收尾都把它清掉。
+  const store = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
+  const backstop = store[EXIT_BACKSTOP_KEY];
+  if (backstop !== undefined) {
+    clearTimeout(backstop);
+    store[EXIT_BACKSTOP_KEY] = undefined;
+  }
   process.argv = originalArgv;
   if (originalElectronRunAsNode === undefined) {
     delete process.env.ELECTRON_RUN_AS_NODE;
