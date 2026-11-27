@@ -15,6 +15,7 @@
 // serveIdentity.parity.test.ts 锁住——那是这套设计唯一的防漂移手段。
 
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 /** 候选端口的起点。选这一段是为了避开常见服务端口，且远离临时端口区。 */
@@ -29,13 +30,28 @@ const FINGERPRINT_CHARS = 8;
 /**
  * 算出一个状态目录的指纹。
  *
- * 用 `path.resolve` 而不是原始字符串：`~/.searchfuse` 与
- * `C:\Users\x\.searchfuse` 必须得到同一个结果，否则同一份状态会被认成两个。
- * Windows 上还要消掉大小写差异（`C:\Users` 与 `c:\users` 是同一个目录）。
+ * 用 `realpathSync` 而不是 `path.resolve`：Windows 上 `C:\Users\Administrator`
+ * 与 `C:\Users\ADMINI~1`（8.3 短名）是**同一个目录**，junction 与它指向的
+ * 目标也是同一个。用 resolve 会给出两组不同的指纹，于是同一份状态被认成
+ * 两个身份——服务绑在一组候选上、客户端去探另一组，症状与「服务没起来」
+ * 一模一样。
+ *
+ * 目录还没建出来时 realpath 会抛 ENOENT：那时退回 resolve，因为那种情况下
+ * 没有「另一个写法」可言。大小写仍要统一（`C:\Users` 与 `c:\users` 在
+ * Windows 上相等）。
  */
 export function fingerprintOf(stateDir: string): string {
-  const normalized = path.resolve(stateDir).toLowerCase();
-  return createHash('sha256').update(normalized).digest('hex').slice(0, FINGERPRINT_CHARS);
+  const resolved = realpathOrSelf(stateDir);
+  return createHash('sha256').update(resolved.toLowerCase()).digest('hex').slice(0, FINGERPRINT_CHARS);
+}
+
+/** realpath 拿不到（目录不存在、权限不足）时退回 resolve。 */
+function realpathOrSelf(stateDir: string): string {
+  try {
+    return fs.realpathSync(stateDir);
+  } catch {
+    return path.resolve(stateDir);
+  }
 }
 
 /**

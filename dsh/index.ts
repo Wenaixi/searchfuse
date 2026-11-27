@@ -18,6 +18,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -605,9 +606,20 @@ function healthOnce(port: number): Promise<boolean> {
 const IDENTITY_PORT_BASE = 42000;
 const IDENTITY_PORT_SPAN = 8;
 
+/**
+ * 用 realpathSync 而不是 resolve：Windows 上 `C:\Users\Administrator` 与
+ * `C:\Users\ADMINI~1`（8.3 短名）是同一个目录，junction 与它的目标也是。
+ * 用 resolve 会给出两组指纹，同一份状态被认成两个身份。目录不存在时退回
+ * resolve——那种情况下没有「另一个写法」可言。
+ */
 function identityFingerprintOf(stateDir: string): string {
-  const normalized = resolve(stateDir).toLowerCase();
-  return createHash('sha256').update(normalized).digest('hex').slice(0, 8);
+  let resolved: string;
+  try {
+    resolved = realpathSync(stateDir);
+  } catch {
+    resolved = resolve(stateDir);
+  }
+  return createHash('sha256').update(resolved.toLowerCase()).digest('hex').slice(0, 8);
 }
 
 function identityCandidatePorts(fingerprint: string): number[] {
