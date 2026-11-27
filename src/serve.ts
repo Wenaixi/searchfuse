@@ -218,6 +218,12 @@ export interface ServeHandle {
 export function startServe(options: ServeOptions): Promise<ServeHandle> {
   const search = options.search ?? runSearch;
   const fingerprint = options.fingerprint ?? identityOf(os.homedir()).fingerprint;
+  // `__APP_VERSION__` 是 vite 构建时注入的常量，在直接跑 TS 源码的场景
+  // （测试、`tsx`）里不存在。**必须只守卫一次、两处共用**：早先 `/identity`
+  // 用 typeof 守卫而 runtime.json 写入处裸用，于是裸跑时服务能起、`/identity`
+  // 能答，但 runtime.json 写入抛 ReferenceError 被 catch 吞掉——文件永远写
+  // 不出，serveEnsure 卡在「runtime.json not written」那个分支。
+  const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
   let hits = 0;
   let inFlight = 0;
   let idleTimer: NodeJS.Timeout | undefined;
@@ -244,11 +250,11 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
     // 客户端按目录推导出候选端口后逐个探测，靠这里的 fingerprint 确认应答者
     // 确实是同一份 `.searchfuse` 的服务，而不是恰好占着那个端口的别的程序。
     //
-    // `__APP_VERSION__` 是 vite 构建时注入的常量，在直接跑 TS 源码的场景
-    // （测试、`tsx`）里不存在。用 `typeof` 守卫而不是 try/catch：后者会把
-    // 整个响应吞掉，让「版本字段缺失」变成「身份端点 500」。
+    // `/identity` 免鉴权：只回身份，不泄露 token 与配置。
+    //
+    // 客户端按目录推导出候选端口后逐个探测，靠这里的 fingerprint 确认应答者
+    // 确实是同一份 `.searchfuse` 的服务，而不是恰好占着那个端口的别的程序。
     if (url.pathname === '/identity') {
-      const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ port: boundPortForHealth, pid: process.pid, fingerprint, version }));
       return;
@@ -472,7 +478,7 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
       fs.mkdirSync(path.dirname(runtimePath()), { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         runtimePath(),
-        `${JSON.stringify({ port: boundPort, pid: process.pid, fingerprint, startedAt: new Date().toISOString(), version: __APP_VERSION__, token: options.token }, null, 2)}\n`,
+        `${JSON.stringify({ port: boundPort, pid: process.pid, fingerprint, startedAt: new Date().toISOString(), version, token: options.token }, null, 2)}\n`,
       );
     } catch {
       // 运行时文件是诊断用的，写不了不影响服务本身。
