@@ -74,6 +74,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    （内容 809 字符）；Claude Code 从 settings 里的 `ports` 逐个探测。
 3. **并发不雪崩。** 6 个进程同时跑 `serve --ensure`：1 个起服务、5 个报
    「Already running」退出，候选段内只有 1 个 LISTENING。
+4. **删掉 runtime.json 后再 ensure 不起第二个。** 这是审查员实证击穿的那条：
+   修复前 A 活 42800 → 删文件 → B 起在 42801 → 两个都在听。修复后报
+   「Already running on 42158」，监听数始终为 1。
+
+### 审查后补齐（第二轮）
+
+两轮独立审查（代码审查 + 测试守护力）之后补的：
+
+- **`serve --ensure` 接上候选探测**（阻断级）。它是唯一真正起服务的入口，
+  早先只信 `runtime.json`，文件一消失就在下一个候选上起第二个实例。判据
+  抽成 `findRunningServe`，CLI 与插件侧共用同一个函数。
+- **指纹改用 `realpathSync`**。junction 与它指向的目标现在算出同一个指纹。
+  Windows 的 8.3 短名（`C:\Users\ADMINI~1`）仍不会被展开——实测确认，
+  `os.homedir()` 正常返回长名时碰不到，文档已如实写明这个限制。
+- **`syncClaudeSettings` 的早退判据**从「只比 enabled」改成「所有要写的字段
+  都比」。升级用户的旧 settings 没有 fingerprint/ports，只看 enabled 会早退，
+  新字段永远写不进去。
+- **omp 与 claude 的 `runtime.json` 形状检查**补齐 `Number.isInteger` 校验，
+  与 `serveEnsure` / `main.ts` 逐条一致。
+- **`__APP_VERSION__` 只守卫一次**、`/identity` 与 runtime.json 写入共用。
+  早先裸跑时服务能起、`/identity` 能答，但 runtime.json 永远写不出。
+- **`parity` 测试改成抽取 dsh 真身函数体求值**。先前从源码抓数字再自己重建，
+  常量对得上但归一化/取模/截断任一漂移时全量测试零红——实测把 dsh 的
+  `.toLowerCase()` 删掉，838 条一条不红。现在三条反向验证都能变红
+  （去掉 toLowerCase → 4 红、取模 2000→2001 → 2 红、截断 8→6 → 3 红）。
+- **候选端口遇 `EACCES` 也换下一个**（不只是 `EADDRINUSE`）；`listening`
+  改 `once`，避免候选重试时重复写 runtime.json。
+- **候选模式下的实例收敛**：启动成功后检查前序候选，有同指纹服务就让位退出。
+- **锁等待超时的错误文案**区分「持锁者还在跑」与「持锁者已死」两种真相。
+- 删掉 `candidatePorts` 里永不触发的 `<= 65535` 守卫（它让函数可能返回少于
+  8 个元素，与契约矛盾）；`serve.ts` 两处「固定端口」过时注释改成候选语义。
 
 <!-- 0.1.0 的完整记录见下 -->
 
