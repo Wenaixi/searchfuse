@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   其余成为占坑的孤儿。
 - **先退出的实例会删掉后退出的那个的文件。** `close()` 原先无条件 `rmSync`，
   服务 A 关闭时把服务 B 写下的 `runtime.json` 一并删掉，B 瞬间变瞎。
-- **512 错误正文被吞。** dsh 的 `tryServe` 早先「先探 `/healthz` 再返回」，
+- **5xx 错误正文被吞。** dsh 的 `tryServe` 早先「先探 `/healthz` 再返回」，
   服务活着但健康检查恰好不通时被判成「服务不存在」，于是回退 spawn kernel，
   服务端 5xx 正文里逐引擎的尝试轨迹就此消失，用户看到「不可达」而非真实原因。
 
@@ -65,9 +65,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 反向验证：破坏指纹校验 → 「陌生服务」那条变红；去掉候选探测层 →
   「不另起实例」那条变红。两条都亲眼看到变红再恢复。
 
-三项实测的端到端结果：服务绑在指纹推导出的第一个候选端口 42158；
-删掉 `runtime.json` 后，客户端仍在 42158 认出指纹 `21fe1ece`，从 `serve-token`
-读到 token，真实搜索返 200（92 KB 结果）。
+三项实测的端到端结果：
+
+1. **服务绑在候选段内。** 本机指纹 `21fe1ece` → 候选 `42158..42165`，服务实际绑
+   42158，`runtime.json` 与 `/identity` 报出的指纹与推导值一致。
+2. **文件消失后三端都能找回。** 删掉 `runtime.json` 后：CLI / serveEnsure 在
+   42158 认出指纹；dsh 的 `locateServeRuntime` 走候选探测，真实搜到 28 条结果
+   （内容 809 字符）；Claude Code 从 settings 里的 `ports` 逐个探测。
+3. **并发不雪崩。** 6 个进程同时跑 `serve --ensure`：1 个起服务、5 个报
+   「Already running」退出，候选段内只有 1 个 LISTENING。
+
+<!-- 0.1.0 的完整记录见下 -->
+
 
 <!-- 0.1.0 的完整记录见下 -->
 
