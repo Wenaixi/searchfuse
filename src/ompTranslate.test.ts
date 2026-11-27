@@ -117,4 +117,71 @@ describe('omp 的 toToolResult', () => {
     expect(text).toContain('https://l19.example');
     expect(text).not.toContain('https://l39.example');
   });
+
+  it('warnings 与 uncertainty 超量时只输出前 10 条', () => {
+    // 早先没有任何测试喂超过上限的列表，把 stringList 的 cap 删掉照样全绿。
+    // 上限的意义是：一个降级运行可能带回几十条引擎失败说明，全塞给模型
+    // 会把真正的答案埋在噪音里。
+    const many = Array.from({ length: 15 }, (_, i) => `w${i}`);
+    const text = textOf(
+      toToolResult(
+        envelope('search', {
+          items: [{ title: 'A', url: 'https://a.example' }],
+          warnings: many,
+          uncertainty: many.map((w) => `u${w}`),
+        }),
+      ),
+    );
+
+    expect(text).toContain('w9');
+    expect(text).not.toContain('w10');
+    expect(text).toContain('uw9');
+    expect(text).not.toContain('uw10');
+  });
+
+  it('抓页只有链接没有正文时仍算成功', () => {
+    // 索引页、目录页、登录墙后面的清单：正文抽不出来，但一页链接就是答案。
+    // 早先 hasBody 只看 content，这种页面被判 isError，模型会白重试一次。
+    const result = toToolResult(
+      envelope('fetch', {
+        summary: 'A directory page.',
+        content: '',
+        links: [
+          { text: 'Docs', url: 'https://e/docs' },
+          { text: 'API', url: 'https://e/api' },
+        ],
+      }),
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result)).toContain('https://e/docs');
+  });
+
+  it('链接全是垃圾项时不算拿到内容（判据与输出必须同一份）', () => {
+    // 一条 `{nope: 1}` 之类的垃圾不该让空页面被判成功：判据若数原始 links
+    // 长度，就会出现「判有内容、却什么都没输出」的裂口。
+    const result = toToolResult(
+      envelope('fetch', {
+        content: '   ',
+        links: [{ nope: 1 }, { url: 42 }, null],
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('这个页面没有取到内容');
+  });
+
+  it('服务错误信封把真实原因说出来，而不是编一句「没有结果」', () => {
+    // /v1/read-page 在 400/500 时 body 是 {error:"missing url"}。落进
+    // 「没有 items」的分支会输出「所有引擎都没有返回结果」——抓页请求里
+    // 根本没有引擎在搜，那句文案本身就是错的，真实原因还消失了。
+    const missing = toToolResult(JSON.stringify({ error: 'missing url' }));
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain('missing url');
+    expect(textOf(missing)).not.toContain('所有引擎都没有返回结果');
+
+    // 抓页链路的错误同样不能退回搜索文案。
+    const boom = toToolResult(JSON.stringify({ error: 'firecrawl exploded' }));
+    expect(textOf(boom)).toContain('firecrawl exploded');
+  });
 });

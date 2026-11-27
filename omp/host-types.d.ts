@@ -27,12 +27,16 @@ declare module '@oh-my-pi/pi-coding-agent' {
     label: string;
     description: string;
     parameters: ZodObjectLike;
-    loadMode?: 'essential' | 'deferred';
+    // 真实取值是 essential / discoverable。写成 deferred 能编译通过，
+    // 但宿主不认——工具会静默不出现。取值已在 omp 二进制里核实。
+    loadMode?: 'essential' | 'discoverable';
     approval?: 'read' | 'write';
+    // signal 可以是缺的：实现里 fetchOrSpawn 明确按 `AbortSignal | undefined`
+    // 处理，healthOnce 也有 undefined 兜底。声明写必填会让实现层不敢保留兜底。
     execute(
       toolCallId: string,
       params: Record<string, unknown>,
-      signal: AbortSignal,
+      signal?: AbortSignal,
     ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
   }
 

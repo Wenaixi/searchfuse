@@ -86,6 +86,27 @@ describe('config file', () => {
     expect(() => setConfigValue('hosts.nope.enabled', 'true', p)).toThrow(/Known hosts: dsh, claudeCode, omp/);
     // 值不是布尔：必须拒收。
     expect(() => setConfigValue('hosts.omp.enabled', 'maybe', p)).toThrow(/Use true or false/);
+    // 拒收面必须钉死。`coerceBoolean` 若放宽成接受 1/yes/0/no，用户写
+    // `hosts.omp.enabled=1` 会被静默接受，而文档与 doctor 都只认 true|false。
+    for (const bad of ['1', '0', 'yes', 'no', 'on', 'off']) {
+      expect(() => setConfigValue('hosts.omp.enabled', bad, p)).toThrow(/Use true or false/);
+    }
+    // 宿主名大小写敏感：`OMP` 不能被当成 omp 写进去。
+    expect(() => setConfigValue('hosts.OMP.enabled', 'true', p)).toThrow(/Unknown host: OMP/);
+  });
+
+  it('写 hosts 开关时保留该宿主的其他既有字段', () => {
+    // 回归：早先写 enabled 用的是 `{ ...config.hosts?.[hostName], enabled }`，
+    // 若那条展开被删掉，宿主名下的其他字段会静默消失。
+    const p = tempConfigPath();
+    fs.writeFileSync(
+      p,
+      JSON.stringify({ hosts: { omp: { enabled: true, runtimePath: '/opt/kf' } } }),
+    );
+
+    setConfigValue('hosts.omp.enabled', 'false', p);
+
+    expect(loadConfigFile(p).hosts?.omp).toEqual({ enabled: false, runtimePath: '/opt/kf' });
   });
 
   it('rejects unknown fields and malformed keys', () => {

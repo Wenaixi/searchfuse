@@ -10,7 +10,7 @@
     "dev": "vite build --watch",
     "build": "vite build && tsc -p tsconfig.dsh.json --outDir dsh",
     "build:dsh": "tsc -p tsconfig.dsh.json --outDir dsh",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.dsh.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.dsh.json --noEmit && tsc -p omp/tsconfig.json --noEmit && tsc -p claude/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint",

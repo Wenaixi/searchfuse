@@ -19,8 +19,9 @@ import { describe, expect, it } from 'vitest';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const kernel = path.join(root, 'dist', 'kernel.js');
 
-/** 跑一次 kernel，返回退出码与合并后的输出。 */
-function runKernel(args: string[]): { code: number | null; output: string } {
+/** 跑一次 kernel，返回退出码、合并后的输出与墙钟耗时。 */
+function runKernel(args: string[]): { code: number | null; output: string; ms: number } {
+  const startedAt = Date.now();
   const result = spawnSync(process.execPath, [kernel, ...args], {
     encoding: 'utf-8',
     timeout: 30_000,
@@ -29,6 +30,7 @@ function runKernel(args: string[]): { code: number | null; output: string } {
   return {
     code: result.status,
     output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+    ms: Date.now() - startedAt,
   };
 }
 
@@ -57,29 +59,62 @@ describe('kernel 的入口契约', () => {
   it('只给 -q 就放行，不被入口拦下', () => {
     // 不走真实搜索：那会花掉引擎额度、还受缓存影响。这里只用一只
     // 不存在的引擎，让入口先放行、再由引擎层立刻报错。
-    // 关键看「不是 2」——2 表示入口把 -q 判成了参数错误。
-    const { code } = runKernel(['-q', 'x', '-e', '__no-such-engine__']);
-    expect(code).not.toBe(2);
+    //
+    // 早先只断言「不是 2」，但坏行为是**退 0 并真的去搜**，它满足「不是 2」。
+    // 现在同时钉住「不是 0」与措辞，否则这条测试对 `-e` 被忽略那个缺陷
+    // 毫无守护力。
+    const { code, output } = runKernel(['-q', 'x', '-e', '__no-such-engine__']);
+    expect(code).toBe(1);
+    expect(output).toMatch(/Unknown engine/);
   }, 30_000);
 
   it('短选项 -e 会被解析，无效引擎当场报错而不是静默去搜', () => {
     // 这一条守的是 takeOption 的别名表：早先 kernel 只把 `--engine` 传进去，
     // `-e` 被整个跳过 —— `engine` 变成 undefined，于是回退成一次全引擎融合，
-    // 退出码 0、真的花掉几十秒额度。断言必须同时钉住「该报错」的措辞和
-    // 「不该退 0」，只断言「不是 2」的话，那个坏行为（退 0）照样满足。
-    const { code, output } = runKernel(['-q', 'x', '-e', '__no-such-engine__']);
+    // 退出码 0、真的花掉几十秒额度。断言必须同时钉住「该报错」的措辞、
+    // 「不该退 0」，以及「没有真的去搜」。
+    //
+    // 光有措辞断言不够：构造一个「stderr 里塞一句 Unknown engine、然后照样
+    // 回退去搜」的实现，前面两条断言都会满足。区分「报了错就停」与「报了错
+    // 还在搜」的可靠判据是墙钟耗时 —— 前者只走解析，1-2 秒；真去搜要 6 秒以上。
+    const { code, output, ms } = runKernel(['-q', 'x', '-e', '__no-such-engine__']);
     expect(code).not.toBe(0);
     expect(output).toMatch(/Unknown engine/);
     expect(output).toMatch(/__no-such-engine__/);
+    expect(ms).toBeLessThan(6000);
   }, 30_000);
 
-  it('短选项 -s 与 --source 等价', () => {
-    // 同一条别名表的另一格。-s x 若被忽略，运行会默认去搜 web；
-    // 用不存在的引擎把两条路的差异放大成可断言的错误文案。
-    const short = runKernel(['-q', 'x', '-s', 'x', '-e', '__no-such-engine__']);
-    expect(short.code).not.toBe(0);
-    expect(short.output).toMatch(/Unknown engine/);
+  it('短选项 -u 与 --url 等价，否则 dsh 的 read_page 一律退 2', () => {
+    // dsh 侧的 read_page 传的正是 `-u`。早先这里只认 `--url`，于是
+    // `-u <url>` 被判成「什么也没给」，退 2 —— 工具注册成功、调用必败。
+    // 期望退 1（引擎层失败，说明参数已通过），与 `--url` 那条同判据。
+    const { code } = runKernel(['-u', 'http://127.0.0.1:9/nope', '--timeout', '3000']);
+    expect(code).toBe(1);
   }, 30_000);
+
+  it('选项缺值时不当成「值是一个选项」，也不静默去搜', () => {
+    // `--engine -q x` 里的 `-q` 是选项、不是引擎名。早先的判断只拦 `--`
+    // 开头的词，`-q` 会被当成引擎名 → 报错；而更早的版本干脆整个跳过。
+    // 这里钉住「缺值要被识别出来」，不是把下一个选项吞成值。
+    const { output } = runKernel(['-q', 'x', '-e', '--timeout', '3000']);
+    // 要么明确报缺值，要么报未知引擎 —— 但绝不能把 `--timeout` 当引擎名。
+    expect(output).not.toMatch(/engine: *--timeout/);
+    expect(output).not.toMatch(/--timeout: *Unknown engine/);
+  }, 30_000);
+
+  it('短选项 -s 与 --source 等价：用有效引擎时才看得见差异', () => {
+    // 这条早先写成 `-s x -e __no-such-engine__`，于是 `-s` 被忽略后错误照样
+    // 由 `-e` 抛出，两条路输出逐字节相同 —— 是个假绿。要看见 `-s` 的作用，
+    // 必须让引擎有效、让「搜哪个语料」决定结果：X 语料在本机不可达（没有
+    // Grok 登录态），会给出 unavailable + 明确的 warnings；web 则正常搜索。
+    const short = runKernel(['-q', 'x', '-s', 'x', '--timeout', '3000']);
+    const long = runKernel(['-q', 'x', '--source', 'x', '--timeout', '3000']);
+    // 两种写法必须得到同样的一类结论（要么都退 1，要么都退 0），
+    // 而不是一个去搜 X、另一个去搜 web。
+    expect(short.code).toBe(long.code);
+    expect(short.output).not.toMatch(/nothing to do/);
+    expect(long.output).not.toMatch(/nothing to do/);
+  }, 60_000);
 
   it('--url 与 -q 同时给时按抓页处理，-q 当关注点', () => {
     // 引擎全失败时 kernel 只往 stderr 写原因、stdout 为空（这是既有契约），

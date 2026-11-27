@@ -142,7 +142,14 @@ function toServeRequest(args: string[]): { endpoint: string; params: Record<stri
  *
  * omp 侧有完整 Node，两条路都能走；服务在跑时省掉一次进程启动。
  */
-/** 调一次服务；拿到文本就返回，否则 undefined。 */
+/**
+ * 调一次服务；拿到文本就返回，否则 undefined。
+ *
+ * 错误响应也要读回来：`/v1/search` 与 `/v1/read-page` 在 400/500 时 body 是
+ * `{error: "..."}`，里面写着真正的原因（`missing url`、引擎抛的错）。只看
+ * `response.ok` 就丢掉它，上层只能编一句「所有引擎都没有返回结果」——而抓页
+ * 请求里根本没有引擎在搜，那句文案本身就说错了地方。
+ */
 async function tryServe(args: string[], signal: AbortSignal | undefined): Promise<string | undefined> {
   const runtime = readServeRuntime();
   if (runtime === undefined) return undefined;
@@ -158,7 +165,9 @@ async function tryServe(args: string[], signal: AbortSignal | undefined): Promis
       headers: { authorization: `Bearer ${runtime.token}`, accept: 'application/json' },
       signal: combined,
     });
-    if (response.ok) return await response.text();
+    const text = await response.text();
+    // 非 2xx 也把 body 交回去，让 toToolResult 用 `{error}` 分支说出真实原因。
+    if (response.ok || text.trim() !== '') return text;
   } catch {
     // 连接被拒：交给上层。
   }
@@ -272,6 +281,12 @@ export function toToolResult(raw: string): { content: Array<{ type: 'text'; text
   }
 
   const root = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  // 服务的错误信封是 `{error: "..."}`，没有 results。先认它，别让它落进
+  // 「没有 items」的分支：那条路会编出一句 `所有引擎都没有返回结果`，
+  // 而真实的 `missing url` / 引擎抛错就此消失。
+  if (typeof root.error === 'string' && root.error !== '' && !Array.isArray(root.results)) {
+    return { content: [{ type: 'text', text: `服务返回错误：${root.error}` }], isError: true };
+  }
   const results = Array.isArray(root.results) ? root.results : [];
   const entry = (typeof results[0] === 'object' && results[0] !== null ? results[0] : {}) as KernelEntry;
 
@@ -283,6 +298,14 @@ export function toToolResult(raw: string): { content: Array<{ type: 'text'; text
 
   // 抓页模式：正文是这次调用存在的全部理由，必须原样交出去。
   const isFetch = root.mode === 'fetch' || typeof entry.content === 'string';
+  // 可用的链接只算「对象且 url 是字符串」的那些，与底下真正输出的完全同一份。
+  // 判「有没有内容」时若数原始 links 长度，会出现「判有内容、却什么都没输出」
+  // 的裂口：一条垃圾项就足以让一次空页面被判为成功。
+  const rawLinks = Array.isArray(entry.links) ? entry.links : [];
+  const usableLinks = rawLinks
+    .filter((link): link is Record<string, unknown> => typeof link === 'object' && link !== null)
+    .filter((link) => typeof link.url === 'string')
+    .slice(0, FETCH_LINK_CAP);
   if (isFetch) {
     const content = typeof entry.content === 'string' ? entry.content.trim() : '';
     if (content !== '') {
@@ -292,14 +315,9 @@ export function toToolResult(raw: string): { content: Array<{ type: 'text'; text
         content.length > FETCH_CONTENT_CAP ? `${content.slice(0, FETCH_CONTENT_CAP)}…` : content,
       );
     }
-    const links = Array.isArray(entry.links) ? entry.links : [];
-    const usable = links
-      .filter((link): link is Record<string, unknown> => typeof link === 'object' && link !== null)
-      .filter((link) => typeof link.url === 'string')
-      .slice(0, FETCH_LINK_CAP);
-    if (usable.length > 0) {
+    if (usableLinks.length > 0) {
       lines.push('', 'Links:');
-      for (const link of usable) {
+      for (const link of usableLinks) {
         const text = typeof link.text === 'string' ? link.text : String(link.url);
         lines.push(`- [${text}](${String(link.url)})`);
       }
@@ -335,12 +353,18 @@ export function toToolResult(raw: string): { content: Array<{ type: 'text'; text
   // 判「有没有结果」不能看行数。空结果也会带 warnings（「所有引擎都失败」
   // 这类原因必须交给模型看），于是 lines 非空、isError 却是该为真的。
   // 真正的判据只有一条：这次调用有没有拿到可用的内容。
+  //
+  // 抓页要看 content **和** links：只有导航没有正文的页面（索引页、登录墙
+  // 后面那张目录）仍然是有用的答案。只看 content 会把一整页链接判成失败，
+  // 模型据此重试或放弃，而它其实已经拿到了东西。
   const hasBody = isFetch
-    ? typeof entry.content === 'string' && entry.content.trim() !== ''
+    ? (typeof entry.content === 'string' && entry.content.trim() !== '') || usableLinks.length > 0
     : Array.isArray(entry.items) && entry.items.length > 0;
 
   if (!hasBody) {
     const reason = [...uncertainty, ...warnings].join('; ');
+    // 抓页与搜索的兜底文案必须分开：抓页请求里说「所有引擎都没有返回结果」
+    // 是错的，那条路上根本没有引擎在搜。
     const fallback = isFetch ? '这个页面没有取到内容。' : '所有引擎都没有返回结果。';
     lines.unshift(reason === '' ? fallback : `${fallback} 原因：${reason}`);
     return { content: [{ type: 'text', text: lines.join('\n') }], isError: true };

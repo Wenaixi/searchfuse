@@ -100,7 +100,9 @@ async function main(): Promise<void> {
   // 判定放在这里而不是靠 runSearch 内部，是因为「参数缺失」要退 2，
   // 而 runSearch 的失败会退 1——调用方按退出码区分「重试」与「别重试」。
   const query = takeOption(args, '-q', '--query');
-  const url = takeOption(args, '--url');
+  // `-u` 必须和 `--url` 一起认：dsh 侧的 read_page 传的就是 `-u`。
+  // 只认长选项会让它退 2「nothing to do」——工具注册成功、调用必败。
+  const url = takeOption(args, '-u', '--url');
 
   const hasQuery = query !== undefined && query.trim() !== '';
   const hasUrl = url !== undefined && url.trim() !== '';
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
     query,
     url,
     // 短选项与 CLI 对齐：Claude Code 与 omp 侧的调用方按 CLI 手册传 `-e`
-     // 与 `-s`，只认长选项会让它们被静默忽略（见 takeOption 的注释）。
+    // 与 `-s`，只认长选项会让它们被静默忽略（见 takeOption 的注释）。
     engine: takeOption(args, '-e', '--engine'),
     sources: takeOption(args, '-s', '--source'),
     timeoutMs: takeNumber(args, '--timeout') ?? DEFAULT_TIMEOUT_MS,
