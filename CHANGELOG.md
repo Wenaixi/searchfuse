@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+暂无。
+
+## [0.1.2] - 2026-11-28
+
+这一版只做一件事：**让冷却机制在生产路径上真的工作，并补齐 omp 那一端**。
+
 ### Fixed
 
 - **omp 扩展没有候选端口探测。** 删掉 `runtime.json` 后（服务被 kill 时
@@ -267,5 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rootDir`（否则退出码 2、`dsh/index.js` 不生成，包装不上）；undici 8 对
   `http://` 目标改用标准代理转发而非 CONNECT 隧道，测试里的假代理两条路都要接。
 
-[Unreleased]: https://github.com/Wenaixi/searchfuse/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Wenaixi/searchfuse/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Wenaixi/searchfuse/releases/tag/v0.1.2
+[0.1.1]: https://github.com/Wenaixi/searchfuse/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Wenaixi/searchfuse/releases/tag/v0.1.0
