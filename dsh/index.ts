@@ -627,8 +627,7 @@ function identityCandidatePorts(fingerprint: string): number[] {
   const base = IDENTITY_PORT_BASE + (seed % 2_000);
   const ports: number[] = [];
   for (let i = 0; i < IDENTITY_PORT_SPAN; i += 1) {
-    const port = base + i;
-    if (port <= 65_535) ports.push(port);
+    ports.push(base + i);
   }
   return ports;
 }

@@ -58,6 +58,11 @@ function realpathOrSelf(stateDir: string): string {
  * 从指纹推出一组候选端口，按优先级从高到低。
  *
  * 确定性：同一个指纹永远给出同一组。跨进程、跨宿主、跨重启都一样。
+ *
+ * 端口范围由算式自身保证：`42000 + (seed % 2000)` 最大 43999，加 7 得
+ * 44006，远低于 65535。所以这里不需要越界过滤——早先有一个 `<= 65535`
+ * 的守卫，它永远不触发，却让函数**可能返回少于 PORT_SPAN 个元素**，与
+ * 「候选恒为 8 个」的契约和测试断言互相矛盾。
  */
 export function candidatePorts(fingerprint: string): number[] {
   const seed = Number.parseInt(fingerprint, 16);
@@ -65,9 +70,7 @@ export function candidatePorts(fingerprint: string): number[] {
   const base = PORT_BASE + (seed % 2_000);
   const ports: number[] = [];
   for (let i = 0; i < PORT_SPAN; i += 1) {
-    const port = base + i;
-    // 65535 之上不是合法端口。窄带设计下不会发生，但算式不该靠「不会发生」。
-    if (port <= 65_535) ports.push(port);
+    ports.push(base + i);
   }
   return ports;
 }
