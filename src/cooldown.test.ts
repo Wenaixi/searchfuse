@@ -14,6 +14,7 @@ import {
   loadCooldownState,
   MONTHLY_COOLDOWN_MS,
   parseResetDuration,
+  parseRetryAfterSeconds,
   recordQuotaCooldown,
 } from './cooldown.ts';
 import { agyQuotaEnvelope } from './fixtures/index.ts';
@@ -190,6 +191,25 @@ describe('classifyQuota', () => {
     expect(
       classifyQuota(new Error('tavily returned 429 Too Many Requests: rate limit'), now),
     ).toBeNull();
+  });
+
+  // 429 不等于瞬时限流。firecrawl 的免注册额度用完时也回 429，正文却明写
+  // `"reason":"credits"` 与 `retry_after_seconds`——那是花光的预算。早先只看
+  // `/429/` 就返回 null，于是每跑一次搜索都白撞一次这堵墙。
+  it('records a 429 that carries a credits reason and retry_after_seconds', () => {
+    const message =
+      'firecrawl returned 429 . {"success":false,"error":"You\'ve hit the keyless free tier rate limit.",' +
+      '"reason":"credits","retry_after_seconds":63459}';
+    const until = classifyQuota(new Error(message), now);
+    expect(until).not.toBeNull();
+    // 用服务器自己给的秒数，而不是兜底 TTL——兜底会让冷却早结束又撞一次。
+    expect((until as Date).getTime() - now.getTime()).toBe(63_459 * 1000);
+  });
+
+  it('reads an explicit retry_after_seconds in preference to the reset clause', () => {
+    expect(parseRetryAfterSeconds('"retry_after_seconds":63459')).toBe(63_459 * 1000);
+    expect(parseRetryAfterSeconds('Retry-After: 120')).toBe(120 * 1000);
+    expect(parseRetryAfterSeconds('quota exhausted')).toBeNull();
   });
 
   it('ignores errors that are not about quota', () => {

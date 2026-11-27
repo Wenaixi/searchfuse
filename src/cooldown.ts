@@ -241,12 +241,39 @@ export function parseResetDuration(message: string): number | null {
 }
 
 /**
+ * Parse an explicit "retry after N seconds" field, or null.
+ *
+ * Firecrawl 的免注册额度耗尽时报 429，正文是 JSON：
+ * `{"reason":"credits","retry_after_seconds":66233}`。这个秒数就是权威的恢复
+ * 时间，比任何兜底 TTL 都准。同时也认 HTTP 标准的 `Retry-After` 头写进
+ * message 的常见形态。
+ */
+export function parseRetryAfterSeconds(message: string): number | null {
+  const match = /"retry_after_seconds"\s*:\s*(\d+)/i.exec(message);
+  if (match) {
+    const seconds = Number.parseInt(match[1] ?? '', 10);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+  }
+  const header = /retry-after:\s*(\d+)/i.exec(message);
+  if (header) {
+    const seconds = Number.parseInt(header[1] ?? '', 10);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+  }
+  return null;
+}
+
+/**
  * Decide whether an engine failure is the quota class worth remembering, and
  * when the engine should recover. A per-second rate limit is transient, not a
  * spent budget, so it returns null and never touches the store. A quota error
  * with a reset clause recovers precisely, one without recovers after the
  * default TTL. A region lock is not a quota but is just as lasting, so it is
  * held for a day.
+ *
+ * **429 不等于瞬时限流。** firecrawl 的免注册额度用完时也回 429，正文却明写
+ * `"reason":"credits"` 与 `retry_after_seconds`——那是花光的预算，不是每秒
+ * 一次的抖动。早先只看 `/429/` 就 `return null`，于是每跑一次搜索都白撞一次
+ * 这堵墙，而 `retry_after_seconds` 这个权威恢复时间从来没人读。
  */
 export function classifyQuota(error: unknown, now: Date): Date | null {
   const message = error instanceof Error ? error.message : String(error);
@@ -257,8 +284,12 @@ export function classifyQuota(error: unknown, now: Date): Date | null {
   // Tavily's monthly plan cap (432) and PAYGO cap (433) are a spent monthly
   // budget carried in the status code, not a per-second blip.
   const monthlyQuota = /\bhttp 43[23]\b/i.test(message);
+  // `"reason":"credits"` 这类 JSON 字段写法，以及 `403`/`402` 明说的额度耗尽。
+  // 它们与上面的 monthlyQuota 一样，是花光的预算。
+  const creditReason = /"reason"\s*:\s*"[^"]*(?:credit|quota|limit)[^"]*"/i.test(message);
   const looksQuota =
     monthlyQuota ||
+    creditReason ||
     /quota|out of credit|insufficient (?:balance|credit)|credits? (?:exhausted|used up)|balance|Resets? in/i.test(
       message,
     );
@@ -268,7 +299,9 @@ export function classifyQuota(error: unknown, now: Date): Date | null {
   if (!looksQuota) {
     return null;
   }
-  const resetMs = parseResetDuration(message);
+  // 恢复时间按精度从高到低：显式的 retry_after_seconds → "Resets in 94h19m9s"
+  // → 兜底 TTL。用到服务器自己给的秒数，就不会出现「冷却早结束、又撞一次」。
+  const resetMs = parseRetryAfterSeconds(message) ?? parseResetDuration(message);
   const fallbackMs = monthlyQuota ? MONTHLY_COOLDOWN_MS : DEFAULT_COOLDOWN_MS;
   return new Date(now.getTime() + (resetMs ?? fallbackMs));
 }
