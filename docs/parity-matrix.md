@@ -41,6 +41,7 @@
 | 设置卡片 UI | TODO(S3) | N/A: 宿主无对应 UI（mod 无内置卡片渲染） | N/A: 宿主无对应 UI |
 | 引擎失败诊断 | TODO(S1) | TODO(S1) | TODO(S1) |
 | 服务不可达时的降级 | TODO(S3) | TODO(S4) | TODO(S5)（实测：退到公网 Parallel、exit 0、stderr 空——**有降级但目标是公网**，S5② 断言此行为） |
+| 服务定位（同目录 = 同服务） | src/serveIdentity.postcondition.test.ts::runtime.json 被删掉后，仍能靠指纹把服务找回来 | src/claudeHook.test.ts::runtime.json 存在且 healthz 会通 | src/dshPlugin.test.ts::reaches the service over HTTP instead of spawning a one-off kernel |
 
 ## 已知语义损失（不是「不支持」，是「有损」）
 
@@ -59,3 +60,7 @@
   订正顶部状态——脚本存在但**没挂 CI**，原文「本文件由 CI 断言」不实。填充 dsh
   侧三格（搜索聚合、x_search、read_page），并把 Claude Code 侧标为「已实现但
   无等价测试」，因为矩阵的定义是「有实现且有测试」，光有代码不算。
+- 2026-11-27：新增「服务定位」一行。0.1.1 把服务身份从 `runtime.json` 换成
+  从目录推导的候选端口 + `/identity` 指纹校验，三端各有一条守护测试。
+  claude 那端不需要自己算指纹（沙箱里没有 crypto），由 `hosts sync` 预先
+  写进 settings，所以它的守护点落在 hooks 的读取路径上。

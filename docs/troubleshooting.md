@@ -253,6 +253,43 @@ searchfuse 拉起了一个引擎，那个引擎又想再跑一次 searchfuse。C
 
 这不是配置问题。grok-cli 已经禁止了会向外调 shell 的工具。再跑一次搜索。如果反复出现，更新 Grok Build（`grok` CLI）。
 
+## 三端找不到本地服务（服务定位）
+
+searchfuse 的服务地址不再只靠 `~/.searchfuse/runtime.json` 这一个文件。它从状态目录的
+路径推导出一组固定候选端口，客户端按这组端口逐个探测，并用 `/identity` 返回的指纹
+确认应答者是自己的服务。
+
+推导规则（三端一致）：
+
+```
+指纹 = sha256(realpath(~/.searchfuse).toLowerCase()) 的前 8 位十六进制
+候选端口 = 42000 + (指纹 % 2000) 起，连续 8 个
+```
+
+**为什么要这样做**：`runtime.json` 会在服务被信号杀掉时消失（进程跑不到清理逻辑），
+留下「端口还在听、文件已经没了」的状态。文件消失后，客户端靠候选端口与指纹仍能
+把服务认回来。
+
+查当前状态：
+
+```bash
+# 看服务自称的身份（免鉴权，不泄露 token）
+curl -s --noproxy '*' http://127.0.0.1:<候选端口>/identity
+# 例如：{"port":42158,"pid":47000,"fingerprint":"21fe1ece","version":"0.1.1"}
+
+# 看文件里记的端口与指纹是否一致
+cat ~/.searchfuse/runtime.json
+```
+
+判据是**两条都要**：候选端口上有服务在听，且 `/identity` 的 `fingerprint` 与本机
+推导值相同。只有前者会把恰好占着那个端口的别的程序认成自己的服务。
+
+如果指纹对不上，说明那一份 `.searchfuse` 不是当前这个 home 的。三端读的都是
+`os.homedir()`（Windows 上读 `USERPROFILE`，POSIX 上读 `HOME`），所以**测试或容器里
+把 HOME/USERPROFILE 指到别处时会推出另一组候选**——这正是隔离生效的证据，不是故障。
+
+`runtime.json` 现在只是缓存：删掉它不会让三端失联，服务被认回来之后会重新写回。
+
 ## 还是没辙
 
 用 searchfuse 打印的失败命令原样重跑一遍，把那份输出附在 issue 里：https://github.com/Wenaixi/searchfuse/issues
