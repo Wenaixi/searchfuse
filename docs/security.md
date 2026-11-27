@@ -20,6 +20,22 @@ read_when:
 
 HTTP 搜索引擎只访问各自的官方主机（除非用 `baseURL` 覆盖）：`api.tavily.com`、`api.exa.ai`、`api.firecrawl.dev`、`api.keenable.ai`、`api.anysearch.com`、`api.you.com`。You.com 引擎把搜索词发往 `api.you.com`，不带 key 也不需要账号。它没有 `baseURL` 设置。SearXNG 没有官方主机：它连用户配置的实例，或本进程拉起的随包实例。
 
+## 本地服务的鉴权边界
+
+服务只绑 `127.0.0.1`，不监听任何对外接口。三个端点的可见面各不相同：
+
+| 端点 | 鉴权 | 暴露什么 |
+| :-- | :-- | :-- |
+| `/healthz` | 免鉴权 | 只有 `OK` 三个字节，连端口都不报 |
+| `/identity` | 免鉴权 | 端口、pid、状态目录指纹、版本号 |
+| `/v1/*`、`/search`、`/config` 等业务端点 | 必须带 `Authorization: Bearer <token>` | 搜索结果、配置摘要 |
+
+`/healthz` 与 `/identity` 免鉴权是刻意的：就绪探测要在拿到 token 之前就能区分「没起来」与「起来了但要授权」，否则客户端无法在服务刚启动的窗口里判断该等还是该重试。
+
+`/identity` 只回四项本机事实（端口、进程 id、目录指纹、版本），不含 token、不含任何配置、不含密钥。它的用途是让客户端在 `runtime.json` 消失后确认「应答者是不是同一份 `.searchfuse` 的服务」——**指纹匹配是唯一判据**，只认 HTTP 200 会把恰好占着该端口的别的程序认成自己的，然后把 token 发给它。
+
+token 存在 `~/.searchfuse/serve-token`（0600），所有业务端点共用它。服务重启不轮换 token，所以 401 只在 token 文件被外部改动时出现。
+
 ## 本地抓取器的 SSRF 防护
 
 `local` 引擎在任何请求发出之前就拒绝：
