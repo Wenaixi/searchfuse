@@ -331,10 +331,16 @@ describe('dsh web search provider', () => {
     await expect(providers[0].search({ query: 'anything' })).resolves.toMatchObject({
       content: expect.stringContaining('What the web says.'),
     });
-    expect(stub.requests).toHaveLength(1);
-    expect(stub.requests[0].path).toBe('/v1/search');
-    expect(stub.requests[0].params.get('q')).toBe('anything');
-    expect(stub.requests[0].authorization).toBe('Bearer test-token');
+    // 不再断言「恰好 1 个请求」：服务的定位现在是两级——先探 /healthz 确认
+    // runtime.json 指向的服务还活着，再发真正的查询。多出来的是这一步，
+    // 它换来的能力是「文件消失后仍能把服务认回来」。要钉住的是「没有起
+    // 子进程、只走 HTTP」，以及查询本身落在 /v1/search 上。
+    const queries = stub.requests.filter((r) => r.path === '/v1/search');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.params.get('q')).toBe('anything');
+    expect(queries[0]!.authorization).toBe('Bearer test-token');
+    // 每一发都是 HTTP，没有一次 spawn。
+    expect(stub.requests.every((r) => r.path === '/healthz' || r.path === '/v1/search')).toBe(true);
   });
 
   it('maps the envelope to the seam result shape', async () => {
@@ -349,7 +355,8 @@ describe('dsh web search provider', () => {
     expect(result.truncated).toBe(false);
     // Max results travels as a query parameter; junk without a URL is dropped
     // and published_at becomes the seam's camelCase.
-    expect(stub.requests[0].params.get('max')).toBe('5');
+    // 取 /v1/search 那一发而不是 requests[0]：定位服务时会先探 /healthz。
+    expect(stub.requests.find((r) => r.path === '/v1/search')!.params.get('max')).toBe('5');
     expect(result.sources).toEqual([
       { title: 'A', url: 'https://a.example', snippet: 'sa', publishedAt: '2026-08-01' },
       { title: 'B', url: 'https://b.example', snippet: 'sb' },
@@ -416,10 +423,15 @@ describe('dsh web search provider', () => {
 describe('dsh CLI budgets', () => {
   // 预算现在以查询参数的形式下发到服务端；服务端读不到它们就会退回自己的
   // 默认值，卡片里的 aggregate.deadlineMs 也就会变成哑设置。
-  const budgetOf = (stub: StubServe) => ({
-    timeout: stub.requests[0]?.params.get('timeout') ?? undefined,
-    deadline: stub.requests[0]?.params.get('deadline') ?? undefined,
-  });
+  // 取真正的业务请求，跳过定位服务时探的 /healthz。
+  // 端点要由调用方指明：read_page 走 /v1/read-page，其余走 /v1/search。
+  const budgetOf = (stub: StubServe, endpoint = '/v1/search') => {
+    const request = stub.requests.find((r) => r.path === endpoint);
+    return {
+      timeout: request?.params.get('timeout') ?? undefined,
+      deadline: request?.params.get('deadline') ?? undefined,
+    };
+  };
 
   it('passes the built-in budgets when neither the plugin nor the file sets one', async () => {
     // Pinned explicitly so this case does not depend on what the ambient
@@ -457,14 +469,14 @@ describe('dsh CLI budgets', () => {
   it('bounds x_search and read_page by a run deadline inside their own backstop', async () => {
     const stub = await serveWith(200, { results: [okSearchEntry] });
     const { tools } = await load({ xSearch: true });
-    for (const [name, args] of [
-      ['x_search', { query: 'anything' }],
-      ['read_page', { url: 'https://a.example' }],
+    for (const [name, args, endpoint] of [
+      ['x_search', { query: 'anything' }, '/v1/search'],
+      ['read_page', { url: 'https://a.example' }, '/v1/read-page'],
     ] as const) {
       stub.requests.length = 0;
       const tool = toolNamed(tools, name) as RegisteredTool & { timeoutMs: number };
       await tool.execute(args, {});
-      const { timeout, deadline } = budgetOf(stub);
+      const { timeout, deadline } = budgetOf(stub, endpoint);
       expect(timeout).toBeDefined();
       expect(deadline).toBeDefined();
       const engineTimeout = Number(timeout);
@@ -571,8 +583,10 @@ describe('dsh read_page tool', () => {
     const tool = toolNamed(tools, 'read_page');
     const value = await tool.execute({ url: 'https://a.example', query: 'rate limits' }, {});
     // 读页也走同一条 HTTP 通道，且 url 以参数形式转发。
-    expect(stub.requests[0].path).toBe('/v1/read-page');
-    expect(stub.requests[0].params.get('url')).toBe('https://a.example');
+    // 取 /v1/read-page 那一发：定位服务时会先探 /healthz。
+    const readPage = stub.requests.find((r) => r.path === '/v1/read-page')!;
+    expect(readPage.path).toBe('/v1/read-page');
+    expect(readPage.params.get('url')).toBe('https://a.example');
     expect(value).toEqual({
       summary: 'The page in one line.',
       content: 'Full extracted content.',

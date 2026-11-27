@@ -24,7 +24,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { request as httpRequest } from 'node:http';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnHidden } from './spawnHidden.js';
 
@@ -593,6 +594,99 @@ function healthOnce(port: number): Promise<boolean> {
 }
 
 /**
+ * 服务身份推导。**必须与 `src/serveIdentity.ts` 逐字一致。**
+ *
+ * 为什么在这里抄一份而不 import：本文件属于 dsh 的独立构建（rootDir="dsh"），
+ * 产物要能脱离 `src/` 单独分发。三份拷贝（src / dsh / claude）任何一份漂移，
+ * 都会造成「服务绑一个端口、客户端去探另一个」的错配，且症状与「服务没起来」
+ * 一模一样。`src/serveIdentity.parity.test.ts` 锁住三者一致——那是唯一的
+ * 防漂移手段。
+ */
+const IDENTITY_PORT_BASE = 42000;
+const IDENTITY_PORT_SPAN = 8;
+
+function identityFingerprintOf(stateDir: string): string {
+  const normalized = resolve(stateDir).toLowerCase();
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 8);
+}
+
+function identityCandidatePorts(fingerprint: string): number[] {
+  const seed = Number.parseInt(fingerprint, 16);
+  const base = IDENTITY_PORT_BASE + (seed % 2_000);
+  const ports: number[] = [];
+  for (let i = 0; i < IDENTITY_PORT_SPAN; i += 1) {
+    const port = base + i;
+    if (port <= 65_535) ports.push(port);
+  }
+  return ports;
+}
+
+function identityOfHome(home: string): { fingerprint: string; ports: number[] } {
+  const fingerprint = identityFingerprintOf(join(home, '.searchfuse'));
+  return { fingerprint, ports: identityCandidatePorts(fingerprint) };
+}
+
+/** 读 `/identity`，拿到服务自称的指纹。 */
+function identityOnce(port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, path: '/identity', method: 'GET', timeout: 2000, headers: { Connection: 'close' } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          resolve(undefined);
+          return;
+        }
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            resolve(isPlainObject(parsed) && typeof parsed.fingerprint === 'string' ? parsed.fingerprint : undefined);
+          } catch {
+            resolve(undefined);
+          }
+        });
+      },
+    );
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(undefined);
+    });
+    req.end();
+  });
+}
+
+/**
+ * 按候选端口找回属于这份 `.searchfuse` 的服务。
+ *
+ * runtime.json 会在服务被 kill 时消失（close 跑不到），所以它不能是唯一凭证。
+ * 必须校验指纹：只看 `/healthz` 200 会把恰好占着候选端口的别的程序认成自己的。
+ */
+async function discoverServeRuntime(): Promise<{ port: number; token: string } | undefined> {
+  const identity = identityOfHome(homedir());
+  for (const port of identity.ports) {
+    if ((await identityOnce(port)) !== identity.fingerprint) continue;
+    const fileToken = readServeTokenFile();
+    if (fileToken !== undefined) return { port, token: fileToken };
+  }
+  return undefined;
+}
+
+/** 读 token 文件。服务端与客户端共用同一份。 */
+function readServeTokenFile(): string | undefined {
+  try {
+    const token = readFileSync(join(homedir(), '.searchfuse', 'serve-token'), 'utf-8').trim();
+    return token === '' ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 拉起本地服务：跑 `serve --ensure`。
  *
  * 就绪的判据是 `/healthz` 通过，不是子进程退出码。实测：`serve --ensure`
@@ -617,9 +711,16 @@ async function startServe(
 ): Promise<{ started: boolean; port?: number; reason?: string }> {
   // 服务已经在跑：不 spawn，直接确认。这条与 `src/serveEnsure.ts` 的
   // 第 1、2 步必须一致——否则服务在跑时点「拉起」会白起一个子进程。
+  // 这里要探健康（与 tryServe 的判据不同）：拉起动作的「已在跑」必须以
+  // 真的能应答为准，文件写着端口但服务已死时必须重新拉起。
   const already = readServeRuntime();
   if (already !== undefined && (await healthOnce(already.port))) {
     return { started: false, port: already.port };
+  }
+  // 文件不在时，靠目录指纹把还活着的服务认回来（同 tryServe 的第二级）。
+  const discovered = already === undefined ? await discoverServeRuntime() : undefined;
+  if (discovered !== undefined && (await healthOnce(discovered.port))) {
+    return { started: false, port: discovered.port };
   }
 
   // 只有 npm 包才带 dist/：从 GitHub 源码安装（DSH 的添加对话框接受仓库 URL）
@@ -720,6 +821,26 @@ function readServeRuntime(): { port: number; token: string } | undefined {
 }
 
 /**
+ * 服务的两级定位：文件优先，候选探测兜底。
+ *
+ * 顺序有讲究：**文件里写的端口优先且不先探健康**。
+ *
+ * 早先这里是「先 healthOnce 再返回」。那样有个隐蔽的退化：服务活着但
+ * `/healthz` 恰好不通（或桩服务只实现业务端点时），会被判成「服务不存在」，
+ * 于是回退去 spawn kernel——本来该得到的错误正文（服务端逐引擎的尝试轨迹）
+ * 就此消失，用户看到的是「不可达」而不是真实原因。
+ *
+ * 所以判据是：文件存在且形状合法就认它，把「它到底通不通」交给真正的
+ * 请求去答。只有**文件不在**时才需要候选探测——那才是「服务被 kill、
+ * close 跑不到、文件消失」的场景。
+ */
+async function locateServeRuntime(): Promise<{ port: number; token: string } | undefined> {
+  const fromFile = readServeRuntime();
+  if (fromFile !== undefined) return fromFile;
+  return discoverServeRuntime();
+}
+
+/**
  * 取一次搜索结果：**服务优先，子进程兜底**。
  *
  * 为什么要两条：服务在跑时省掉一次 Node 启动（约 200ms）；服务不在时
@@ -766,7 +887,7 @@ function toServeRequest(args: string[]): Bag | undefined {
 
 /** 调一次服务；拿到文本就返回，否则 undefined。 */
 async function tryServe(args: string[], signal?: AbortSignal): Promise<string | undefined> {
-  const runtime = readServeRuntime();
+  const runtime = await locateServeRuntime();
   if (runtime === undefined) return undefined;
   const request = toServeRequest(args);
   if (request === undefined) return undefined;

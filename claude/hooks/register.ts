@@ -148,47 +148,111 @@ let cachedStamp = '';
  * 判断——比 mtime 简单，且 runtime.json 只在服务起停时变。
  */
 /**
- * 找到 `runtime.json` 的绝对路径。
+ * 找到 `runtime.json` 的绝对路径与身份信息。
  *
  * 为什么需要这一步：宿主的 mod 沙箱里 **`~` 不展开**，`$.env.get('HOME')`
  * 也返回 undefined（实测），所以拿不到家目录。唯一可行的办法是让
  * `searchfuse hosts sync` 把绝对路径写进 Claude 的 settings，mod 通过
  * `$.settings.read` 读回来——那条通道是宿主明确支持的。
  *
+ * 同时把 fingerprint 与候选端口带回来：runtime.json 会在服务被 kill 时
+ * 消失（close 跑不到），那时只能靠这些候选端口逐个探 `/identity` 并把
+ * 应答者自称的指纹与本机算好的比对。沙箱里没有 crypto，算不了指纹，
+ * 所以由 CLI 侧预先写好。
+ *
  * 读不到就返回 undefined：调用方据此回退到 `$.process.run` 直接跑 kernel。
  */
-async function runtimePathFromSettings($: HostDollar, next: HostNext): Promise<string | undefined> {
+async function hostInfoFromSettings(
+  $: HostDollar,
+  next: HostNext,
+): Promise<{ runtimePath?: string; fingerprint?: string; ports?: number[] } | undefined> {
   try {
     const value = await $.settings.read({ key: 'searchfuseHosts', signal: next.signal });
     const hosts = asRecord(value);
     const claude = asRecord(hosts?.claudeCode);
-    const path = claude?.runtimePath;
-    return typeof path === 'string' && path !== '' ? path : undefined;
+    if (claude === undefined) return undefined;
+    const path = claude.runtimePath;
+    const fingerprint = claude.fingerprint;
+    const ports = claude.ports;
+    return {
+      runtimePath: typeof path === 'string' && path !== '' ? path : undefined,
+      fingerprint: typeof fingerprint === 'string' && fingerprint !== '' ? fingerprint : undefined,
+      ports: Array.isArray(ports) ? ports.filter((p): p is number => typeof p === 'number' && Number.isInteger(p)) : undefined,
+    };
   } catch {
     return undefined;
   }
+}
+
+async function runtimePathFromSettings($: HostDollar, next: HostNext): Promise<string | undefined> {
+  return (await hostInfoFromSettings($, next))?.runtimePath;
 }
 
 async function readServeRuntime(
   $: HostDollar,
   next: HostNext,
 ): Promise<ServeRuntime | undefined> {
-  const runtimePath = await runtimePathFromSettings($, next);
-  if (runtimePath === undefined) return undefined;
-  try {
-    const raw = await $.fs.read(runtimePath);
-    if (raw === cachedStamp && cachedRuntime !== undefined) return cachedRuntime;
-    const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
-    if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
-    cachedRuntime = { port: parsed.port, token: parsed.token };
-    cachedStamp = raw;
-    return cachedRuntime;
-  } catch {
-    // 文件不在或读不了：服务没起。
-    cachedRuntime = undefined;
-    cachedStamp = '';
+  const info = await hostInfoFromSettings($, next);
+  if (info?.runtimePath !== undefined) {
+    try {
+      const raw = await $.fs.read(info.runtimePath);
+      if (raw === cachedStamp && cachedRuntime !== undefined) return cachedRuntime;
+      const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
+      if (typeof parsed.port === 'number' && typeof parsed.token === 'string') {
+        cachedRuntime = { port: parsed.port, token: parsed.token };
+        cachedStamp = raw;
+        return cachedRuntime;
+      }
+    } catch {
+      // 文件不在或读不了：往下走候选探测。
+      cachedRuntime = undefined;
+      cachedStamp = '';
+    }
+  }
+
+  // runtime.json 不在（服务被 kill 时 close 跑不到，文件会消失）。
+  // 按 CLI 预先写进 settings 的候选端口逐个探 /identity，指纹匹配才算。
+  // 只探 200 会把恰好占着那个端口的别的程序认成自己的服务，然后把 token
+  // 发给它。
+  if (info?.fingerprint === undefined || info.ports === undefined || info.ports.length === 0) {
     return undefined;
   }
+  // token 文件与 runtime.json 同目录：`runtime.json` → `serve-token`。
+  // 沙箱里读不了家目录，但这条路径由 runtimePath 直接推出，不需要 HOME。
+  const tokenPath = info.runtimePath === undefined ? undefined : serveTokenPathFrom(info.runtimePath);
+  if (tokenPath === undefined) return undefined;
+  for (const port of info.ports) {
+    try {
+      const body = await $.http.fetch(`http://127.0.0.1:${port}/identity`, {
+        headers: { accept: 'application/json' },
+      });
+      if (!body.ok) continue;
+      const parsed = JSON.parse(body.text) as { fingerprint?: unknown };
+      if (parsed.fingerprint !== info.fingerprint) continue;
+      // 指纹对上了：端口是这一份的服务，token 从同目录的 token 文件读。
+      const token = (await $.fs.read(tokenPath)).trim();
+      if (token !== '') {
+        cachedRuntime = { port, token };
+        cachedStamp = '';
+        return cachedRuntime;
+      }
+    } catch {
+      // 该端口不通或不是 JSON：换下一个。
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 从 runtime.json 的绝对路径推出 serve-token 的绝对路径。
+ *
+ * 两者永远同目录（都由 `serve.ts` 的 `runtimePath()` / `serveTokenPath()` 拼出），
+ * 所以这里只做一次字符串替换，不必再往 settings 里多写一条路径。
+ */
+function serveTokenPathFrom(runtimePath: string): string | undefined {
+  const index = runtimePath.lastIndexOf('runtime.json');
+  if (index === -1) return undefined;
+  return `${runtimePath.slice(0, index)}serve-token`;
 }
 
 /**

@@ -233,6 +233,17 @@ export interface ClaudePaths {
   runtimePath: string;
   /** `dist/kernel.js` 的绝对路径；服务不在时用它跑子进程。 */
   kernelPath: string;
+  /**
+   * 服务身份与候选端口。
+   *
+   * 为什么要写进来而不是让 mod 自己算：mod 的沙箱里既没有 `process` 也没有
+   * `crypto`（实测），算不出 sha256 指纹。把结果预先写进 settings，mod 只需
+   * 按候选顺序探 `/identity` 并比对指纹——与另外两端同一套判定。
+   *
+   * runtime.json 会在服务被 kill 时消失（close 跑不到），这一层是它消失后
+   * 唯一还能找到服务的路。
+   */
+  identity?: { fingerprint: string; ports: number[] };
 }
 
 export function syncClaudeSettings(
@@ -281,6 +292,9 @@ export function syncClaudeSettings(
       enabled,
       runtimePath: paths.runtimePath,
       kernelPath: paths.kernelPath,
+      ...(paths.identity === undefined
+        ? {}
+        : { fingerprint: paths.identity.fingerprint, ports: paths.identity.ports }),
     },
   };
   const next = `${JSON.stringify(raw, null, 2)}\n`;

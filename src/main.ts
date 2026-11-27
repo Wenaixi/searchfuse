@@ -630,6 +630,9 @@ hosts
         const result = syncClaudeSettings(claudeEnabled, {
           runtimePath: path.join(os.homedir(), '.searchfuse', 'runtime.json'),
           kernelPath: path.join(selfDir, 'kernel.js'),
+          // 预先算好身份写进 settings：mod 沙箱里没有 process 与 crypto，
+          // 自己算不出指纹，只能拿现成的。
+          identity: identityOf(os.homedir()),
         });
         lines.push(
           `claudeCode: ${claudeEnabled ? 'enabled' : 'disabled'}` +
