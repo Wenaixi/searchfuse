@@ -1,6 +1,6 @@
 {
   "name": "searchfuse",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "多引擎聚合搜索，替换 Claude Code 原生 WebSearch。免 key 开箱即用（anysearch 默认），可选聚合 tavily/exa/keenable/youcom/searxng。",
   "author": {
     "name": "Wenaixi"

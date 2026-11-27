@@ -4,7 +4,7 @@ skill 如何启动 `searchfuse` CLI、钉在哪个版本、在什么都跑不了
 
 ## 钉住的版本
 
-- Pinned CLI version: 0.1.1
+- Pinned CLI version: 0.1.2
 - npm 包：`@wenaixi/searchfuse`
 - CLI 命令名：`searchfuse`
 

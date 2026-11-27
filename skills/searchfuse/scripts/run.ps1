@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 # package.json version, and the release script rewrites it on every bump.
 $Package = '@wenaixi/searchfuse'
 $Bin = 'searchfuse'
-$Pinned = '0.1.1'
+$Pinned = '0.1.2'
 # -------------------------------------------------------------------------------
 
 $NativeNote = 'no native artifact is published for this tool yet; phase A ships npm launch paths only'
