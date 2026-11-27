@@ -665,13 +665,21 @@ function identityOnce(port: number): Promise<string | undefined> {
  *
  * runtime.json 会在服务被 kill 时消失（close 跑不到），所以它不能是唯一凭证。
  * 必须校验指纹：只看 `/healthz` 200 会把恰好占着候选端口的别的程序认成自己的。
+ *
+ * 指纹一旦匹配就**停止探测**：那一份 `.searchfuse` 的服务就在这个端口，
+ * 后面的候选不可能再是它。token 读不到时直接返回 undefined（调用方回退
+ * 子进程），而不是继续白探剩下七个端口。
  */
 async function discoverServeRuntime(): Promise<{ port: number; token: string } | undefined> {
   const identity = identityOfHome(homedir());
   for (const port of identity.ports) {
     if ((await identityOnce(port)) !== identity.fingerprint) continue;
+    // 与 src/serveEnsure.ts 的 discoverServe 同一顺序：文件里记的端口若与
+    // 探测到的一致，直接用它的 token（省一次读）；否则读 token 文件。
+    const fromFile = readServeRuntime();
+    if (fromFile !== undefined && fromFile.port === port) return fromFile;
     const fileToken = readServeTokenFile();
-    if (fileToken !== undefined) return { port, token: fileToken };
+    return fileToken === undefined ? undefined : { port, token: fileToken };
   }
   return undefined;
 }
