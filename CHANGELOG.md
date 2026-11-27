@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`runtime.json` 消失后三端全部失联（僵尸态）。** 该文件曾是服务身份的唯一
   凭证，而它在 `close()` 里被删除；进程被信号杀掉或崩溃时 `close` 跑不到，于是
-  出现「服务还在听、文件已经没了」的状态。实测 PID 27056 监听 64683 而
-  `runtime.json` 不存在，三端读不到端口，全部退回 spawn 慢路径。
+  出现「服务还在听、文件已经没了」的状态。实测 PID 27056 监听 64683（**旧机制
+  下的观测值**：那时端口由内核随机分配）而 `runtime.json` 不存在，三端读不到
+  端口，全部退回 spawn 慢路径。
 - **并发 `serve --ensure` 的进程雪崩。** `serve.port` 默认 0（内核随机挑端口），
   并发的多个实例各绑各的端口、全部成功、全部常驻，谁最后写 `runtime.json` 谁赢，
   其余成为占坑的孤儿。
