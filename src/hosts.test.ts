@@ -149,11 +149,64 @@ describe('syncClaudeSettings', () => {
     expect(out.searchfuseHosts.omp).toEqual({ enabled: true });
   });
 
-  it('已经是目标值时不写也不留备份', () => {
-    const file = tempFile('settings.json', JSON.stringify({ searchfuseHosts: { claudeCode: { enabled: true } } }, null, 2));
-    const result = syncClaudeSettings(true, { runtimePath: "/tmp/rt.json", kernelPath: "/tmp/k.js" }, file);
+  it('已经是完整目标值时不写也不留备份', () => {
+    // 幂等的判据是**所有会被写入的字段都一致**，不只是 enabled。
+    // 早先只比 enabled，于是升级前写下的「只有 enabled、没有路径」的旧
+    // settings 会被判成「无需改动」——mod 拿不到 runtimePath 与 kernelPath
+    // 就没法工作，是实实在在的坏状态。
+    const identity = { fingerprint: 'abcdef01', ports: [42000, 42001] };
+    const file = tempFile(
+      'settings.json',
+      JSON.stringify(
+        {
+          searchfuseHosts: {
+            claudeCode: {
+              enabled: true,
+              runtimePath: '/tmp/rt.json',
+              kernelPath: '/tmp/k.js',
+              fingerprint: identity.fingerprint,
+              ports: identity.ports,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = syncClaudeSettings(
+      true,
+      { runtimePath: '/tmp/rt.json', kernelPath: '/tmp/k.js', identity },
+      file,
+    );
     expect(result.changed).toBe(false);
     expect(result.backup).toBeUndefined();
+  });
+
+  it('旧版 settings 只有 enabled 时也要补写路径与身份', () => {
+    // 升级路径：这次改造之前写下的 settings 没有 fingerprint/ports。
+    // 若早退判据只看 enabled，新字段永远写不进去，claude 端的候选探测
+    // 就永远拿不到数据，退化成「只能读 runtime.json」——而那个文件正是
+    // 这次要修的痛点。
+    const file = tempFile(
+      'settings.json',
+      JSON.stringify({ searchfuseHosts: { claudeCode: { enabled: true } } }, null, 2),
+    );
+    const result = syncClaudeSettings(
+      true,
+      {
+        runtimePath: '/tmp/rt.json',
+        kernelPath: '/tmp/k.js',
+        identity: { fingerprint: 'abcdef01', ports: [42000, 42001] },
+      },
+      file,
+    );
+    expect(result.changed).toBe(true);
+    const saved = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+      searchfuseHosts: { claudeCode: Record<string, unknown> };
+    };
+    expect(saved.searchfuseHosts.claudeCode.fingerprint).toBe('abcdef01');
+    expect(saved.searchfuseHosts.claudeCode.ports).toEqual([42000, 42001]);
+    expect(saved.searchfuseHosts.claudeCode.runtimePath).toBe('/tmp/rt.json');
   });
 
   it('拒绝覆盖无法解析的 settings 文件', () => {

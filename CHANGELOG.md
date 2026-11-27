@@ -13,6 +13,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 暂无。
 
+## [0.1.1] - 2026-11-27
+
+这一版只做一件事：**服务定位不再依赖一个会消失的文件**。
+
+### Fixed
+
+- **`runtime.json` 消失后三端全部失联（僵尸态）。** 该文件曾是服务身份的唯一
+  凭证，而它在 `close()` 里被删除；进程被信号杀掉或崩溃时 `close` 跑不到，于是
+  出现「服务还在听、文件已经没了」的状态。实测 PID 27056 监听 64683 而
+  `runtime.json` 不存在，三端读不到端口，全部退回 spawn 慢路径。
+- **并发 `serve --ensure` 的进程雪崩。** `serve.port` 默认 0（内核随机挑端口），
+  并发的多个实例各绑各的端口、全部成功、全部常驻，谁最后写 `runtime.json` 谁赢，
+  其余成为占坑的孤儿。
+- **先退出的实例会删掉后退出的那个的文件。** `close()` 原先无条件 `rmSync`，
+  服务 A 关闭时把服务 B 写下的 `runtime.json` 一并删掉，B 瞬间变瞎。
+- **512 错误正文被吞。** dsh 的 `tryServe` 早先「先探 `/healthz` 再返回」，
+  服务活着但健康检查恰好不通时被判成「服务不存在」，于是回退 spawn kernel，
+  服务端 5xx 正文里逐引擎的尝试轨迹就此消失，用户看到「不可达」而非真实原因。
+
+### Added
+
+- **目录指纹与确定性候选端口。** 指纹是 `sha256(realpath(~/.searchfuse).toLowerCase())`
+  的前 8 位，归一化消除尾斜杠、`.` 段与大小写差异。候选端口从
+  `42000 + (指纹 % 2000)` 起连续 8 个，同一份状态目录必然得到同一组。
+  服务按候选顺序找第一个能绑的，被占则顺延，全部被占才报错。
+- **`GET /identity` 端点。** 返回 `{port, pid, fingerprint, version}`，免鉴权、
+  不泄露 token。客户端按候选端口逐个探测，**必须比对指纹**才认——只看 `/healthz`
+  200 会把恰好占着那个端口的别的程序认成自己的服务，然后把 token 发给它。
+- **两级服务定位。** `runtime.json` 降级为缓存：文件在且形状合法就直接用；
+  文件不在才走候选探测。三端（CLI / dsh / Claude Code）同一套判定。
+- **`hosts sync` 把身份写进 Claude settings。** mod 的沙箱里既没有 `process`
+  也没有 `crypto`，算不了指纹，只能拿 CLI 预先算好的 `fingerprint` 与 `ports`。
+
+### Changed
+
+- **`/healthz` 的 body 保持纯文本 `OK`。** 四个现存消费者都只看状态码，
+  把 body 换成 JSON 是无谓的破坏性变更；身份校验走独立的 `/identity`。
+- **`typecheck` 接上 `omp/tsconfig.json` 与 `claude/tsconfig.json`。**
+  此前这两份从来不在 CI 里跑，「四道类型门禁」实际只有两道在跑。
+
+### Tests
+
+- 新增 `src/serveIdentity.test.ts`（6 条）：确定性、归一化、候选范围与连续性。
+- 新增 `src/serveIdentity.postcondition.test.ts`（8 条）：用真实 HTTP 服务
+  钉住核心承诺——文件删掉后靠指纹找回服务、`ensureServeRunning` 不另起实例、
+  陌生服务占着候选端口不会被误认、`/identity` 与目录推导一致、候选被占时顺延。
+- 新增 `src/serveIdentity.parity.test.ts`（4 条）：锁住三份拷贝一致。任何一份
+  漂移都会造成「服务绑一个端口、客户端去探另一个」，症状与「服务没起来」
+  一模一样，是最难查的一类故障。
+- 反向验证：破坏指纹校验 → 「陌生服务」那条变红；去掉候选探测层 →
+  「不另起实例」那条变红。两条都亲眼看到变红再恢复。
+
+三项实测的端到端结果：服务绑在指纹推导出的第一个候选端口 42158；
+删掉 `runtime.json` 后，客户端仍在 42158 认出指纹 `21fe1ece`，从 `serve-token`
+读到 token，真实搜索返 200（92 KB 结果）。
+
+<!-- 0.1.0 的完整记录见下 -->
+
 ## [0.1.0] - 2026-11-26
 
 首个正式版本。searchfuse 是一个给模型用的联网搜索插件：把搜索查询变成带来源

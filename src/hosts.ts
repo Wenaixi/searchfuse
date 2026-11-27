@@ -279,7 +279,28 @@ export function syncClaudeSettings(
     typeof existing.claudeCode === 'object' && existing.claudeCode !== null
       ? (existing.claudeCode as Record<string, unknown>)
       : {};
-  if (claude.enabled === enabled) {
+  // 早退判据不能只看 enabled。升级前写下的 settings 只有 enabled/runtimePath/
+  // kernelPath，没有 fingerprint 与 ports；只看 enabled === enabled 就会早退，
+  // 于是新字段永远写不进去，claude 端的候选探测永远拿不到数据——它退化成
+  // 「只能读 runtime.json」，而这次改造要解决的正是那个文件会消失。
+  //
+  // 所以凡是「本次要写的字段里有任何一个与现状不同」就重写。
+  const nextClaude = {
+    ...claude,
+    enabled,
+    runtimePath: paths.runtimePath,
+    kernelPath: paths.kernelPath,
+    ...(paths.identity === undefined
+      ? {}
+      : { fingerprint: paths.identity.fingerprint, ports: paths.identity.ports }),
+  };
+  const unchanged =
+    claude.enabled === nextClaude.enabled &&
+    claude.runtimePath === nextClaude.runtimePath &&
+    claude.kernelPath === nextClaude.kernelPath &&
+    JSON.stringify(claude.fingerprint) === JSON.stringify(nextClaude.fingerprint) &&
+    JSON.stringify(claude.ports) === JSON.stringify(nextClaude.ports);
+  if (unchanged) {
     return { changed: false };
   }
 
@@ -287,15 +308,7 @@ export function syncClaudeSettings(
   // 所以路径必须由插件之外的 CLI 写进来。
   raw.searchfuseHosts = {
     ...existing,
-    claudeCode: {
-      ...claude,
-      enabled,
-      runtimePath: paths.runtimePath,
-      kernelPath: paths.kernelPath,
-      ...(paths.identity === undefined
-        ? {}
-        : { fingerprint: paths.identity.fingerprint, ports: paths.identity.ports }),
-    },
+    claudeCode: nextClaude,
   };
   const next = `${JSON.stringify(raw, null, 2)}\n`;
 

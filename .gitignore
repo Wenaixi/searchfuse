@@ -11,6 +11,14 @@ dsh/client.js
 # coverage output
 coverage/
 
+# vitest 的缓存目录：每次跑测试都会重建，不该进仓库
+.vitest/
+
+# 编辑器与工具产生的临时目录
+.nx/
+*.tsbuildinfo
+*.log.tmp
+
 # eval evidence artifacts (run locally, on demand)
 evals/results/
 
