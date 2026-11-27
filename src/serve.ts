@@ -412,32 +412,40 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
   const portQueue = options.candidatePorts !== undefined && options.candidatePorts.length > 0
     ? [...options.candidatePorts]
     : [options.port];
+  /** 已经尝试过的端口，用来在报错时把「试过哪些」完整说出来。 */
+  const triedPorts: number[] = [];
 
   const tryListenNext = (): void => {
     const port = portQueue.shift();
     if (port === undefined) {
       ready.reject(
         new Error(
-          `No candidate port was free (tried ${(options.candidatePorts ?? [options.port]).join(', ')}). ` +
+          `No candidate port was usable (tried ${triedPorts.join(', ')}). ` +
             'Stop another searchfuse instance, or set serve.port to a free number.',
         ),
       );
       return;
     }
+    triedPorts.push(port);
     server.listen(port, '127.0.0.1');
   };
 
   server.on('error', (error: NodeJS.ErrnoException) => {
-    // EADDRINUSE 在候选模式下不是终局：换下一个候选。只有队列耗尽才算失败。
-    if (error.code === 'EADDRINUSE' && portQueue.length > 0) {
+    // 端口相关的错误都换下一个候选，不只是 EADDRINUSE：
+    // EACCES（端口被系统保留或权限不足）同样不该让整次启动失败——候选
+    // 有 8 个，换一个通常就能绑上。
+    //
+    // 其它错误（例如 ENOMEM）是环境问题，换端口也无济于事，直接报出来。
+    const portLevel = error.code === 'EADDRINUSE' || error.code === 'EACCES';
+    if (portLevel && portQueue.length > 0) {
       tryListenNext();
       return;
     }
-    if (error.code === 'EADDRINUSE') {
+    if (portLevel) {
       ready.reject(
         new Error(
-          `Port ${options.port} is already in use. Leave serve.port at 0 so searchfuse can pick ` +
-            'a deterministic candidate derived from your ~/.searchfuse directory.',
+          `Port ${options.port} could not be bound (${error.code}). Leave serve.port at 0 so ` +
+            'searchfuse can pick a deterministic candidate derived from your ~/.searchfuse directory.',
         ),
       );
       return;
@@ -445,7 +453,11 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
     ready.reject(error);
   });
 
-  server.on('listening', () => {
+  // 用 `once`：候选重试时如果前一个端口的 listening 已经触发过，
+  // 再触发一次会重复写 runtime.json（后写的覆盖先写的，而 pid 相同，
+  // 关掉时只删一次，看似无害，但绑定端口会以最后一次为准，与 ready
+  // 已经 resolve 的那次不一致）。
+  server.once('listening', () => {
     // 端口 0 时内核会分配一个真实端口，必须从 address() 取回，
     // 否则调用方拿着 0 去连接会 EADDRNOTAVAIL。
     const address = server.address();
