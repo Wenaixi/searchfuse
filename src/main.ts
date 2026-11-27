@@ -35,6 +35,7 @@ import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, runtimePath, startServe } from './serve.ts';
+import { identityOf } from './serveIdentity.ts';
 import { readSecret } from './util/secretInput.ts';
 import { isAlive } from './util/isAlive.ts';
 import { registerSearxngCleanup } from './providers/searxngServer.ts';
@@ -529,11 +530,18 @@ program
     }
 
     const token = ensureServeToken();
+    // 候选端口：显式 `--port` 或配置写了非零端口时尊重它；否则按目录指纹
+    // 推导一组。后者的意义是「同一份 .searchfuse 永远算出同一组候选」，
+    // 于是客户端不必依赖 runtime.json（它会在服务被 kill 时消失）也能找到服务。
+    const identity = identityOf(os.homedir());
+    const useCandidates = requested === 0;
     try {
       const handle = await startServe({
         port: requested,
         token,
         idleExitSeconds: options.daemon ? 0 : (config.serve?.idleExitSeconds ?? 0),
+        fingerprint: identity.fingerprint,
+        ...(useCandidates ? { candidatePorts: identity.ports } : {}),
       });
       process.stdout.write(`Listening on http://127.0.0.1:${handle.port}\n`);
       // **服务一就绪就放锁。** 持锁到进程退出是错的：`serve` 本来就是常驻

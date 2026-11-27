@@ -13,6 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { allowsPrivateNetwork, currentConfigPath, loadConfigFile } from './config.ts';
 import { runSearch } from './search.ts';
+import { identityOf } from './serveIdentity.ts';
 
 /**
  * `Promise.withResolvers` 在 Node 20+ 的运行时存在，但本仓库的 tsconfig
@@ -184,6 +185,19 @@ export interface ServeOptions {
   idleExitSeconds: number;
   /** 测试用：注入的搜索函数，默认走 runSearch。 */
   search?: typeof runSearch;
+  /**
+   * 状态目录指纹。`/healthz` 把它交出去，客户端据此确认应答者是「同一个
+   * `.searchfuse`」的服务。缺省时按当前 home 推导，测试可显式覆盖。
+   */
+  fingerprint?: string;
+  /**
+   * 候选端口。给定时服务按顺序找第一个能绑的，全部被占才报错。
+   *
+   * 为什么需要：原先 `serve.port` 默认 0（内核随机挑），于是并发起的多个
+   * 实例各绑各的端口、全部成功、全部常驻，谁最后写 runtime.json 谁赢。
+   * 确定性候选把这个雪崩变成「第一个抢到，其余发现它已健康就退出」。
+   */
+  candidatePorts?: number[];
 }
 
 export interface ServeHandle {
@@ -203,17 +217,40 @@ export interface ServeHandle {
  */
 export function startServe(options: ServeOptions): Promise<ServeHandle> {
   const search = options.search ?? runSearch;
+  const fingerprint = options.fingerprint ?? identityOf(os.homedir()).fingerprint;
   let hits = 0;
   let inFlight = 0;
   let idleTimer: NodeJS.Timeout | undefined;
+  /** 实际绑定的端口。listen 回调里才有值，`/healthz` 要把它报出去。 */
+  let boundPortForHealth = options.port;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${options.port}`);
 
     // `/healthz` 免鉴权：就绪探测要能区分「起来了」与「起来了但要授权」。
+    //
+    // **body 必须保持纯文本 `OK`**：现存的四个消费者（main.ts 的 --ensure、
+    // dsh 的唤醒轮询、claude hook 的探测、serveEnsure.ts）都只看状态码，
+    // 但把 body 换成 JSON 是无谓的破坏性变更。身份校验走下面单独的
+    // `/identity` 端点。
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       res.end('OK');
+      return;
+    }
+
+    // `/identity` 免鉴权：只回身份，不泄露 token 与配置。
+    //
+    // 客户端按目录推导出候选端口后逐个探测，靠这里的 fingerprint 确认应答者
+    // 确实是同一份 `.searchfuse` 的服务，而不是恰好占着那个端口的别的程序。
+    //
+    // `__APP_VERSION__` 是 vite 构建时注入的常量，在直接跑 TS 源码的场景
+    // （测试、`tsx`）里不存在。用 `typeof` 守卫而不是 try/catch：后者会把
+    // 整个响应吞掉，让「版本字段缺失」变成「身份端点 500」。
+    if (url.pathname === '/identity') {
+      const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ port: boundPortForHealth, pid: process.pid, fingerprint, version }));
       return;
     }
 
@@ -344,10 +381,19 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
 
   async function close(): Promise<void> {
     clearTimeout(idleTimer);
+    // **只删属于自己的那份 runtime.json。**
+    //
+    // 早先这里无条件 `rmSync`。问题在于：先起的服务 A 关闭时，会把后起的
+    // 服务 B 写下的文件一并删掉，B 于是瞬间变瞎（服务在听、文件没了）。
+    // 改成先读回 pid，确认是自己写的再删。
     try {
-      fs.rmSync(runtimePath(), { force: true });
+      const raw = fs.readFileSync(runtimePath(), 'utf-8');
+      const parsed = JSON.parse(raw) as { pid?: unknown };
+      if (typeof parsed.pid === 'number' && parsed.pid === process.pid) {
+        fs.rmSync(runtimePath(), { force: true });
+      }
     } catch {
-      // 运行时文件删不掉不影响关闭。
+      // 文件不在或读不了：没有可删的，或者那是别人的。两种情况都不动手。
     }
     const closed = Promise.withResolvers<void>();
     server.close(() => closed.resolve());
@@ -355,38 +401,66 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
   }
 
   const ready = Promise.withResolvers<ServeHandle>();
-  server.once('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        // 只有用户显式固定端口时才会走到这里：默认的 0 由内核分配，
-        // 不存在「被占用」这回事。所以消息直接指向那个显式配置。
-        ready.reject(
-          new Error(
-            `Port ${options.port} is already in use. Set serve.port to 0 (or omit it) to let the ` +
-              'system pick a free port, or choose a different number. Hosts read the actual ' +
-              'port from runtime.json, so a picked port needs no host reconfiguration.',
-          ),
-        );
-        return;
-      }
-      ready.reject(error);
+
+  /**
+   * 依次尝试候选端口的监听器。
+   *
+   * 候选来自目录指纹，同一份 `.searchfuse` 永远得到同一组，所以「谁先来谁
+   * 占住前面的」。全部被占才报错——那时说明同机上真有 8 个实例，比让内核
+   * 随机分配一个用户不知道的端口要好：后两者会让 runtime.json 成为唯一线索。
+   */
+  const portQueue = options.candidatePorts !== undefined && options.candidatePorts.length > 0
+    ? [...options.candidatePorts]
+    : [options.port];
+
+  const tryListenNext = (): void => {
+    const port = portQueue.shift();
+    if (port === undefined) {
+      ready.reject(
+        new Error(
+          `No candidate port was free (tried ${(options.candidatePorts ?? [options.port]).join(', ')}). ` +
+            'Stop another searchfuse instance, or set serve.port to a free number.',
+        ),
+      );
+      return;
+    }
+    server.listen(port, '127.0.0.1');
+  };
+
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    // EADDRINUSE 在候选模式下不是终局：换下一个候选。只有队列耗尽才算失败。
+    if (error.code === 'EADDRINUSE' && portQueue.length > 0) {
+      tryListenNext();
+      return;
+    }
+    if (error.code === 'EADDRINUSE') {
+      ready.reject(
+        new Error(
+          `Port ${options.port} is already in use. Leave serve.port at 0 so searchfuse can pick ` +
+            'a deterministic candidate derived from your ~/.searchfuse directory.',
+        ),
+      );
+      return;
+    }
+    ready.reject(error);
   });
 
-  server.listen(options.port, '127.0.0.1', () => {
+  server.on('listening', () => {
     // 端口 0 时内核会分配一个真实端口，必须从 address() 取回，
     // 否则调用方拿着 0 去连接会 EADDRNOTAVAIL。
     const address = server.address();
     const boundPort = typeof address === 'object' && address !== null ? address.port : options.port;
+    boundPortForHealth = boundPort;
 
     // 就绪后写运行时文件，退出时删除（见 close）。
     //
-    // **必须带端口**：宿主侧的客户端（Claude Code 用 `$.http.fetch`）只有
-    // 读了这里才知道该连哪。固定端口写死的话，一旦端口被占就没法降级到
-    // 一个空闲端口。
+    // **必须带指纹**：客户端按目录推导候选端口时，靠它确认应答者是同一份
+    // 状态目录的服务，而不是恰好占着那个端口的别的程序。
     try {
       fs.mkdirSync(path.dirname(runtimePath()), { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         runtimePath(),
-        `${JSON.stringify({ port: boundPort, pid: process.pid, startedAt: new Date().toISOString(), version: __APP_VERSION__, token: options.token }, null, 2)}\n`,
+        `${JSON.stringify({ port: boundPort, pid: process.pid, fingerprint, startedAt: new Date().toISOString(), version: __APP_VERSION__, token: options.token }, null, 2)}\n`,
       );
     } catch {
       // 运行时文件是诊断用的，写不了不影响服务本身。
@@ -394,6 +468,8 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
     scheduleIdleExit();
     ready.resolve({ server, port: boundPort, localHits: () => hits, close });
   });
+
+  tryListenNext();
   return ready.promise;
 }
 

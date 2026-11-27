@@ -1,8 +1,10 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runtimePath } from './serve.ts';
+import { runtimePath, serveTokenPath } from './serve.ts';
+import { identityOf } from './serveIdentity.ts';
 import { spawnHidden } from './util/spawnHidden.ts';
 
 /** 拉起/检查的结果。`reason` 只在没起来时出现，给调用方一行可读的解释。 */
@@ -59,7 +61,9 @@ export function readServeRuntimeFile(
   }
 }
 
-/** 探一次 /healthz。返回是否 200。 */
+/**
+ * 探一次 /healthz。返回是否 200。
+ */
 function healthOnce(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.request(
@@ -87,6 +91,90 @@ function healthOnce(port: number): Promise<boolean> {
 }
 
 /**
+ * 读一次 `/identity`，拿到那个服务自称的指纹。
+ *
+ * 为什么不复用 `/healthz`：四个现存消费者都只看 `/healthz` 的状态码，
+ * 把它的 body 换成 JSON 是无谓的破坏。身份校验放在独立端点上。
+ */
+function identityOnce(port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/identity',
+        method: 'GET',
+        timeout: HEALTH_TIMEOUT_MS,
+        headers: { Connection: 'close' },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          resolve(undefined);
+          return;
+        }
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { fingerprint?: unknown };
+            resolve(typeof parsed.fingerprint === 'string' ? parsed.fingerprint : undefined);
+          } catch {
+            resolve(undefined);
+          }
+        });
+      },
+    );
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(undefined);
+    });
+    req.end();
+  });
+}
+
+/**
+ * 按目录推导出的候选端口逐个探测，找出真正属于这份 `.searchfuse` 的服务。
+ *
+ * 这是「runtime.json 不再是唯一凭证」的落地：文件消失（服务被 kill 时来不及
+ * 清理）、或指向了一个死端口，都能靠这条路径找回真正的服务。
+ *
+ * **必须校验指纹**。只看 `/healthz` 200 会把「恰好占着候选端口的别的程序」
+ * 认成自己的服务，然后把搜索请求连同 token 发给它。
+ *
+ * 返回的 token 可能缺失（`serve-token` 文件还没写或读不了）：那种情况下
+ * 端口仍然是对的，调用方可以只用端口做唤醒/健康检查；要发鉴权请求时再读一次。
+ */
+export async function discoverServe(
+  fingerprint: string,
+  ports: number[],
+): Promise<{ port: number; token?: string } | undefined> {
+  for (const port of ports) {
+    const claimed = await identityOnce(port);
+    if (claimed !== fingerprint) continue;
+    // 文件里记的端口若与探测到的一致，直接用它的 token（省一次读）。
+    const runtime = readServeRuntimeFile();
+    if (runtime !== undefined && runtime.port === port) return runtime;
+    // 文件不在或指向别处：端口是对的，token 从 token 文件读；读不到也认。
+    return { port, token: readServeTokenFile() };
+  }
+  return undefined;
+}
+
+/** 读 token 文件。服务端与客户端共用同一份，所以这里只需读。 */
+function readServeTokenFile(file = serveTokenPath()): string | undefined {
+  try {
+    const token = fs.readFileSync(file, 'utf-8').trim();
+    return token === '' ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 确保本地服务在跑。已在跑就什么都不做。
  *
  * 顺序是「先探文件、再探 /healthz、最后才 spawn」：文件在但服务已死是最阴的
@@ -103,9 +191,19 @@ function healthOnce(port: number): Promise<boolean> {
  */
 export async function ensureServeRunning(options: EnsureOptions = {}): Promise<EnsureOutcome> {
   const file = runtimePath();
+  // 第一层：文件指向的服务还健康，直接用。
   const existing = readServeRuntimeFile(file);
   if (existing !== undefined && (await healthOnce(existing.port))) {
     return { started: false, port: existing.port };
+  }
+
+  // 第二层：文件不在或指向死端口——按目录推导出的候选端口找回来。
+  // 这一层就是「同目录 = 同服务」的落地：服务被 kill 时 runtime.json 会
+  // 消失（close 跑不到），但服务仍在候选端口上听着，靠指纹校验认出来。
+  const identity = identityOf(os.homedir());
+  const discovered = await discoverServe(identity.fingerprint, identity.ports);
+  if (discovered !== undefined && (await healthOnce(discovered.port))) {
+    return { started: false, port: discovered.port };
   }
 
   const cliPath =
