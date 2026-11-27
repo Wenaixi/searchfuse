@@ -295,6 +295,61 @@ cat ~/.searchfuse/runtime.json
 
 `runtime.json` 现在只是缓存：删掉它不会让三端失联，服务被认回来之后会重新写回。
 
+### 哪一端有这条路径
+
+**四端都有**（0.1.2 起）：CLI（`serve --ensure`）、dsh（`locateServeRuntime`）、
+Claude Code（读 settings 里 `hosts sync` 预写的 `fingerprint` + `ports`）、
+omp（`locateServeRuntime`）。0.1.1 只做了前三端，omp 扩展漏了——那一端在
+文件消失后会白等 15 秒再报「不可用」。
+
+排障时按这一条核对：如果某一端说「服务不在」而 `curl /identity` 明明答得上来，
+就是那一端的候选探测没接上，或它读的是旧版代码。
+
+**dsh 侧尤其容易踩这个**：profile 里若装的是 pnpm 快照（`file:` 依赖会被 pnpm
+复制到 `.pnpm/` 下）而不是 junction，改源码不会生效。判据：
+
+```bash
+readlink -f ~/.dsh/profiles/web/node_modules/@wenaixi/searchfuse
+# 含 .pnpm 就是快照，指向 E:\newCC\aaa-dsh-go\searchfuse 才是 junction
+grep -c identityFingerprintOf ~/.dsh/profiles/web/node_modules/@wenaixi/searchfuse/dsh/index.js
+# 0 表示跑的是没有候选探测的旧代码
+```
+
+修复方式（Windows）：
+
+```cmd
+rmdir /S /Q "C:\Users\<你>\.dsh\profiles\web\node_modules\@wenaixi\searchfuse"
+mklink /J "C:\Users\<你>\.dsh\profiles\web\node_modules\@wenaixi\searchfuse" "E:\newCC\aaa-dsh-go\searchfuse"
+```
+
+## 某个引擎一直失败却没有进入冷却
+
+先确认冷却控制器真的被传进去了。三端跑搜索走 `dist/kernel.js` 或本地服务的
+`/v1/search`，**这两条路径必须各自传 `cooldown`**——0.1.1 及更早只给 CLI 的
+`searchfuse search` 传了，于是 `state.json` 永远是空的，被额度耗尽的引擎每跑一次
+都被重新撞一遍墙。0.1.2 已修。
+
+再确认失败是否真的是「持续限制」而非瞬时：
+
+| 引擎回的东西 | 会不会记冷却 |
+| --- | --- |
+| `429 Too Many Requests: rate limit`（没有额度字眼） | 不记——每秒一次的抖动 |
+| `429 ... "reason":"credits"`（firecrawl 免注册额度用完） | 记，按 `retry_after_seconds` 精确恢复 |
+| `402` 或正文含 credit/quota | 记，45 分钟 |
+| Tavily `432` / `433` | 记，24 小时 |
+| 401 / 403 鉴权失败 | 不记——换 key 就能好 |
+
+融合模式（默认 `rrf`）与链式模式（`chain`）都会记。融合模式下全灭时也会记——
+那正是最需要记的情况（只有一个引擎、而它刚把额度用光）。
+
+核对当前记了什么：
+
+```bash
+cat ~/.searchfuse/state.json
+searchfuse doctor | sed -n '/Cooldown/,/Aggregate/p'
+searchfuse state clear   # 全部忘掉，所有引擎回到满优先级
+```
+
 ## 还是没辙
 
 用 searchfuse 打印的失败命令原样重跑一遍，把那份输出附在 issue 里：https://github.com/Wenaixi/searchfuse/issues

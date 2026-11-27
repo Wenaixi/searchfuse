@@ -11,7 +11,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-暂无。
+### Fixed
+
+- **omp 扩展没有候选端口探测。** 删掉 `runtime.json` 后（服务被 kill 时
+  `close()` 跑不到），omp 的 `readServeRuntime` 直接返回 undefined，会认为服务
+  不在，白等 15 秒再报不可用。主包、dsh、claude 三端在 0.1.1 都有候选探测，
+  只有这一端漏了——CHANGELOG 里「三端都能找回」的说法对它不成立。现已内联
+  同一套身份算法，`tryServe` 与 `healthOnce` 都改走 `locateServeRuntime`。
+  实测：删文件后用真实 `omp -p` 搜索，13 条结果，仍只有 1 个实例。
+- **冷却控制器从未传入三端的真实链路。** `src/kernel.ts`（dsh / claude hook /
+  omp 扩展全部走它）与 `src/serve.ts` 的两个端点都没传 `cooldown`，只有 CLI 的
+  `searchfuse search` 传了——而三端没有一个走那条路。结果是 `state.json`
+  永远是空的，被额度耗尽的引擎每次运行都被重新撞一遍墙。
+- **融合模式只读冷却、从不写。** 即使控制器传进去了，默认的 `rrf` 模式下
+  `record`/`clear` 也只挂在链式路径上。`FanoutResult` 现在带 `outcomes`
+  （保留原始 `Error` 对象，而不只是格式化后的字符串），融合路径据此记冷却；
+  全灭时 `fanout` 抛出的 error 上也挂着 `outcomes`，那正是最该记的情况。
+- **429 携带额度原因时被当成瞬时限流。** firecrawl 的免注册额度用完回 429，
+  正文写着 `"reason":"credits"` 与 `"retry_after_seconds":66233`——那是花光的
+  预算，不是每秒一次的抖动。`classifyQuota` 早先只看 `/429/` 就返回 null，
+  而 `retry_after_seconds` 这个权威恢复时间全仓库没人读。现在认这类 JSON
+  字段，恢复时间按 `retry_after_seconds` → `Resets in 94h19m9s` → 兜底 TTL
+  的精度顺序取。
+- **`claude/.claude-plugin/plugin.json` 的版本号不在盖章表里。** 0.1.1 发版后
+  `searchfuse --version` 报 0.1.1，而宿主里显示的仍是 0.1.0。已纳入
+  `stampTargets`，并加一条测试钉住它必须在表内且戳出来是合法 JSON。
+- **测试结束后 `process.exit` 触发未处理错误。** `src/main.ts` 收尾挂的 2 秒
+  unref 计时器会在测试结束后才触发，并行跑全量时报 3 个 unhandled error。
+  改成把句柄挂在 `globalThis` 的 Symbol 上（`main.ts` 一被 import 就解析
+  argv，测试没法在配好 argv 之前 import 它）。
+
+### Tests
+
+- `serveIdentity.parity.test.ts` 增加 omp 那份拷贝的抽取求值比对。
+  反向验证：删掉 omp 的 `.toLowerCase()` → 立刻变红。
+- `cooldown.test.ts` 增加「429 + credits + retry_after_seconds」与
+  `parseRetryAfterSeconds` 的用例。反向验证：去掉 credits 识别 → 变红。
+- `search.test.ts` 增加一条**跨平台**的融合冷却用例（走进程内 firecrawl，
+  不需要假 CLI）。`describeSpawn` 那组在 Windows 上整段跳过，而冷却缺口
+  最该被钉住的正是这台机器上的真实路径。
+- `fanout.test.ts` 增加「原始拒绝原因被原样交回」的用例。
+
+全量 843 通过 / 34 跳过，零 errors；src 与 dsh 类型门禁全绿。
 
 ## [0.1.1] - 2026-11-27
 
