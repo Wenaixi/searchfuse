@@ -198,7 +198,15 @@ async function readServeRuntime(
       const raw = await $.fs.read(info.runtimePath);
       if (raw === cachedStamp && cachedRuntime !== undefined) return cachedRuntime;
       const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
-      if (typeof parsed.port === 'number' && typeof parsed.token === 'string') {
+      // 与 omp、src/serveEnsure.ts、src/main.ts 逐条一致：整数校验 + 非空
+      // token。三处读同一个文件，宽严不一会让它们对「服务在不在」给出相反
+      // 答案——`3.5` 与 `NaN` 都是 `typeof === 'number'`。
+      if (
+        typeof parsed.port === 'number' &&
+        Number.isInteger(parsed.port) &&
+        typeof parsed.token === 'string' &&
+        parsed.token !== ''
+      ) {
         cachedRuntime = { port: parsed.port, token: parsed.token };
         cachedStamp = raw;
         return cachedRuntime;

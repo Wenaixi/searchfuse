@@ -107,7 +107,11 @@ function readServeRuntime(): ServeRuntime | undefined {
   try {
     const raw = readFileSync(join(homedir(), '.searchfuse', 'runtime.json'), 'utf-8');
     const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
-    if (typeof parsed.port !== 'number' || typeof parsed.token !== 'string') return undefined;
+    // 整数校验与 src/serveEnsure.ts、src/main.ts 逐条一致。三处读的是同一个
+    // 文件；宽严不一就会出现「一个判在跑、一个判没在跑」——`3.5` 与 `NaN`
+    // 都是 `typeof === 'number'`，拿它们去 fetch 只会得到模棱两可的错误。
+    if (typeof parsed.port !== 'number' || !Number.isInteger(parsed.port)) return undefined;
+    if (typeof parsed.token !== 'string' || parsed.token === '') return undefined;
     return { port: parsed.port, token: parsed.token };
   } catch {
     return undefined;
