@@ -35,7 +35,7 @@ import { runSearch } from './search.ts';
 import { waitForPendingKills } from './subprocess.ts';
 import { checkMcpHealth, usableMcpNames } from './mcp/health.ts';
 import { ensureServeToken, runtimePath, startServe } from './serve.ts';
-import { findRunningServe } from './serveEnsure.ts';
+import { discoverServe, findRunningServe } from './serveEnsure.ts';
 import { identityOf } from './serveIdentity.ts';
 import { readSecret } from './util/secretInput.ts';
 import { isAlive } from './util/isAlive.ts';
@@ -541,6 +541,33 @@ program
         ...(useCandidates ? { candidatePorts: identity.ports } : {}),
       });
       process.stdout.write(`Listening on http://127.0.0.1:${handle.port}\n`);
+
+      // **收敛：如果自己不是第一个候选，就让先来的赢。**
+      //
+      // 候选存在的理由是「谁先来谁占前面的」。但两种情况会让两个实例
+      // 同时活着：机器重启后两个都被拉起，或两次并发 ensure 抢锁失败后
+      // 各自起。此时客户端按候选顺序探，永远连前面的那个，而后面的实例
+      // 只占端口与内存、永远不被使用——它还握着 runtime.json，于是 dsh
+      // （文件优先）连它、serveEnsure（候选优先）连前面那个，同一台机器
+      // 两个聚合器轮流接管搜索，冷却与缓存各算各的。
+      //
+      // 判据只看**前序**候选：后面的实例不影响自己，没必要探（省掉 8 次
+      // HTTP）。指纹匹配是必须的——恰好占着前序端口的别的程序不算。
+      if (useCandidates) {
+        const earlier = identity.ports.slice(0, identity.ports.indexOf(handle.port));
+        if (earlier.length > 0) {
+          const winner = await discoverServe(identity.fingerprint, earlier);
+          if (winner !== undefined) {
+            process.stdout.write(
+              `Port ${handle.port} yielded to the instance already running on 127.0.0.1:${winner.port}.\n`,
+            );
+            await handle.close();
+            releaseLockFn?.();
+            process.exit(0);
+          }
+        }
+      }
+
       // **服务一就绪就放锁。** 持锁到进程退出是错的：`serve` 本来就是常驻
       // 进程，锁会永远不释放，后来者只能等到 20 秒超时——那等于把「互斥」
       // 变成了「排队失败」。互斥要保护的只是「谁来起服务」这一小段。
