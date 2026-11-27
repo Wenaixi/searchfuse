@@ -322,6 +322,25 @@ rmdir /S /Q "C:\Users\<你>\.dsh\profiles\web\node_modules\@wenaixi\searchfuse"
 mklink /J "C:\Users\<你>\.dsh\profiles\web\node_modules\@wenaixi\searchfuse" "E:\newCC\aaa-dsh-go\searchfuse"
 ```
 
+### 升级后 `/identity` 还报旧版本
+
+说明**服务进程还是旧版起的**，它不会自己重载。停掉重启即可：
+
+```bash
+# 看当前 PID（/identity 里的 pid）
+curl -s --noproxy '*' http://127.0.0.1:42158/identity
+
+# 停掉（Windows）
+taskkill /PID <pid> /F
+
+# 用 --daemon 起新版本：真正脱离终端，关掉 Shell 也不受影响
+node dist/main.js serve --daemon
+```
+
+**别用 `serve --ensure` 起长期服务**：它启动后跟着调用它的那个进程树，
+终端一关或被工具杀掉，服务跟着走。`--ensure` 的用途只有一个——让
+`wakeServe` 那类自愈调用「确认在跑就立刻返回」，不适合手工常驻。
+
 ## 某个引擎一直失败却没有进入冷却
 
 先确认冷却控制器真的被传进去了。三端跑搜索走 `dist/kernel.js` 或本地服务的
