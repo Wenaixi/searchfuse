@@ -61,6 +61,29 @@ describe('fanout', () => {
     expect(failures).toEqual(['b: tavily: 401 invalid key']);
   });
 
+  it('hands the original rejection reason back, not just the formatted line', async () => {
+    // 冷却记录要拿 Error 对象本身：`classifyQuota` 看的是 `"reason":"credits"`
+    // 与 `retry_after_seconds`。只给格式化字符串的话，融合路径就没法判额度失败，
+    // 于是 `state.json` 永远是空的、被额度耗尽的引擎每跑一次都被重新撞一遍。
+    const quotaError = new Error('firecrawl returned 429 "reason":"credits" "retry_after_seconds":60');
+    const { outcomes } = await fanout(
+      [
+        target('a', async () => box('a', ['https://a.example/1'])),
+        target('b', async () => {
+          throw quotaError;
+        }),
+      ],
+      request,
+      5_000,
+      new AbortController().signal,
+    );
+    const failed = outcomes.find((o) => o.engine === 'b');
+    expect(failed?.ok).toBe(false);
+    // 必须是同一个 Error 实例，而不是重新拼出来的字符串。
+    expect(failed?.reason).toBe(quotaError);
+    expect(outcomes.find((o) => o.engine === 'a')?.ok).toBe(true);
+  });
+
   it('reports which sources were skipped rather than calling them failures', async () => {
     // A source held out of the run by the caller is not a failure: the caller
     // decides why, and the wording has to be able to say so.

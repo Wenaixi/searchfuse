@@ -934,6 +934,87 @@ describeSpawn('quota cooldown records, clears, and can be switched off', () => {
     // Off means the state file is never created.
     expect(fs.existsSync(p)).toBe(false);
   }, 30_000);
+
+  // **融合模式也必须记冷却。** 早先 `record`/`clear` 只挂在链式路径上，
+  // 融合只读 `controller.state` 判断「跳过谁」，从不写。于是默认的 rrf 模式
+  // 下 `state.json` 永远是空的，被额度耗尽的引擎每次运行都被重新撞一遍。
+  // 这是三端（kernel、serve、dsh、claude、omp）共享的那条真实路径。
+  it('records a cooling engine in fused mode too, not only the chain', async () => {
+    const p = statePath();
+    // agy 打额度墙，同时配一个能答的引擎，这样融合不会因全灭而抛错。
+    const config = agyConfig({ stdout: agyQuotaEnvelope() }, { aggregate: { mode: 'rrf' } });
+    const controller = buildCooldownController({}, { now, statePath: p });
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('offline unit test');
+    });
+    let result: Awaited<ReturnType<typeof runSearch>>;
+    try {
+      result = await runSearch({
+        query: 'q',
+        config,
+        env: BARE_ENV,
+        timeoutMs: 20_000,
+        cooldown: controller,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const recorded = loadCooldownState(p).engineCooldowns['antigravity-cli'];
+    expect(recorded).toBeDefined();
+    expect(recorded.until).toBe(
+      new Date(now.getTime() + (94 * 3600 + 19 * 60 + 9) * 1000).toISOString(),
+    );
+    // 报告里要说出来，别让读者以为它只是「没参与」。
+    expect((result.results[0].uncertainty as string[]).join(' ')).toMatch(/cooling until/);
+  }, 30_000);
+});
+
+// 融合模式记冷却的**跨平台**守护。
+//
+// 上面那条走假 CLI（`describeSpawn`），在 Windows 上整段跳过——而这台机器
+// 就是 Windows。冷却缺口最该被钉住的正是「三端真实路径」，所以这里改用
+// 进程内的 firecrawl（HTTP 引擎，不需要 spawn 假二进制），在两个平台上都跑。
+describe('fused mode records cooldown (cross-platform)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    cleanupTempDirs();
+  });
+
+  it('writes a cooldown row when a fused engine hits a quota wall', async () => {
+    const p = path.join(tempDir('modsearch-state-'), 'state.json');
+    const now = new Date('2026-08-06T00:00:00.000Z');
+    const controller = buildCooldownController({}, { now, statePath: p });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 402,
+        statusText: 'Payment Required',
+        json: async () => ({}),
+        text: async () => '{"error":"You have run out of credits","reason":"credits"}',
+      })),
+    );
+    // 只留 firecrawl 一个融合引擎：它必然失败，其余引擎被关掉以免联网。
+    const config: ModsearchConfig = {
+      aggregate: { mode: 'rrf' },
+      engines: {
+        firecrawl: {},
+        exa: { enabled: false },
+        keenable: { enabled: false },
+        anysearch: { enabled: false },
+        youcom: { enabled: false },
+        searxng: { enabled: false },
+        'antigravity-cli': { enabled: false },
+      },
+    };
+    await expect(
+      runSearch({ query: 'q', config, env: BARE_ENV, timeoutMs: 20_000, cooldown: controller }),
+    ).rejects.toThrow(/Every engine|failed/);
+    vi.unstubAllGlobals();
+    const recorded = loadCooldownState(p).engineCooldowns['firecrawl'];
+    expect(recorded).toBeDefined();
+    expect(recorded.until).toBeTruthy();
+  }, 30_000);
 });
 
 describe('engine spend surfaces on the attempt', () => {

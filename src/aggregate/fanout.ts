@@ -20,6 +20,17 @@ export interface FanoutResult<T> {
   outputs: RankedList<T>[];
   failures: string[];
   skipped: string[];
+  /**
+   * 每个引擎的结局，带上原始拒绝原因。
+   *
+   * `failures` 是给人看的一行行文字，冷却记录却需要 `Error` 对象本身——
+   * `classifyQuota` 要看 `"reason":"credits"` 与 `retry_after_seconds` 这类
+   * 字段，字符串能看出来，但把原始对象交出去更省事，也避免再从文字里解析。
+   *
+   * 早先只有 `failures`，于是融合路径根本没机会记冷却：`state.json` 永远是
+   * 空的，被额度耗尽的引擎每跑一次都被重新撞一遍。
+   */
+  outcomes: Array<{ engine: string; ok: boolean; reason?: unknown }>;
 }
 
 /**
@@ -89,6 +100,7 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
 
   const outputs: RankedList<T>[] = [];
   const failures: string[] = [];
+  const outcomes: Array<{ engine: string; ok: boolean; reason?: unknown }> = [];
   for (const { name, outcome } of settled) {
     if (outcome === 'stopped') {
       failures.push(
@@ -96,6 +108,9 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
           ? `${name}: the run was cancelled before this source answered.`
           : `${name}: timed out after ${totalDeadlineMs} ms.`,
       );
+      // 超时与取消都不是配额失败，带一个 undefined reason 让上层知道
+      // 这个引擎「没答上」但「不该记冷却」。
+      outcomes.push({ engine: name, ok: false });
       continue;
     }
     if (outcome.status === 'fulfilled') {
@@ -104,19 +119,26 @@ export async function fanout<T extends { url?: string; snippet?: string }>(
         ? ((result as { items: T[] }).items)
         : [];
       outputs.push({ engine: name, items });
+      outcomes.push({ engine: name, ok: true });
       continue;
     }
     const reason = outcome.reason;
     const text = reason instanceof Error ? reason.message : String(reason);
     failures.push(`${name}: ${text}`);
+    outcomes.push({ engine: name, ok: false, reason });
   }
 
   if (outputs.length === 0) {
     const lines = [...failures, ...skipped];
     const why = cancelledByCaller() ? 'The run was cancelled.' : 'Every engine failed or was skipped, so nothing could be fused.';
-    throw new Error(`${why} ${lines.join(' | ')}`);
+    // **把各引擎的原始失败原因挂到 error 上。** 全灭是最需要记冷却的情况
+    // （M 只有一个引擎、而它刚把额度用光），调用方据此把冷却记下来，不必
+    // 为了记冷却再跑一遍引擎。
+    const error = new Error(`${why} ${lines.join(' | ')}`) as Error & { outcomes?: unknown };
+    error.outcomes = outcomes;
+    throw error;
   }
 
-  return { outputs, failures, skipped };
+  return { outputs, failures, skipped, outcomes };
 }
 

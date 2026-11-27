@@ -28,6 +28,7 @@ import {
   currentConfigPath,
   loadConfigFile,
 } from './config.ts';
+import { buildCooldownController } from './cooldown.ts';
 import { runSearch } from './search.ts';
 
 /** 退出码。列成常量而不是散在代码里，因为调用方要按它们分支。 */
@@ -126,6 +127,11 @@ async function main(): Promise<void> {
     maxResults: takeNumber(args, '--max-results'),
     allowPrivateNetwork: allowsPrivateNetwork(config),
     config,
+    // 冷却控制器：没有它，被额度耗尽的引擎每跑一次都会被重新撞一遍。
+    // **kernel 是三端真正跑搜索的入口**（dsh、claude hook、omp 扩展全走它），
+    // 早先只有 CLI 的 `searchfuse search` 传了它，于是冷却在生产路径上
+    // 从来没生效过——state.json 永远是空的。
+    cooldown: buildCooldownController(config),
   });
 
   // 单行 JSON：调用方按行解析，不需要处理多行或尾随内容。

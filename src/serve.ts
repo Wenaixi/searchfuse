@@ -12,6 +12,7 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { allowsPrivateNetwork, currentConfigPath, loadConfigFile } from './config.ts';
+import { buildCooldownController } from './cooldown.ts';
 import { runSearch } from './search.ts';
 import { identityOf } from './serveIdentity.ts';
 
@@ -324,6 +325,9 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
             deadlineMs: Number(url.searchParams.get('deadline') ?? '') || undefined,
             allowPrivateNetwork: allowsPrivateNetwork(config),
             config,
+            // 冷却控制器：服务是三端（含 omp）跑搜索的路径之一，不传它
+            // 被额度耗尽的引擎就永远不会被跳过（见 kernel.ts 同一处注释）。
+            cooldown: buildCooldownController(config),
           };
       void search(options as Parameters<typeof search>[0])
         .then((result) => {
@@ -353,6 +357,7 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
         sources: 'web',
         allowPrivateNetwork: allowsPrivateNetwork(config),
         config,
+        cooldown: buildCooldownController(config),
       })
         .then((result) => {
           const payload = toSearxngShape(result, query);

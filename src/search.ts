@@ -366,26 +366,81 @@ async function runFused(
       snippet: string;
     }>(targets, request, budgetMs, undefined, { skipped });
   } catch (error) {
-    // 所有引擎都失败了。直接抛出去，而不是把运行交回给链式：链式会
-    // 为同一个失败把同样的引擎再查一遍，花掉双倍配额，换来的只是
-    // 我们手里这条错误的另一种说法。fanout 的消息会点名每个来源及其
-    // 原因，而链式的消息也是这么做的。
+    // **全部引擎都失败时也要记冷却。** 这是最需要记的情况：防火墙后面只有
+    // 一个引擎、而它刚把额度用光，下一次运行还会再撞一次。`fanout` 抛出的
+    // error 上带着每个引擎的原始原因（`outcomes`），用它把该记的记下来，
+    // 再把原错误抛给调用方。
+    recordFusedCooldowns(controller, error);
     throw error;
   }
-  const { outputs, failures } = fanoutResult;
+  const { outputs, failures, outcomes } = fanoutResult;
   const fused = rrfFuse(outputs);
   const enginesUsed = outputs.map((o) => o.engine);
+
+  // **融合路径也要记冷却。** 早先这里只读 `controller.state` 判断「跳过谁」，
+  // 从不写：`record`/`clear` 只挂在链式路径上。于是默认的融合模式下
+  // `state.json` 永远是空的，被额度耗尽的引擎每次运行都被重新撞一遍墙。
+  const cooldownNotes = recordFusedCooldowns(controller, undefined, outcomes) ?? [];
 
   return buildFusedResult({
     items: fused as unknown as Array<Record<string, unknown>>,
     engines: enginesUsed,
     failures,
     skipped,
+    cooldownNotes,
     durationSeconds: (Date.now() - startedAt) / 1000,
     query,
   });
 }
 
+/**
+ * 把融合运行里每个引擎的结局落到冷却记录上，返回一行行给人看的提示。
+ *
+ * 超时与取消（`ok: false` 但没有 `reason`）不该记——它们是瞬时的，与配额
+ * 无关；`classifyQuota` 自己也会再判一遍（限流不算配额）。
+ *
+ * 全灭时 `fanout` 抛错，调用方从带出来的 `outcomes` 里再取一次；这就是
+ * `fallbackError` 参数的用途。
+ */
+function recordFusedCooldowns(
+  controller: CooldownController | undefined,
+  fallbackError?: unknown,
+  outcomes?: Array<{ engine: string; ok: boolean; reason?: unknown }>,
+): string[] | undefined {
+  if (!controller) return undefined;
+  const source = outcomes ?? outcomesFromError(fallbackError);
+  const notes: string[] = [];
+  for (const outcome of source) {
+    if (outcome.ok) {
+      controller.clear(outcome.engine);
+      continue;
+    }
+    if (outcome.reason === undefined) continue;
+    const entry = controller.record(outcome.engine, outcome.reason);
+    if (entry) {
+      notes.push(
+        `The ${outcome.engine} engine hit a lasting limit (quota or region) and is now cooling until ${entry.until}.`,
+      );
+    }
+  }
+  return notes;
+}
+
+/**
+ * 从 `fanout` 抛出的错误上取回各引擎的结局。
+ *
+ * `fanout` 把 `outcomes` 挂在 error 上（见它的全灭分支），这样失败路径不必
+ * 为了记冷却重跑一遍引擎。取不到就当没有——记冷却失败不该掩盖原错误。
+ */
+function outcomesFromError(
+  error: unknown,
+): Array<{ engine: string; ok: boolean; reason?: unknown }> {
+  if (typeof error !== 'object' || error === null) return [];
+  const outcomes = (error as { outcomes?: unknown }).outcomes;
+  return Array.isArray(outcomes)
+    ? (outcomes as Array<{ engine: string; ok: boolean; reason?: unknown }>)
+    : [];
+}
 /**
  * 组装一次融合运行作答所用的条目。
  */
@@ -394,10 +449,12 @@ function buildFusedResult(input: {
   engines: string[];
   failures: string[];
   skipped: string[];
+  /** 冷却提示：某个引擎被记下持续限制，与一次性的失败原因分开报。 */
+  cooldownNotes?: string[];
   durationSeconds: number;
   query?: string;
 }): SourceResult {
-  const { items, engines, failures, skipped, durationSeconds, query } = input;
+  const { items, engines, failures, skipped, cooldownNotes, durationSeconds, query } = input;
   const multiSource = items.filter((item) => {
     const found = item.foundIn;
     return Array.isArray(found) && found.length > 1;
@@ -416,7 +473,7 @@ function buildFusedResult(input: {
     status: failures.length > 0 ? 'degraded' : 'ok',
     summary,
     items,
-    uncertainty: [...failures, ...skipped],
+    uncertainty: [...failures, ...skipped, ...(cooldownNotes ?? [])],
     warnings: items.length === 0 ? ['No results were returned by any of the eligible engines.'] : [],
     attempts: [],
     durationSeconds,
