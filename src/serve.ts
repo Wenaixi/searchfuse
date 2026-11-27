@@ -48,7 +48,7 @@ export function serveTokenPath(): string {
   return path.join(os.homedir(), '.searchfuse', 'serve-token');
 }
 
-/** 运行时文件：谁在跑、什么时候起的。不含端口（固定端口）。 */
+/** 运行时文件：谁在跑、端口、指纹、token。客户端优先读它；它不在时按候选探测。 */
 export function runtimePath(): string {
   return path.join(os.homedir(), '.searchfuse', 'runtime.json');
 }
@@ -209,11 +209,15 @@ export interface ServeHandle {
 }
 
 /**
- * 起服务。固定端口——被占用就报错，不漂移。
+/**
+ * 起服务。按候选端口顺序找第一个能绑的，全部被占才报错。
  *
- * 为什么不漂移：omp 的 `searxng.endpoint` 是配置文件里的静态字符串，
- * 端口变了它不会跟着变，于是每次重启都要用户手动跑一次 `hosts sync`。
- * 固定端口把这条高频故障变成一次性配置。
+ * 为什么是确定性候选而不是让内核随机分配：端口随机时 runtime.json 会成为
+ * 唯一线索，而它会在服务被 kill 时消失（close 跑不到）。候选来自目录指纹，
+ * 同一份 `.searchfuse` 永远得到同一组，客户端不必依赖文件也能找到服务。
+ *
+ * 为什么不漂移到任意空闲端口：8 个候选都被占说明同机上真有 8 个实例，
+ * 那时报错比再挑一个用户不知道的端口更有用——后者会让诊断无处下手。
  */
 export function startServe(options: ServeOptions): Promise<ServeHandle> {
   const search = options.search ?? runSearch;
