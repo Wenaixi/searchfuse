@@ -209,6 +209,55 @@ describe('端点把冷却控制器接进真实链路', () => {
     };
     expect(recorded.engineCooldowns?.firecrawl).toBeDefined();
   }, 30_000);
+
+  // `/v1/search` 才是 omp 真正走的路径（见 omp/extension.ts 的 toServeRequest），
+  // `/search` 只是 SearXNG 兼容壳。两条各自有一份 cooldown 接线，一条绿不代表
+  // 另一条接上了——这正是 0.1.1 那个缺口的形态。
+  it('/v1/search 也把冷却写进 state.json', async () => {
+    const temp = withTempHome();
+    restoreHome = temp.restore;
+
+    const configDir = path.join(temp.home, '.searchfuse');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'config.json'),
+      JSON.stringify({
+        aggregate: { mode: 'rrf' },
+        engines: {
+          exa: { enabled: false },
+          keenable: { enabled: false },
+          anysearch: { enabled: false },
+          youcom: { enabled: false },
+          searxng: { enabled: false },
+          'antigravity-cli': { enabled: false },
+        },
+      }),
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 402,
+        statusText: 'Payment Required',
+        json: async () => ({}),
+        text: async () => '{"error":"You have run out of credits","reason":"credits"}',
+      })),
+    );
+
+    const handle = await startServe({ port: 0, token: 'test-token', idleExitSeconds: 0 });
+    opened.push(handle);
+
+    const res = await httpGet(handle.port, '/v1/search?q=probe', 'test-token');
+    expect(res.status).toBeGreaterThanOrEqual(400);
+
+    const stateFile = path.join(configDir, 'state.json');
+    expect(fs.existsSync(stateFile), '/v1/search 没有把冷却落盘，接线断了').toBe(true);
+    const recorded = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
+      engineCooldowns?: Record<string, unknown>;
+    };
+    expect(recorded.engineCooldowns?.firecrawl).toBeDefined();
+  }, 30_000);
 });
 
 describe('toSearxngShape', () => {

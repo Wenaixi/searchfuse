@@ -97,9 +97,11 @@ expect(codeMeansAlive(err)).toBe(true);
 
 判据：给接线加守护时，断言必须从**真实入口**出发，而不是从被接的组件出发。
 
-本轮实际补的那条在 `src/serve.test.ts`：临时 home 里写一份只留 firecrawl 的配置，`startServe` 不注入 `search`（让它走自己的 `runSearch`），用打桩 `fetch` 让 firecrawl 返回额度错误，然后从真实 HTTP 端点打一次 `/search`，断言临时 home 的 `state.json` 里出现 firecrawl 的冷却行。删掉端点里的 `cooldown:` 接线 → 这条变红，恢复 → 转绿。
+本轮实际补的两条在 `src/serve.test.ts`：临时 home 里写一份只留 firecrawl 的配置，`startServe` 不注入 `search`（让它走自己的 `runSearch`），用打桩 `fetch` 让 firecrawl 返回额度错误，然后从真实 HTTP 端点打一次，断言临时 home 的 `state.json` 里出现 firecrawl 的冷却行。
 
-写这条时踩了两个坑，都属于「守护变成自证」：
+**两个端点各要一条**：`/v1/search`（omp 真正走的路径）与 `/search`（SearXNG 兼容壳）各自有一份 `cooldown` 接线。实测只删 `/v1/search` 那份时，`/search` 那条仍绿——一条守不住另一条。这正是缺口容易残留的原因：看着「有测试了」，其实只覆盖了一半。
+
+写这两条时踩了两个坑，都属于「守护变成自证」：
 
 - **不能用测试自己的 `fetch` 发那个请求。** `vi.stubGlobal('fetch', ...)` 换的是整个进程的全局 `fetch`，测试里再调 `fetch('http://127.0.0.1:...')` 拿到的是刚造的那个假响应，请求根本到不了服务端。表现是断言全绿或全红都毫无意义——我第一次就是这样，看到 402 以为是端点透传状态码，其实是桩自己答的。要用 `node:http` 发。
 - **必须断言落盘产物，不是返回值。** 端点在全灭时把上游错误原样抛出，`error.message` 里本来就有 `"reason":"credits"`；断言消息内容会绿，断言 `state.json` 存在才有意义。
