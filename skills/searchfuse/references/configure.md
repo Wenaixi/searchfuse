@@ -274,7 +274,7 @@ searchfuse config set allowPrivateNetwork true   # 永久生效（顶层，全�
 某个 API key 因额度类错误失败时，searchfuse 把这个 key 记在 `~/.searchfuse/state.json`（与 `config.json` 分开）。下一次运行会先试同一引擎里的健康 key。只有所有已配置 key 都在冷却时，整个引擎才会移到后备链末尾。没有 API key 的引擎仍按引擎粒度冷却。这是软化的熔断器，不是负载均衡：健康 key 和健康引擎拿全部工作，冷却项仍保留为最后尝试。
 
 - 冷却中的 key 不会被移除。某个 key 成功后只清除它自己的冷却。旧格式的引擎级状态仍可读取，并在任一 key 成功前作用于该引擎的所有 key。
-- 引擎报错里的精确重置时间（agy 的 `Resets in 94h19m9s`）会被采用。没写时间的额度错误冷却 45 分钟。按秒的速率限制是瞬时的，从不记录。
+- 恢复时间按精度从高到低取：服务器给的 `retry_after_seconds`（firecrawl 的免注册额度墙回 429 时带的 JSON 字段）→ 报错正文里的 `Resets in 94h19m9s` → 兜底。没写时间的额度错误冷却 45 分钟，月度额度（Tavily 的 432/433）冷却 24 小时。按秒的速率限制是瞬时的，从不记录——但**429 不等于瞬时限流**：正文写着 `"reason":"credits"` 的是花光的预算，会记。
 - 显式 `-e`/`--engine` 仍是硬指定，不会跨引擎后备。同一引擎有多个 key 时，健康 key 仍排在冷却 key 前面。
 - 结果的 `warnings` 会指出哪个 key 进入冷却。只有所有已配置 key 都在冷却并导致引擎后移时，路由 warning 才按引擎报告。
 
