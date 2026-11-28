@@ -241,12 +241,16 @@ export function parseResetDuration(message: string): number | null {
 }
 
 /**
- * Parse an explicit "retry after N seconds" field, or null.
+ * Parse an explicit retry-after value in seconds, or null.
  *
  * Firecrawl 的免注册额度耗尽时报 429，正文是 JSON：
  * `{"reason":"credits","retry_after_seconds":66233}`。这个秒数就是权威的恢复
  * 时间，比任何兜底 TTL 都准。同时也认 HTTP 标准的 `Retry-After` 头写进
- * message 的常见形态。
+ * message 的**秒数形态**。
+ *
+ * **不认 HTTP-date 形态**（`Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`）。
+ * 认不动时会返回 null 退回兜底 TTL，冷却偏短而不是偏长，是可以接受的降级。
+ * 真正会写出 date 形态的上游，正文里通常另有 `Resets in ...` 或秒数字段。
  */
 export function parseRetryAfterSeconds(message: string): number | null {
   const match = /"retry_after_seconds"\s*:\s*(\d+)/i.exec(message);
@@ -254,7 +258,8 @@ export function parseRetryAfterSeconds(message: string): number | null {
     const seconds = Number.parseInt(match[1] ?? '', 10);
     return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
   }
-  const header = /retry-after:\s*(\d+)/i.exec(message);
+  // 锚定到词边界，免得 `x-retry-after: 5` 这种复合头名字命中。
+  const header = /\bretry-after:\s*(\d+)/i.exec(message);
   if (header) {
     const seconds = Number.parseInt(header[1] ?? '', 10);
     return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
@@ -287,13 +292,22 @@ export function classifyQuota(error: unknown, now: Date): Date | null {
   // `"reason":"credits"` 这类 JSON 字段写法。它们与上面的 monthlyQuota 一样，
   // 是花光的预算。
   //
-  // 只认明确表示「已耗尽」的词：`credits` / `credit_exhausted` / `quota` /
-  // `daily_limit` / `usage_limit`。**不能收裸词 `limit`**——上游把瞬时限流的
-  // 原因写成 `"reason":"rate_limit"` 时，收下它就把每秒一次的抖动记成 45 分钟
-  // 冷却，正好与本函数的判断相反。`limit` 必须带 quota/usage/daily 这类
-  // 表示「配额」的前缀才算。
+  // 两条约束同时要满足，缺一条就会错：
+  //
+  // 1. **收得下额度码的复合形态。** `credits?\\b` 是不够的：JS 正则里 `_`
+  //    属于 `\\w`，所以 `_` 与字母之间**不构成词边界**，`credits_exhausted`
+  //    会漏判。连字符形态（`daily-limit`）也漏，因为 `[_-]?` 只允许零个或
+  //    一个下划线。这里改成显式的「后跟引号或分隔符」断言。
+  // 2. **不能把限流码误当额度。** 裸词 `limit` 与独立成词的 `limit_reached`
+  //    都会命中 `rate_limit_reached` / `requests_limit_reached` 这类极常见的
+  //    瞬时限流码——那是每秒一次的抖动，记 45 分钟冷却正好与本意相反。
+  //    所以 `limit` **必须**带 usage/daily/monthly/plan/billing 这类表示
+  //    配额的词作前缀。
+  //
+  // `credits` 收复数形式（`credits`、`credits_exhausted`），单数 `credit`
+  // 只走明确列出的复合词，否则 `credit_score` 这类无关码会被误吃。
   const creditReason =
-    /"reason"\s*:\s*"[^"]*(?:credits?\b|credit_exhausted|quota|(?:usage|daily|monthly)_?limit|limit_reached)/i.test(
+    /"reason"\s*:\s*"[^"]*(?:credits(?=["_]|$)|credit[_-](?:exhausted|depleted|used|limit|quota)|quota|(?:usage|daily|monthly|plan|billing)[_-]?limit(?:[_-](?:reached|exceeded))?)/i.test(
       message,
     );
   const looksQuota =
@@ -312,7 +326,12 @@ export function classifyQuota(error: unknown, now: Date): Date | null {
   // → 兜底 TTL。用到服务器自己给的秒数，就不会出现「冷却早结束、又撞一次」。
   const resetMs = parseRetryAfterSeconds(message) ?? parseResetDuration(message);
   const fallbackMs = monthlyQuota ? MONTHLY_COOLDOWN_MS : DEFAULT_COOLDOWN_MS;
-  return new Date(now.getTime() + (resetMs ?? fallbackMs));
+  // **必须验证结果日期有效。** 秒数本身有限不代表 `now + 秒数*1000` 还是有限：
+  // 上游正文由外部控制，一个 `"retry_after_seconds":99999999999999` 就会算出
+  // Invalid Date。而 `Date` 对象永远 truthy，`if (!until)` 拦不住它，于是
+  // 调用方 `toISOString()` 抛 RangeError，整次搜索报错而不是正常降级。
+  const until = new Date(now.getTime() + (resetMs ?? fallbackMs));
+  return Number.isFinite(until.getTime()) ? until : null;
 }
 
 /**

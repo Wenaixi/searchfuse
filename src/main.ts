@@ -179,6 +179,11 @@ program
     await waitForPendingKills();
     process.exitCode = exitCode;
     const store = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
+    // 覆盖前先清旧句柄。同一进程里这个 action 再次进入（测试里多次 import
+    // main.ts 就是这种形态）时，旧计时器既没人引用也没被 clear，它仍会在
+    // 2 秒后真的调 process.exit——正是这个改动想消灭的症状。
+    const previous = store[EXIT_BACKSTOP_KEY];
+    if (previous !== undefined) clearTimeout(previous);
     const timer = setTimeout(() => process.exit(exitCode), EXIT_BACKSTOP_MS);
     timer.unref();
     store[EXIT_BACKSTOP_KEY] = timer;

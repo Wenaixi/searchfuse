@@ -26,24 +26,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   同一套身份算法，`tryServe` 与 `healthOnce` 都改走 `locateServeRuntime`。
   实测：删文件后用真实 `omp -p` 搜索，13 条结果，仍只有 1 个实例。
 - **冷却控制器从未传入三端的真实链路。** `src/kernel.ts`（dsh / claude hook /
-  omp 扩展全部走它）与 `src/serve.ts` 的两个端点都没传 `cooldown`，只有 CLI 的
+  omp 扩展全部走它）与 `src/serve.ts` 的三个端点都没传 `cooldown`，只有 CLI 的
   `searchfuse search` 传了——而三端没有一个走那条路。结果是 `state.json`
-  永远是空的，被额度耗尽的引擎每次运行都被重新撞一遍墙。
+  永远是空的，被额度耗尽的引擎每次运行都被重新撞一遍墙。三个端点里
+  `/v1/read-page` 是最晚被发现的：修前两个时漏了它，而 omp 的 `read_page`
+  走的正是这条。
 - **融合模式只读冷却、从不写。** 即使控制器传进去了，默认的 `rrf` 模式下
   `record`/`clear` 也只挂在链式路径上。`FanoutResult` 现在带 `outcomes`
   （保留原始 `Error` 对象，而不只是格式化后的字符串），融合路径据此记冷却；
   全灭时 `fanout` 抛出的 error 上也挂着 `outcomes`，那正是最该记的情况。
+- **多密钥引擎在融合模式下会一直用那把已耗尽的 key。** 所有 HTTP provider 只读
+  `splitApiKeys(apiKey)[0]`，而密钥轮换只发生在链式路径。链式把 key1 记成冷却
+  后，下一次融合运行仍拿它去打同一堵墙。现在融合组目标时把健康的 key 排到首位，
+  不必改任何 provider。
 - **429 携带额度原因时被当成瞬时限流。** firecrawl 的免注册额度用完回 429，
   正文写着 `"reason":"credits"` 与 `"retry_after_seconds":66233`——那是花光的
   预算，不是每秒一次的抖动。`classifyQuota` 早先只看 `/429/` 就返回 null，
   而 `retry_after_seconds` 这个权威恢复时间全仓库没人读。现在认这类 JSON
   字段，恢复时间按 `retry_after_seconds` → `Resets in 94h19m9s` → 兜底 TTL
-  的精度顺序取。判定「额度类」时只认明确表示已耗尽的词（`credits`、`quota`、
-  `daily_limit` 等），**不收裸词 `limit`**——上游把瞬时限流写成
-  `"reason":"rate_limit"`，收下它就会把每秒一次的抖动记成 45 分钟冷却。
+  的精度顺序取。
+- **额度码的复合形态被判漏。** 判定「额度类」的正则早先写 `credits?\b`，
+  但 JS 正则里 `_` 属于 `\w`，`_` 与字母之间**不构成词边界**，于是
+  `"reason":"credits_exhausted"`、`credits_depleted` 这种最常见形状全部漏判；
+  连字符形态 `daily-limit` 也漏（`[_-]?` 只允许下划线）。漏判的后果是每次运行
+  都重新撞一次墙。现在改成显式后跟断言 `credits(?=["_]|$)`，并接受连字符。
+- **瞬时限流码被误判成额度。** 同一个正则里独立成词的 `limit_reached` 会命中
+  `rate_limit_reached` / `requests_limit_reached` 这类极常见的限流码，把一秒钟的
+  抖动记成 45 分钟冷却——正是这段逻辑声明要避免的反向错误。现在 `limit` 必须
+  带 `usage`/`daily`/`monthly`/`plan`/`billing` 这类表示配额的前缀。
+- **外部可控的秒数能让冷却记录抛 RangeError。** `"retry_after_seconds":99999999999999`
+  会算出 Invalid Date，而 Date 对象永远 truthy，`if (!until)` 拦不住，调用方
+  `toISOString()` 抛出并**替换掉原本的引擎失败原因**。现在验证结果日期有效，
+  并在记录侧包一层兜底。
 - **`claude/.claude-plugin/plugin.json` 的版本号不在盖章表里。** 0.1.1 发版后
   `searchfuse --version` 报 0.1.1，而宿主里显示的仍是 0.1.0。已纳入
   `stampTargets`。
+
+### Changed
+
+- **成功引擎只在确实有冷却记录时才清状态。** `clearEngineCooldown` 无条件读盘
+  （写被短路，读不会），融合模式下每个成功引擎触发一次，六个引擎就是每请求
+  六次读盘，而绝大多数时候是空操作。
 
 ## [0.1.1] - 2026-11-27
 

@@ -313,6 +313,9 @@ export function startServe(options: ServeOptions): Promise<ServeHandle> {
             url: targetUrl,
             allowPrivateNetwork: allowsPrivateNetwork(config),
             config,
+            // 抓页也要跑引擎（firecrawl 会撞额度墙），不传控制器就既不记
+            // 冷却也不清除。omp 的 read_page 走的正是这条分支。
+            cooldown: buildCooldownController(config),
           }
         : {
             query,

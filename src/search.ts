@@ -6,7 +6,7 @@ import {
   loadConfigFile,
   type ModsearchConfig,
 } from './config.ts';
-import { coolingEngineEntry, coolingEntry, type CooldownController } from './cooldown.ts';
+import { cooldownStateKey, coolingEngineEntry, coolingEntry, type CooldownController } from './cooldown.ts';
 import { fanout, type FanoutTarget } from './aggregate/fanout.ts';
 import { rrfFuse } from './aggregate/rrf.ts';
 import {
@@ -333,7 +333,24 @@ async function runFused(
       skipped.push(`${engine.name}: 处于冷却期，本次未参与（配额恢复后自动回归）`);
       continue;
     }
-    targets.push({ engine, settings });
+    // **多密钥引擎要把健康的 key 排到首位。** 融合路径把 settings 原样交给
+    // provider，而所有 HTTP provider 只读 `splitApiKeys(apiKey)[0]`——密钥
+    // 轮换只发生在链式路径。于是链式把 key0 记成冷却后，下一次融合运行仍会
+    // 拿 key0 去打同一堵墙。这里只重排顺序、不改 provider。
+    //
+    // 单密钥引擎不受影响（keyCount<=1 时没必要动）。
+    let effective = settings;
+    if (controller && keyCount > 1) {
+      const keys = splitApiKeys(settings.apiKey);
+      const healthy = keys.findIndex(
+        (_, index) => !coolingEntry(controller.state, engine.name, controller.now, index),
+      );
+      if (healthy > 0) {
+        const reordered = [keys[healthy]!, ...keys.filter((_, index) => index !== healthy)];
+        effective = { ...settings, apiKey: reordered.join(',') };
+      }
+    }
+    targets.push({ engine, settings: effective });
   }
 
   if (targets.length === 0) {
@@ -411,16 +428,37 @@ function recordFusedCooldowns(
   const source = outcomes ?? outcomesFromError(fallbackError);
   const notes: string[] = [];
   for (const outcome of source) {
+    // 元素级守卫：`outcomes` 是 fans 出来的数据，形状由内部契约保证，但
+    // `canonicalEngineName(undefined)` 会抛 TypeError。一行守卫比修复更省。
+    if (typeof outcome?.engine !== 'string') continue;
     if (outcome.ok) {
-      controller.clear(outcome.engine);
+      // **只在快照里确实有冷却记录时才 clear。** clearEngineCooldown 无条件
+      // 调 updateStateOnDisk，后者先 readFileSync + JSON.parse（写被短路，
+      // 读不会）。融合模式下每个成功引擎都触发一次，六个引擎就是每请求
+      // 六次读盘，而绝大多数时候是空操作。
+      //
+      // 键要过 cooldownStateKey（内含 canonicalEngineName），否则别名的引擎
+      // 名（`antigravity-cli` vs `agy`）查不到自己那条。
+      const stateKey = cooldownStateKey(outcome.engine);
+      if (controller.state.engineCooldowns[stateKey] !== undefined) {
+        controller.clear(outcome.engine);
+      }
       continue;
     }
     if (outcome.reason === undefined) continue;
-    const entry = controller.record(outcome.engine, outcome.reason);
-    if (entry) {
-      notes.push(
-        `The ${outcome.engine} engine hit a lasting limit (quota or region) and is now cooling until ${entry.until}.`,
-      );
+    try {
+      const entry = controller.record(outcome.engine, outcome.reason);
+      if (entry) {
+        notes.push(
+          `The ${outcome.engine} engine hit a lasting limit (quota or region) and is now cooling until ${entry.until}.`,
+        );
+      }
+    } catch (recordError) {
+      // 记冷却失败绝不能掩盖原错误：这个函数既在成功路径上返回 notes，也在
+      // 全灭的 catch 分支里被调用——那里抛出去会把调用方看到的「引擎为什么
+      // 失败」换成一句 `Invalid time value`。
+      const message = recordError instanceof Error ? recordError.message : String(recordError);
+      notes.push(`Cooldown state for ${outcome.engine} could not be recorded (${message}).`);
     }
   }
   return notes;

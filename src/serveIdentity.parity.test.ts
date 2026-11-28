@@ -18,8 +18,13 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { identityOf } from './serveIdentity.ts';
+import { cleanupTempDirs, tempDir } from './testing/helpers.ts';
+
+afterEach(() => {
+  cleanupTempDirs();
+});
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1'), '..');
 const dshSource = fs.readFileSync(path.join(repoRoot, 'dsh', 'index.ts'), 'utf-8');
@@ -68,15 +73,19 @@ ${portsFn}
 ${ofHomeFn}
 return identityOfHome;
 `);
-  // 注入真实的 crypto / path：dsh 里这两个是 import 进来的名字，
-  // 这里用同名参数传进去，等价于它自己的模块环境。
+  // 注入 dsh 模块环境里真实存在的四个名字。**`realpathSync` 不能漏**：
+  // 漏了它，`realpathSync(stateDir)` 抛 TypeError 被 catch 吞掉，全部用例都
+  // 走 `resolve` 那条降级分支，于是这份 parity 测试对真实的 realpath 归一化
+  // （junction 与目标算同一份、8.3 短名不展平）**零守护力**——测试绿的原因
+  // 不是"两份一致"，而是"两边都没跑那条分支"。
   // eslint-disable-next-line no-new-func
-  const factory = new Function('createHash', 'resolve', 'join', program) as (
+  const factory = new Function('createHash', 'realpathSync', 'resolve', 'join', program) as (
     createHash: typeof crypto.createHash,
+    realpathSync: typeof fs.realpathSync,
     resolve: typeof path.resolve,
     join: typeof path.join,
   ) => (home: string) => { fingerprint: string; ports: number[] };
-  return factory(crypto.createHash, path.resolve, path.join);
+  return factory(crypto.createHash, fs.realpathSync, path.resolve, path.join);
 }
 
 const ompSource = fs.readFileSync(path.join(repoRoot, 'omp', 'extension.ts'), 'utf-8');
@@ -160,6 +169,46 @@ describe('三端的身份推导必须一致', () => {
     expect(identityOf('C:/Users/Administrator').fingerprint).toBe(
       identityOf('c:/users/administrator').fingerprint,
     );
+  });
+
+  it('对真实存在的目录，三份实现都走 realpath 分支且结果一致', () => {
+    // **上面所有用例的路径都不存在**，于是三份实现全都靠 `catch` 退回
+    // `resolve`，realpath 这条真正决定生产行为的分支从未被执行过。
+    // 这条用一个真实存在的临时目录，把那条分支拉进射程。
+    //
+    // 为什么重要：junction / 符号链接与它的目标必须是同一份状态（台账记的
+    // dsh profile 快照问题就是这个形态）；8.3 短名不被 realpathSync 展平，
+    // 也是已知限制。这两条都只在 realpath 分支里成立。
+    const dir = tempDir('identity-parity-');
+    fs.mkdirSync(path.join(dir, '.searchfuse'), { recursive: true });
+
+    const dshIdentityOf = evalDshIdentity();
+    const ompIdentityOf = evalOmpIdentity();
+
+    const fromMain = identityOf(dir);
+    expect(dshIdentityOf(dir)).toEqual(fromMain);
+    expect(ompIdentityOf(dir)).toEqual(fromMain);
+
+    // **把 realpath 与 resolve 分开的关键一步。** 上面四条用例的路径都不存在，
+    // 三份实现全走 `catch → resolve`；而即使目录存在但没有链接，realpath 与
+    // resolve 也给出同一串。所以只测「存在」还锁不住这条分支——实测：把
+    // realpathSync 从求值器里去掉，7 条全绿。
+    //
+    // 建一个指向真实目录的 junction，让两条路径给出**不同**的字符串：
+    // realpath(link) → <target>，resolve(link) → <link>。三份实现必须都返回
+    // target 的指纹；任何一份退回 resolve，指纹就会不同，立刻变红。
+    const target = path.join(dir, 'target-home');
+    const link = path.join(dir, 'linked-home');
+    fs.mkdirSync(path.join(target, '.searchfuse'), { recursive: true });
+    fs.symlinkSync(target, link, 'junction');
+
+    // 断言前提成立：两条路径确实不同，否则下面比不出东西。
+    expect(fs.realpathSync(link)).not.toBe(path.resolve(link));
+
+    const viaLinkMain = identityOf(link);
+    expect(viaLinkMain.fingerprint).toBe(identityOf(target).fingerprint);
+    expect(dshIdentityOf(link).fingerprint).toBe(identityOf(target).fingerprint);
+    expect(ompIdentityOf(link).fingerprint).toBe(identityOf(target).fingerprint);
   });
 
   it('dsh 的指纹是 8 位十六进制，与主包一致', () => {

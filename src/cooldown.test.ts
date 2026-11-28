@@ -203,6 +203,47 @@ describe('classifyQuota', () => {
     expect(classifyQuota(new Error(message), now)).toBeNull();
   });
 
+  // 上面那条的更硬版本：`rate_limit_reached` / `requests_limit_reached` 这类
+  // 带后缀的瞬时限流码。早先正则把独立成词的 `limit_reached` 也收进额度类，
+  // 于是一秒钟的抖动被记成 45 分钟——正是这段逻辑声明要避免的反向错误。
+  it.each(['rate_limit_reached', 'requests_limit_reached', 'too_many_requests'])(
+    'does not persist a 429 whose JSON reason is %s',
+    (reason) => {
+      const message = `saas returned 429 . {"error":"throttled","reason":"${reason}"}`;
+      expect(classifyQuota(new Error(message), now)).toBeNull();
+    },
+  );
+
+  // 另一面：额度码的复合形态必须收下。`credits?\\b` 在 `_` 与字母之间不构成
+  // 词边界，所以 `credits_exhausted` 会漏判；连字符形态 `daily-limit` 也漏。
+  // 漏判的后果是每跑一次都重新撞一次墙，与这个功能的初衷相反。
+  it.each([
+    'credits',
+    'credits_exhausted',
+    'credits_depleted',
+    'quota_exceeded',
+    'daily_limit',
+    'daily-limit',
+    'usage_limit',
+    'plan_limit_reached',
+  ])('persists a 429 whose JSON reason is %s', (reason) => {
+    const message = `saas returned 429 . {"error":"no budget","reason":"${reason}"}`;
+    expect(classifyQuota(new Error(message), now)).not.toBeNull();
+  });
+
+  // 与额度无关的复合词不能被误吃：`credit_score` 里那个 `credit` 不是钱。
+  it('does not treat credit_score as a quota reason', () => {
+    const message = 'saas returned 429 . {"error":"bad request","reason":"credit_score"}';
+    expect(classifyQuota(new Error(message), now)).toBeNull();
+  });
+
+  // 外部可控的秒数可以让结果变成 Invalid Date。Date 对象永远 truthy，
+  // `if (!until)` 拦不住，调用方 toISOString() 会抛 RangeError。
+  it('returns null instead of an Invalid Date for an absurd retry_after', () => {
+    const message = 'saas returned 429 . {"reason":"credits","retry_after_seconds":99999999999999}';
+    expect(classifyQuota(new Error(message), now)).toBeNull();
+  });
+
   // 429 不等于瞬时限流。firecrawl 的免注册额度用完时也回 429，正文却明写
   // `"reason":"credits"` 与 `retry_after_seconds`——那是花光的预算。早先只看
   // `/429/` 就返回 null，于是每跑一次搜索都白撞一次这堵墙。

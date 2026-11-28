@@ -257,6 +257,57 @@ describe('端点把冷却控制器接进真实链路', () => {
     };
     expect(recorded.engineCooldowns?.firecrawl).toBeDefined();
   }, 30_000);
+
+  // 抓页分支是同一个 handler 里的**第三个** options 对象。0.1.2 修端点接线时
+  // 只补了 /search 与 /v1/search，漏了 read-page——而 omp 的 read_page 工具
+  // 走的正是这条。抓页同样会撞 firecrawl 的额度墙。
+  it('/v1/read-page 也把冷却写进 state.json', async () => {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, 'config.json'),
+      JSON.stringify({
+        aggregate: { mode: 'chain' },
+        engines: {
+          exa: { enabled: false },
+          keenable: { enabled: false },
+          anysearch: { enabled: false },
+          youcom: { enabled: false },
+          searxng: { enabled: false },
+          'antigravity-cli': { enabled: false },
+        },
+      }),
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 402,
+        statusText: 'Payment Required',
+        json: async () => ({}),
+        text: async () => '{"error":"You have run out of credits","reason":"credits"}',
+      })),
+    );
+
+    const handle = await startServe({ port: 0, token: 'test-token', idleExitSeconds: 0 });
+    handles.push(handle);
+
+    const res = await httpGet(
+      handle.port,
+      '/v1/read-page?url=https%3A%2F%2Fexample.com%2Fprobe',
+      'test-token',
+    );
+    // 抓页链失败后会回退到本地引擎，所以状态码不一定是错误——200 也可能。
+    // 这条要断言的是 **firecrawl 撞墙后被记了冷却**，不是响应码。
+    void res;
+
+    const stateFile = path.join(stateDir, 'state.json');
+    expect(fs.existsSync(stateFile), '/v1/read-page 没有把冷却落盘，接线断了').toBe(true);
+    const recorded = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
+      engineCooldowns?: Record<string, unknown>;
+    };
+    expect(recorded.engineCooldowns?.firecrawl).toBeDefined();
+  }, 30_000);
 });
 
 describe('toSearxngShape', () => {
