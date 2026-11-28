@@ -17,14 +17,10 @@
     "format": "biome format --write",
     "release": "node scripts/release.mjs",
     "prepublishOnly": "pnpm build",
-    "eval": "node evals/run.mjs",
-    "docs:list": "node scripts/docs-list.js",
-    "parity:check": "node scripts/parity-check.mjs",
-    "parity:final": "node scripts/parity-check.mjs --final"
+    "eval": "node evals/run.mjs"
   },
   "files": [
     "dist",
-    "docs",
     "skills/searchfuse/SKILL.md",
     "skills/searchfuse/scripts",
     "skills/searchfuse/references",

@@ -7,8 +7,9 @@ assignees: ""
 ---
 
 <!--
-docs/troubleshooting.md catalogs every error this CLI prints, with its cause and
-fix. Please check it first: most messages already name the fix.
+Run `searchfuse doctor` first: it reports Node version, each engine's readiness
+with the reason, where every config value came from, and which engines are
+cooling. Most error messages already name their own fix.
 -->
 
 ## What happened

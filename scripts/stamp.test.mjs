@@ -22,12 +22,6 @@ describe('launcher version stamping', () => {
         'README.md dsh install',
         // README 是唯一保留双语的文件，所以两个版本号行都还在。
         'README.zh-CN.md dsh install',
-        // 其余文档只剩中文版，主文件名就是它们自己。
-        'harness-setup.md dsh install',
-        'harness-setup.md dsh update',
-        'dsh.md install',
-        'dsh.md doctor',
-        'dsh.md update',
       ]),
     );
     for (const stamped of stampedVersions) {

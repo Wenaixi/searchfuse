@@ -103,12 +103,6 @@ export function dshInstallTargets(root, pkgName) {
     pattern: new RegExp(`--profile ${escapeRe(profile)} add ${escaped}@(\\d+\\.\\d+\\.\\d+)`),
     format: (version) => `--profile ${profile} add ${pkgName}@${version}`,
   });
-  const doctorTarget = (name, file) => ({
-    name,
-    file: join(root, file),
-    pattern: new RegExp(`npx -y ${escaped}@(\\d+\\.\\d+\\.\\d+) doctor`),
-    format: (version) => `npx -y ${pkgName}@${version} doctor`,
-  });
   const installConfigTarget = {
     name: 'INSTALL.md dsh config',
     file: join(root, 'INSTALL.md'),
@@ -121,12 +115,6 @@ export function dshInstallTargets(root, pkgName) {
     target('README.md dsh install', 'README.md', 'web'),
     // README.zh-CN.md 是唯一保留双语的文档，所以它仍然有自己的版本号行。
     target('README.zh-CN.md dsh install', 'README.zh-CN.md', 'web'),
-    // 其余文档只剩中文版，主文件名就是它们自己。
-    target('harness-setup.md dsh install', 'docs/harness-setup.md', 'web'),
-    target('harness-setup.md dsh update', 'docs/harness-setup.md', '<name>'),
-    target('dsh.md install', 'docs/dsh.md', 'web'),
-    doctorTarget('dsh.md doctor', 'docs/dsh.md'),
-    target('dsh.md update', 'docs/dsh.md', '<name>'),
   ];
 }
 

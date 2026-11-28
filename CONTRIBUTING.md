@@ -24,7 +24,7 @@ pnpm build       # vite lib build to dist/
 pnpm lint        # Biome
 ```
 
-Requires Node 22.19+. CI runs the full gate on Linux (Node 22, 24, 26) and Windows (Node 22, 26). Platform-specific test suites are gated in code (see docs/testing.md).
+Requires Node 22.19+. CI runs the full gate on Linux (Node 22, 24, 26) and Windows (Node 22, 26). Platform-specific test suites are gated in code with `SPAWNS_FAKE_CLI` and `expectPosixMode`.
 
 ## Tests never go online
 
@@ -34,16 +34,19 @@ loopback server from `startLocalPage` in `src/testing/helpers.ts`, and the
 `agy`/`grok` subprocess engines are replaced with fake CLIs that echo canned
 envelopes. A fake CLI is a POSIX shell script, so the suites that spawn one run
 on Unix only and are skipped on Windows. Real `agy`/`grok` calls spend quota and
-are end-to-end checks, not unit tests, so they stay out of `pnpm test`. See
-`docs/testing.md`.
+are end-to-end checks, not unit tests, so they stay out of `pnpm test`.
 
 Tests are co-located: modules have an adjacent `*.test.ts`. Add or update a
 test in the same commit as any behavior change.
 
 ## Commits
 
-Follow `docs/commit.md`: Conventional Commits, one change per commit, imperative
-summary under 72 characters, no trailing period. Do not mix a pure refactor or
-formatting pass with a behavior change.
+Use Conventional Commits (`feat`, `fix`, `docs`, `test`, `chore`, ...), one change
+per commit, imperative summary under 72 characters, no trailing period. Put the
+why in the body, not a restatement of the diff. Do not mix a pure refactor or
+formatting pass with a behavior change, and add the test in the same commit as
+the behaviour it covers. Never use `--amend` to hide a failed hook: fix the
+problem and make a new commit. Do not push without the maintainer asking.
 
-The architecture lives in `README.md` and `docs/` if you need the lay of the land.
+The architecture lives in `README.md` and `CLAUDE.md` if you need the lay of the
+land.

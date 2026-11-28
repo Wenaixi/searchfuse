@@ -72,7 +72,8 @@ with `npx -y @wenaixi/searchfuse@0.1.2` in place of the launcher.
   line with the exact version above.
 - `--dump-config` shows neither line -> the plugin went into a different
   profile. Check `PROFILE` and re-run the `add` line.
-- Anything else -> see the [dsh plugin guide](docs/dsh.md).
+- Anything else -> run `searchfuse doctor`; it reports every engine's readiness
+  and the reason behind it, without spending quota.
 
 > **Windows:** in PowerShell, set the profile with
 > `$DshProfile = if ($env:DSH_PROFILE) { $env:DSH_PROFILE } else { 'web' }` and pass
@@ -347,9 +348,9 @@ who answered and an `items` list with `url`s. That is a working install.
   Firecrawl, Keenable, and You.com mean a bare install always has a search engine. Read the per-engine
   attempt lines for the actual cause.
 - A timeout -> retry once with `--timeout 300000`. agy runs take 10-30 seconds.
-- Any other message -> it is catalogued with its cause and fix in
-  [`docs/troubleshooting.md`](docs/troubleshooting.md). Read the message first,
-  since most already name the fix.
+- Any other message -> run `searchfuse doctor`. It reports Node version, each
+  engine's readiness with the reason, where every config value came from, and
+  which engines are cooling. Most error messages already name their own fix.
 
 ---
 

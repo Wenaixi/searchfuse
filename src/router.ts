@@ -129,8 +129,8 @@ export function planRole(
     //
     // 所以这里**抛错**，不是往 notes 里塞一行。往 notes 里塞会返回空链，
     // 而上层拿到空链会退回自动链——那正是「悄悄烧掉别家额度」，
-    // 与这段注释和 docs/troubleshooting.md 写的「`-e` 是硬指定、没有回退」
-    // 都相反。实测：`-e __no-such-engine__` 曾经退出码 0 并返回 6 台引擎的
+    // 与「`-e` 是硬指定、没有回退」这条契约相反。实测：
+    // `-e __no-such-engine__` 曾经退出码 0 并返回 6 台引擎的
     // 真实结果，因为调用方看不出空链意味着「用户的要求做不到」。
     const engine = findEngine(explicit);
     if (!engine) {

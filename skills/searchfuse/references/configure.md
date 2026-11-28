@@ -228,7 +228,9 @@ searchfuse config set searxng.baseURL http://127.0.0.1:8888   # 用自己的实�
 
 填了 `baseURL` 就用用户的实例，`embedded` 不再起作用；留空则用随包实例。公共实例几乎总返回 403，因为它的 `settings.yml` 里 `format: json` 是关的，所以要么指向自己实例、要么用随包实例，不要随便填一个公共地址。
 
-它只搜索，`-u` 配 `-e searxng` 会报错。`searxng.outgoing` 控制的是随包实例自己去抓网页时走哪个代理，与 `engines.searxng.proxy`（管 searchfuse 直连那一跳）互不覆盖。自建细节见 [docs/searxng-setup.md](../../../docs/searxng-setup.md)。
+它只搜索，`-u` 配 `-e searxng` 会报错。`searxng.outgoing` 控制的是随包实例自己去抓网页时走哪个代理，与 `engines.searxng.proxy`（管 searchfuse 直连那一跳）互不覆盖。
+
+自建实例要满足两条：`settings.yml` 里开 `json` 格式（否则 adapter 拿不到结构化结果），以及允许 searchfuse 的来源地址。`searxng.baseURL` 填你自己的实例后 `embedded` 就不再起作用；留空则一直用随包实例。
 
 
 

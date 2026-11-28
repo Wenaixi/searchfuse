@@ -19,7 +19,7 @@ export const IS_WINDOWS = process.platform === 'win32';
  * therefore emits a shell script that runs only on Unix, so the suites that spawn
  * it are gated on this flag and skipped on Windows. The in-process HTTP engines
  * (local, tavily, exa, firecrawl) and every pure-logic test still run on all
- * platforms. See docs/testing.md.
+ * platforms.
  */
 export const SPAWNS_FAKE_CLI = !IS_WINDOWS;
 

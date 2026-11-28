@@ -12,10 +12,8 @@
 
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a> ·
-  <a href="docs/troubleshooting.md">Troubleshooting</a> ·
   <a href="skills/searchfuse/references/configure.md">Configuration</a> ·
   <a href="skills/searchfuse/references/output-schema.md">Output contract</a> ·
-  <a href="docs/security.md">Security</a> ·
   <a href="https://github.com/liustack/modlens">ModLens (vision)</a>
 </p>
 
@@ -36,7 +34,7 @@ Hit a problem? [Open an issue](https://github.com/Wenaixi/searchfuse/issues/new/
 
 ## Features
 
-- **The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.2`. In the desktop app's Add plugin dialog, enter `@wenaixi/searchfuse`, not the GitHub URL. Details in [harness setup](docs/harness-setup.md#deepseek-harness-dsh).
+- **The strongest free web search plugin for DeepSeek Harness (dsh):** one command installs it, `npx -y @deepseek-ai/dsh plugin --profile web add @wenaixi/searchfuse@0.1.2`. In the desktop app's Add plugin dialog, enter `@wenaixi/searchfuse`, not the GitHub URL.
 - **Free out of the box, no signup.** Search and page fetch run on Firecrawl Keyless by default: [1,000 free credits/month](https://www.firecrawl.dev/blog/firecrawl-keyless-launch), no account, no API key, no card. Every fallback channel is free too: Keenable, AnySearch, and You.com each add a keyless pool, the bundled SearXNG instance needs no key at all, Antigravity CLI needs only a browser sign-in, and Tavily, Exa, and a free Firecrawl key each add their own monthly quota with no card required.
 - **Fused search, not failover.** By default `web_search` asks every reachable engine at once and merges their ranked lists with reciprocal rank fusion, so an answer reflects several indexes and a page two engines agree on outranks one only a single engine liked. Set `aggregate.mode: chain` in `~/.searchfuse/config.json` for the old sequential behaviour.
 - **Automatic failover.** When a channel fails or exhausts its quota, the next one takes over. Under fusion, one engine erroring costs only its own contribution; the rest of the answer stands and the failure is named in `uncertainty`.
@@ -122,17 +120,11 @@ Once installed, you do not need to remember any commands. Just chat. Ask anythin
 | :-- | :-- |
 | [INSTALL.md](INSTALL.md) | Installing the skill step by step (written for an agent) |
 | [CLI manual](skills/searchfuse/references/cli.md) | The CLI the skill drives: flags, config, doctor |
-| [Troubleshooting](docs/troubleshooting.md) | A command failed and the message needs decoding |
 | [Configuration](skills/searchfuse/references/configure.md) | Setting a key, switching engines, fixing config |
 | [Output contract](skills/searchfuse/references/output-schema.md) | Parsing the JSON or building on it |
-| [SearXNG setup](docs/searxng-setup.md) | Running your own instance to reach Google's index |
-| [dsh plugin](docs/dsh.md) | Installing, configuring, verifying, and updating the native dsh bundle |
-| [Harness setup](docs/harness-setup.md) | Wiring it into Codex, Claude Code, OpenCode, or Pi |
-| [Security](docs/security.md) | SSRF guards, DNS-rebinding protection, untrusted input |
-| [Testing](docs/testing.md) | Running the suite or writing a test that can fail |
 | [CHANGELOG](CHANGELOG.md) | Finding what changed in a version |
 
-Proxy fake-IP mode (Clash, Clash Verge Rev, mihomo, Surge) works out of the box. DNS answers in `198.18.0.0/15` are treated as fake-IP placeholders with no switch needed. Literal URLs such as `http://198.18.0.5/` stay blocked when `allowPrivateNetwork` is off. For other reserved ranges used by VPNs or hosts-file accelerators such as Steam++ / Watt Toolkit, see [Blocked private network target](docs/troubleshooting.md#blocked-private-network-target).
+Proxy fake-IP mode (Clash, Clash Verge Rev, mihomo, Surge) works out of the box. DNS answers in `198.18.0.0/15` are treated as fake-IP placeholders with no switch needed. Literal URLs such as `http://198.18.0.5/` stay blocked when `allowPrivateNetwork` is off.
 
 ## Contributing
 
