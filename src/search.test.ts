@@ -941,14 +941,14 @@ describeSpawn('quota cooldown records, clears, and can be switched off', () => {
   // 这是三端（kernel、serve、dsh、claude、omp）共享的那条真实路径。
   it('records a cooling engine in fused mode too, not only the chain', async () => {
     const p = statePath();
-    // agy 打额度墙，同时配一个能答的引擎，这样融合不会因全灭而抛错。
+    // 这条要验两件事：agy 的 `Resets in 94h19m9s` 被精确解析、融合模式也会
+    // 记冷却（不只是链式）。所以必须有**一个能答的引擎**陪跑，否则融合全灭
+    // 会落到链式，链式也只有 agy，于是直接抛错、拿不到结果。
     //
-    // **必须把其余引擎显式关掉。** 融合模式与链式不同：`engine:` 那个锁定在
-    // 融合里不生效，所有引擎都会并发参与。免注册引擎（firecrawl / keenable /
-    // anysearch / youcom）在没有 key 时也算可用，于是它们全跑起来、被下面的
-    // `offline unit test` 打死，融合变成全灭并抛错——这条测的就不是「agy 进
-    // 冷却」而是「全灭怎么抛」了。本地有代理时它们可能侥幸答上，CI 的干净网络
-    // 一定不会，所以这条曾经只在 CI 上红。
+    // 陪跑用 tavily（进程内 HTTP 引擎，走下面那个 fetch 桩）。其余全部关掉：
+    // 融合模式与链式不同，`engine:` 锁定在融合里不生效，而免注册引擎在没有
+    // key 时也算可用——它们会全跑起来、被 `offline unit test` 打死。本地有
+    // 代理时可能侥幸答上，CI 的干净网络一定不会，所以这类用例只在 CI 红。
     const config = agyConfig({ stdout: agyQuotaEnvelope() }, {
       aggregate: { mode: 'rrf' },
       engines: {
@@ -957,12 +957,27 @@ describeSpawn('quota cooldown records, clears, and can be switched off', () => {
         anysearch: { enabled: false },
         youcom: { enabled: false },
         searxng: { enabled: false },
-        tavily: { enabled: false },
         exa: { enabled: false },
+        tavily: { apiKey: 'test-key' },
       },
     });
     const controller = buildCooldownController({}, { now, statePath: p });
-    vi.stubGlobal('fetch', async () => {
+    // agy 走子进程（假 CLI 打额度墙），tavily 走 HTTP，这里只让 tavily 成功。
+    // tavily 的 provider 读的是 `text()` 再自己 JSON.parse，所以这里必须给
+    // 合法 JSON——给空串会抛 `Unexpected end of JSON input`。
+    vi.stubGlobal('fetch', async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('api.tavily.com')) {
+        const body = JSON.stringify({
+          results: [{ title: 'T', url: 'https://example.com/1', content: 'S' }],
+        });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => JSON.parse(body),
+          text: async () => body,
+        };
+      }
       throw new Error('offline unit test');
     });
     let result: Awaited<ReturnType<typeof runSearch>>;
