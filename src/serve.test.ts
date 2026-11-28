@@ -1,5 +1,37 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startServe, toSearxngShape, type ServeHandle } from './serve.ts';
+import { cleanupTempDirs, withTempHome } from './testing/helpers.ts';
+
+/**
+ * 用 node:http 打本地服务，而不是全局 `fetch`。
+ *
+ * `vi.stubGlobal('fetch', ...)` 会把测试进程里的全局 fetch 一起换掉，于是测试
+ * 自己发的 HTTP 请求也走桩、根本到不了服务端。要验真实端点就必须绕开它。
+ */
+function httpGet(
+  port: number,
+  pathAndQuery: string,
+  token: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port, path: pathAndQuery, method: 'GET', headers: { authorization: `Bearer ${token}` } },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf-8');
+        res.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 const handles: ServeHandle[] = [];
 afterEach(async () => {
@@ -95,6 +127,88 @@ describe('serve', () => {
     const res = await fetch(`${base}/nope`, { headers: { authorization: 'Bearer test-token' } });
     expect(res.status).toBe(404);
   });
+});
+
+// 这一组守的是「端点有没有把冷却控制器传进 runSearch」。
+//
+// 为什么必须从 HTTP 端点打进去，而不是直接调 runSearch：0.1.1 的缺口恰恰
+// 在端点这一层——`startServe` 传了 config 却没传 cooldown，三端（含 omp）
+// 跑在生产上，state.json 永远是空的。直接调 runSearch 并手动塞一个控制器，
+// 无论端点接线与否都会绿，那是假守护（见 docs/testing.md 第六种假绿）。
+describe('端点把冷却控制器接进真实链路', () => {
+  let restoreHome: (() => void) | undefined;
+  const opened: ServeHandle[] = [];
+
+  afterEach(async () => {
+    for (const handle of opened.splice(0)) {
+      try {
+        await handle.close();
+      } catch {
+        // 已关闭：不影响结论。
+      }
+    }
+    restoreHome?.();
+    restoreHome = undefined;
+    vi.unstubAllGlobals();
+    cleanupTempDirs();
+  });
+
+  it('/search 命中额度墙时把冷却写进该 home 的 state.json', async () => {
+    // 隔离到临时 home：这条测试会真的写 state.json，绝不能落在主人真实的状态目录。
+    const temp = withTempHome();
+    restoreHome = temp.restore;
+
+    // 只留 firecrawl 一个融合引擎，并让它的额度检查必然失败。
+    const configDir = path.join(temp.home, '.searchfuse');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'config.json'),
+      JSON.stringify({
+        aggregate: { mode: 'rrf' },
+        engines: {
+          firecrawl: {},
+          exa: { enabled: false },
+          keenable: { enabled: false },
+          anysearch: { enabled: false },
+          youcom: { enabled: false },
+          searxng: { enabled: false },
+          'antigravity-cli': { enabled: false },
+        },
+      }),
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 402,
+        statusText: 'Payment Required',
+        json: async () => ({}),
+        text: async () => '{"error":"You have run out of credits","reason":"credits"}',
+      })),
+    );
+
+    // 刻意不传 search：让端点走它自己的 runSearch，那条接线才在射程内。
+    const handle = await startServe({
+      port: 0,
+      token: 'test-token',
+      idleExitSeconds: 0,
+    });
+    opened.push(handle);
+
+    // **必须用 node:http 发请求，不能用自己的 `fetch`。** 上面的 stubGlobal
+    // 把全局 fetch 换成了假响应，测试里再调 fetch 拿到的就是那个 402 桩，
+    // 请求根本不会到达服务端——整条守护会变成「断言自己造的假象」。
+    const res = await httpGet(handle.port, '/search?q=probe', 'test-token');
+    expect(res.status).toBeGreaterThanOrEqual(400);
+
+    const stateFile = path.join(configDir, 'state.json');
+    expect(fs.existsSync(stateFile), '端点没有把冷却落盘，接线断了').toBe(true);
+    const recorded = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
+      engineCooldowns?: Record<string, unknown>;
+    };
+    expect(recorded.engineCooldowns?.firecrawl).toBeDefined();
+  }, 30_000);
 });
 
 describe('toSearxngShape', () => {

@@ -284,9 +284,18 @@ export function classifyQuota(error: unknown, now: Date): Date | null {
   // Tavily's monthly plan cap (432) and PAYGO cap (433) are a spent monthly
   // budget carried in the status code, not a per-second blip.
   const monthlyQuota = /\bhttp 43[23]\b/i.test(message);
-  // `"reason":"credits"` 这类 JSON 字段写法，以及 `403`/`402` 明说的额度耗尽。
-  // 它们与上面的 monthlyQuota 一样，是花光的预算。
-  const creditReason = /"reason"\s*:\s*"[^"]*(?:credit|quota|limit)[^"]*"/i.test(message);
+  // `"reason":"credits"` 这类 JSON 字段写法。它们与上面的 monthlyQuota 一样，
+  // 是花光的预算。
+  //
+  // 只认明确表示「已耗尽」的词：`credits` / `credit_exhausted` / `quota` /
+  // `daily_limit` / `usage_limit`。**不能收裸词 `limit`**——上游把瞬时限流的
+  // 原因写成 `"reason":"rate_limit"` 时，收下它就把每秒一次的抖动记成 45 分钟
+  // 冷却，正好与本函数的判断相反。`limit` 必须带 quota/usage/daily 这类
+  // 表示「配额」的前缀才算。
+  const creditReason =
+    /"reason"\s*:\s*"[^"]*(?:credits?\b|credit_exhausted|quota|(?:usage|daily|monthly)_?limit|limit_reached)/i.test(
+      message,
+    );
   const looksQuota =
     monthlyQuota ||
     creditReason ||

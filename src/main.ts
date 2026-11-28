@@ -54,24 +54,15 @@ const EXIT_BACKSTOP_MS = 2_000;
 /**
  * 退出兜底计时器挂在 globalThis 上的键。
  *
- * 为什么不用普通模块变量：测试要清掉它，而 `main.ts` 一被 import 就会立即
- * 解析 argv（commander 的 `program.parse()` 在模块顶层），测试没法在配置好
- * argv 之前 import 它。挂在 globalThis 上的符号让测试不 import 也能拿到句柄。
+ * 为什么不用普通模块变量：`main.ts` 一被 import 就会立即解析 argv（commander
+ * 的 `program.parse()` 在模块顶层），测试没法在配置好 argv 之前 import 它，
+ * 也就拿不到模块作用域里的句柄。挂在 globalThis 的符号上，测试用同一个
+ * `Symbol.for(...)` 直接取，不必 import 这个模块。
  *
  * 计时器本身 `.unref()` 过，不阻止进程退出；但它会在测试结束后才触发
  * `process.exit`，那时 spy 已恢复，Vitest 报「unexpected process.exit」。
  */
 const EXIT_BACKSTOP_KEY = Symbol.for('searchfuse.exitBackstop');
-
-/** 清掉挂着的退出兜底计时器。测试用；正常运行时它自己会触发。 */
-export function clearExitBackstop(): void {
-  const store = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
-  const timer = store[EXIT_BACKSTOP_KEY];
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    store[EXIT_BACKSTOP_KEY] = undefined;
-  }
-}
 
 /** 写入并等到流确实收下，这样退出时不会把它截断。 */
 function writeFully(stream: NodeJS.WriteStream, text: string): Promise<void> {

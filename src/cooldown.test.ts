@@ -193,6 +193,16 @@ describe('classifyQuota', () => {
     ).toBeNull();
   });
 
+  // 上面那条的 JSON 版本。上游把瞬时限流的原因写成 `"reason":"rate_limit"`，
+  // 若把裸词 `limit` 当成额度字眼，每一次抖动都会被记成 45 分钟冷却——正好
+  // 与本函数该做的事相反。这条钉住「limit 必须带 quota/usage/daily 前缀」。
+  it('does not persist a 429 whose JSON reason is rate_limit', () => {
+    const message =
+      'firecrawl returned 429 . {"success":false,"error":"Too many requests",' +
+      '"reason":"rate_limit","retry_after_seconds":30}';
+    expect(classifyQuota(new Error(message), now)).toBeNull();
+  });
+
   // 429 不等于瞬时限流。firecrawl 的免注册额度用完时也回 429，正文却明写
   // `"reason":"credits"` 与 `retry_after_seconds`——那是花光的预算。早先只看
   // `/429/` 就返回 null，于是每跑一次搜索都白撞一次这堵墙。
