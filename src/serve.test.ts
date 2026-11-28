@@ -1,10 +1,9 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { startServe, toSearxngShape, type ServeHandle } from './serve.ts';
 import { cleanupTempDirs, withTempHome } from './testing/helpers.ts';
-
 /**
  * 用 node:http 打本地服务，而不是全局 `fetch`。
  *
@@ -34,10 +33,27 @@ function httpGet(
 }
 
 const handles: ServeHandle[] = [];
+
+/**
+ * 服务启动时会无条件写 `~/.searchfuse/runtime.json`（见 startServe 的
+ * listening 回调）。不把 HOME 指到临时目录，整个文件里的用例都会往主人
+ * 真实的 `.searchfuse` 里写一个 runtime.json——虽然 close() 会按 pid 删回
+ * 自己那份、config/serve-token 不受影响，但测试不该碰生产状态目录。
+ *
+ * 整个文件共用一份临时 home：同一个用例里可能起多个服务，各建一个目录会让
+ * 后起的服务与先起的互相看不见身份。
+ */
+const tempHome = withTempHome();
+
 afterEach(async () => {
   for (const handle of handles.splice(0)) {
     await handle.close();
   }
+});
+
+afterAll(() => {
+  tempHome.restore();
+  cleanupTempDirs();
 });
 
 /** 起一个服务，端口 0 让内核分配，避免测试之间抢 7799。 */
@@ -136,33 +152,20 @@ describe('serve', () => {
 // 跑在生产上，state.json 永远是空的。直接调 runSearch 并手动塞一个控制器，
 // 无论端点接线与否都会绿，那是假守护（见 docs/testing.md 第六种假绿）。
 describe('端点把冷却控制器接进真实链路', () => {
-  let restoreHome: (() => void) | undefined;
-  const opened: ServeHandle[] = [];
+  // 复用文件级临时 home：整份测试文件的所有服务都落在同一个隔离目录里，
+  // 谁都不会碰主人真实的 ~/.searchfuse。这里只清状态文件，不重建 home。
+  const stateDir = path.join(tempHome.home, '.searchfuse');
 
   afterEach(async () => {
-    for (const handle of opened.splice(0)) {
-      try {
-        await handle.close();
-      } catch {
-        // 已关闭：不影响结论。
-      }
-    }
-    restoreHome?.();
-    restoreHome = undefined;
     vi.unstubAllGlobals();
-    cleanupTempDirs();
+    fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
   it('/search 命中额度墙时把冷却写进该 home 的 state.json', async () => {
-    // 隔离到临时 home：这条测试会真的写 state.json，绝不能落在主人真实的状态目录。
-    const temp = withTempHome();
-    restoreHome = temp.restore;
-
     // 只留 firecrawl 一个融合引擎，并让它的额度检查必然失败。
-    const configDir = path.join(temp.home, '.searchfuse');
-    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(
-      path.join(configDir, 'config.json'),
+      path.join(stateDir, 'config.json'),
       JSON.stringify({
         aggregate: { mode: 'rrf' },
         engines: {
@@ -194,7 +197,7 @@ describe('端点把冷却控制器接进真实链路', () => {
       token: 'test-token',
       idleExitSeconds: 0,
     });
-    opened.push(handle);
+    handles.push(handle);
 
     // **必须用 node:http 发请求，不能用自己的 `fetch`。** 上面的 stubGlobal
     // 把全局 fetch 换成了假响应，测试里再调 fetch 拿到的就是那个 402 桩，
@@ -202,7 +205,7 @@ describe('端点把冷却控制器接进真实链路', () => {
     const res = await httpGet(handle.port, '/search?q=probe', 'test-token');
     expect(res.status).toBeGreaterThanOrEqual(400);
 
-    const stateFile = path.join(configDir, 'state.json');
+    const stateFile = path.join(stateDir, 'state.json');
     expect(fs.existsSync(stateFile), '端点没有把冷却落盘，接线断了').toBe(true);
     const recorded = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
       engineCooldowns?: Record<string, unknown>;
@@ -214,13 +217,9 @@ describe('端点把冷却控制器接进真实链路', () => {
   // `/search` 只是 SearXNG 兼容壳。两条各自有一份 cooldown 接线，一条绿不代表
   // 另一条接上了——这正是 0.1.1 那个缺口的形态。
   it('/v1/search 也把冷却写进 state.json', async () => {
-    const temp = withTempHome();
-    restoreHome = temp.restore;
-
-    const configDir = path.join(temp.home, '.searchfuse');
-    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(
-      path.join(configDir, 'config.json'),
+      path.join(stateDir, 'config.json'),
       JSON.stringify({
         aggregate: { mode: 'rrf' },
         engines: {
@@ -246,12 +245,12 @@ describe('端点把冷却控制器接进真实链路', () => {
     );
 
     const handle = await startServe({ port: 0, token: 'test-token', idleExitSeconds: 0 });
-    opened.push(handle);
+    handles.push(handle);
 
     const res = await httpGet(handle.port, '/v1/search?q=probe', 'test-token');
     expect(res.status).toBeGreaterThanOrEqual(400);
 
-    const stateFile = path.join(configDir, 'state.json');
+    const stateFile = path.join(stateDir, 'state.json');
     expect(fs.existsSync(stateFile), '/v1/search 没有把冷却落盘，接线断了').toBe(true);
     const recorded = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
       engineCooldowns?: Record<string, unknown>;
