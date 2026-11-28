@@ -253,13 +253,13 @@ searchfuse 拉起了一个引擎，那个引擎又想再跑一次 searchfuse。C
 
 这不是配置问题。grok-cli 已经禁止了会向外调 shell 的工具。再跑一次搜索。如果反复出现，更新 Grok Build（`grok` CLI）。
 
-## 三端找不到本地服务（服务定位）
+## 四端找不到本地服务（服务定位）
 
 searchfuse 的服务地址不再只靠 `~/.searchfuse/runtime.json` 这一个文件。它从状态目录的
 路径推导出一组固定候选端口，客户端按这组端口逐个探测，并用 `/identity` 返回的指纹
 确认应答者是自己的服务。
 
-推导规则（三端一致）：
+推导规则（四端一致）：
 
 ```
 指纹 = sha256(realpath(~/.searchfuse).toLowerCase()) 的前 8 位十六进制
@@ -289,11 +289,11 @@ cat ~/.searchfuse/runtime.json
 判据是**两条都要**：候选端口上有服务在听，且 `/identity` 的 `fingerprint` 与本机
 推导值相同。只有前者会把恰好占着那个端口的别的程序认成自己的服务。
 
-如果指纹对不上，说明那一份 `.searchfuse` 不是当前这个 home 的。三端读的都是
+如果指纹对不上，说明那一份 `.searchfuse` 不是当前这个 home 的。四端读的都是
 `os.homedir()`（Windows 上读 `USERPROFILE`，POSIX 上读 `HOME`），所以**测试或容器里
 把 HOME/USERPROFILE 指到别处时会推出另一组候选**——这正是隔离生效的证据，不是故障。
 
-`runtime.json` 现在只是缓存：删掉它不会让三端失联，服务被认回来之后会重新写回。
+`runtime.json` 现在只是缓存：删掉它不会让四端失联，服务被认回来之后会重新写回。
 
 ### 哪一端有这条路径
 
@@ -330,12 +330,24 @@ mklink /J "C:\Users\<你>\.dsh\profiles\web\node_modules\@wenaixi\searchfuse" "E
 # 看当前 PID（/identity 里的 pid）
 curl -s --noproxy '*' http://127.0.0.1:42158/identity
 
-# 停掉（Windows）
-taskkill /PID <pid> /F
+# 停掉（Windows）。Git Bash 里 /PID 会被当成路径，要写成 //PID；cmd 里用 /PID
+taskkill //PID <pid> //F
 
-# 用 --daemon 起新版本：真正脱离终端，关掉 Shell 也不受影响
+# 起新版本
 node dist/main.js serve --daemon
 ```
+
+**`--daemon` 只保证「脱离它的直接父进程」，不保证脱离整条进程树。**
+实测两种踩法：
+
+- 在 Git Bash 里直接跑 `node dist/main.js serve --daemon`，服务的父进程是那个
+  `bash.exe`；工具调用一结束、或关掉那个 shell，服务跟着死。
+- 用 `Start-Process -WindowStyle Hidden` 起，父进程是 `powershell.exe`，
+  它退出后父进程句柄消失，服务留下——这才是真正常驻。
+
+判据：`Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>'` 看
+`ParentProcessId`；再查那个父进程是否还活着。要常驻就让它挂在一个**已经退出**
+或**长期存在**的父进程上。
 
 **别用 `serve --ensure` 起长期服务**：它启动后跟着调用它的那个进程树，
 终端一关或被工具杀掉，服务跟着走。`--ensure` 的用途只有一个——让
@@ -343,7 +355,7 @@ node dist/main.js serve --daemon
 
 ## 某个引擎一直失败却没有进入冷却
 
-先确认冷却控制器真的被传进去了。三端跑搜索走 `dist/kernel.js` 或本地服务的
+先确认冷却控制器真的被传进去了。前端跑搜索走 `dist/kernel.js` 或本地服务的
 `/v1/search`，**这两条路径必须各自传 `cooldown`**——0.1.1 及更早只给 CLI 的
 `searchfuse search` 传了，于是 `state.json` 永远是空的，被额度耗尽的引擎每跑一次
 都被重新撞一遍墙。0.1.2 已修。
