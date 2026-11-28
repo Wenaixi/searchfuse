@@ -38,27 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   预算，不是每秒一次的抖动。`classifyQuota` 早先只看 `/429/` 就返回 null，
   而 `retry_after_seconds` 这个权威恢复时间全仓库没人读。现在认这类 JSON
   字段，恢复时间按 `retry_after_seconds` → `Resets in 94h19m9s` → 兜底 TTL
-  的精度顺序取。
+  的精度顺序取。判定「额度类」时只认明确表示已耗尽的词（`credits`、`quota`、
+  `daily_limit` 等），**不收裸词 `limit`**——上游把瞬时限流写成
+  `"reason":"rate_limit"`，收下它就会把每秒一次的抖动记成 45 分钟冷却。
 - **`claude/.claude-plugin/plugin.json` 的版本号不在盖章表里。** 0.1.1 发版后
   `searchfuse --version` 报 0.1.1，而宿主里显示的仍是 0.1.0。已纳入
-  `stampTargets`，并加一条测试钉住它必须在表内且戳出来是合法 JSON。
-- **测试结束后 `process.exit` 触发未处理错误。** `src/main.ts` 收尾挂的 2 秒
-  unref 计时器会在测试结束后才触发，并行跑全量时报 3 个 unhandled error。
-  改成把句柄挂在 `globalThis` 的 Symbol 上（`main.ts` 一被 import 就解析
-  argv，测试没法在配好 argv 之前 import 它）。
-
-### Tests
-
-- `serveIdentity.parity.test.ts` 增加 omp 那份拷贝的抽取求值比对。
-  反向验证：删掉 omp 的 `.toLowerCase()` → 立刻变红。
-- `cooldown.test.ts` 增加「429 + credits + retry_after_seconds」与
-  `parseRetryAfterSeconds` 的用例。反向验证：去掉 credits 识别 → 变红。
-- `search.test.ts` 增加一条**跨平台**的融合冷却用例（走进程内 firecrawl，
-  不需要假 CLI）。`describeSpawn` 那组在 Windows 上整段跳过，而冷却缺口
-  最该被钉住的正是这台机器上的真实路径。
-- `fanout.test.ts` 增加「原始拒绝原因被原样交回」的用例。
-
-全量 843 通过 / 34 跳过，零 errors；src 与 dsh 类型门禁全绿。
+  `stampTargets`。
 
 ## [0.1.1] - 2026-11-27
 

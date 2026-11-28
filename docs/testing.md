@@ -83,6 +83,29 @@ expect(codeMeansAlive(err)).toBe(true);
 
 结论：能稳定自动化的只有纯函数判据。锁的其余行为（`linkSync` 的内核原子性、陈旧回收、立即释放）靠代码审查与项目 `CLAUDE.md` 的事故记录兜底，这是有意识的取舍，不是漏测。注意那三种行为里，能真跑并发验的只有 `isAlive` 的 EPERM 判据（`src/serveEnsure.test.ts` 里那条直接测生产函数）；`linkSync` 本身的原子性虽然做过 8 进程实测（`openSync('wx')` 版 8/8 全部误报持锁，`linkSync` 版恰好 1 个成功、7 个 EEXIST），但那是一次性的人工验证，没有进测试套件。
 
+### 五、只验「该记的记住了」，不验「不该记的没记」
+
+2026-11-28 给冷却加「429 带 `"reason":"credits"` 也要记」时，只写了正向用例：这条消息进来，冷却非空。把判定正则写成 `credit|quota|limit` 之后，它照样绿——但它同时也把 `"reason":"rate_limit"` 记成了 45 分钟冷却，而**那正是这个函数本该拒绝的情况**。
+
+判据：一对相反的输入要各有一条用例。冷却、限流、重试、「只在某些条件下才做」这类**带分类器**的逻辑，正向用例只证明半个契约；漏掉的反向用例覆盖的是「误伤」，而误伤往往比漏判更难发现——漏判会让你多撞一次墙，误伤会让一个好引擎被静默停用一个小时。
+
+具体到本轮：`cooldown.test.ts` 里 `does not persist a per-second rate limit` 与 `does not persist a 429 whose JSON reason is rate_limit` 是成对的。反向验证：把正则改回宽版 → 后者变红，收到 `2026-08-06T00:00:30.000Z`（就是被误记的那 30 秒冷却）。
+
+### 六、只验「传了参数」，不验「参数进了真实链路」
+
+0.1.1 时冷却控制器确实存在、单测也全绿，但 `kernel.ts` 与 `serve.ts` 两个端点**根本没把它传进 `runSearch`**，于是三端（dsh / claude hook / omp）在生产上一个冷却都没记过，`state.json` 永远是空的。测的是控制器本身，不是「控制器接上了」。
+
+判据：给接线加守护时，断言必须从**真实入口**出发，而不是从被接的组件出发。
+
+本轮实际补的那条在 `src/serve.test.ts`：临时 home 里写一份只留 firecrawl 的配置，`startServe` 不注入 `search`（让它走自己的 `runSearch`），用打桩 `fetch` 让 firecrawl 返回额度错误，然后从真实 HTTP 端点打一次 `/search`，断言临时 home 的 `state.json` 里出现 firecrawl 的冷却行。删掉端点里的 `cooldown:` 接线 → 这条变红，恢复 → 转绿。
+
+写这条时踩了两个坑，都属于「守护变成自证」：
+
+- **不能用测试自己的 `fetch` 发那个请求。** `vi.stubGlobal('fetch', ...)` 换的是整个进程的全局 `fetch`，测试里再调 `fetch('http://127.0.0.1:...')` 拿到的是刚造的那个假响应，请求根本到不了服务端。表现是断言全绿或全红都毫无意义——我第一次就是这样，看到 402 以为是端点透传状态码，其实是桩自己答的。要用 `node:http` 发。
+- **必须断言落盘产物，不是返回值。** 端点在全灭时把上游错误原样抛出，`error.message` 里本来就有 `"reason":"credits"`；断言消息内容会绿，断言 `state.json` 存在才有意义。
+
+只断言「我在 `startServe` 里调了 `buildCooldownController()`」也是假绿：它证明构造函数被调用，不证明返回的控制器流到了记录那一步。
+
 ## 热重载
 
 插件自己拥有 `~/.searchfuse/config.json`，它在宿主的 profile 之外，所以宿主的重载信号永远不会为它触发。`watchModsearchConfigFile` 每隔几秒 stat 一次它的 mtime，MCP 工具与引擎工具都挂在这唯一一个监视器上——只有一个定时器，因为对同一个文件挂两套监视器会让两半在一次保存之后短暂地看法不一致。
