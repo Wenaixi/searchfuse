@@ -1,7 +1,6 @@
 # 三宿主功能对等矩阵
 
 > 状态：部分实现，本文件由 `scripts/parity-check.mjs` 校验（**未挂在 CI 上**，需手动或发布前跑 `pnpm parity:check`；`--final` 模式禁止 TODO）
-> 关联 spec：`docs/superpowers/specs/2026-11-21-searchfuse-tri-host-design.md` §十 S6
 > 日期：2026-11-26（初版 2026-11-21）
 
 ## 判定规则

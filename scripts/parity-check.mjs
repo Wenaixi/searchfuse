@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MATRIX = join(ROOT, 'docs', 'parity-matrix.md');
 
-/** 宿主不支持的三种理由，与 spec §十 的白名单一致。 */
+/** 宿主不支持的三种理由。这是唯一出处，`docs/parity-matrix.md` 的白名单要跟它一致。 */
 const NA_REASONS = [
   '宿主无此 API',
   '宿主强制命名空间不同',
