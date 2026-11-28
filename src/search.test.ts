@@ -942,7 +942,25 @@ describeSpawn('quota cooldown records, clears, and can be switched off', () => {
   it('records a cooling engine in fused mode too, not only the chain', async () => {
     const p = statePath();
     // agy 打额度墙，同时配一个能答的引擎，这样融合不会因全灭而抛错。
-    const config = agyConfig({ stdout: agyQuotaEnvelope() }, { aggregate: { mode: 'rrf' } });
+    //
+    // **必须把其余引擎显式关掉。** 融合模式与链式不同：`engine:` 那个锁定在
+    // 融合里不生效，所有引擎都会并发参与。免注册引擎（firecrawl / keenable /
+    // anysearch / youcom）在没有 key 时也算可用，于是它们全跑起来、被下面的
+    // `offline unit test` 打死，融合变成全灭并抛错——这条测的就不是「agy 进
+    // 冷却」而是「全灭怎么抛」了。本地有代理时它们可能侥幸答上，CI 的干净网络
+    // 一定不会，所以这条曾经只在 CI 上红。
+    const config = agyConfig({ stdout: agyQuotaEnvelope() }, {
+      aggregate: { mode: 'rrf' },
+      engines: {
+        firecrawl: { enabled: false },
+        keenable: { enabled: false },
+        anysearch: { enabled: false },
+        youcom: { enabled: false },
+        searxng: { enabled: false },
+        tavily: { enabled: false },
+        exa: { enabled: false },
+      },
+    });
     const controller = buildCooldownController({}, { now, statePath: p });
     vi.stubGlobal('fetch', async () => {
       throw new Error('offline unit test');
